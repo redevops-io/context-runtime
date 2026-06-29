@@ -18,7 +18,8 @@ rag = ["redevops-rag @ git+https://github.com/redevops-io/redevops-rag.git"]
 # Physical execution binding (the SchedulerPlugin compiles to Dagster runs).
 dagster = ["dagster>=1.7"]
 # Observability export.
-otel = ["openllmetry-sdk>=0.20"]
+otel = ["opentelemetry-sdk>=1.20"]
+langfuse = ["langfuse>=2.0"]
 dev = ["pytest>=8.0", "ruff>=0.7"]
 
 [project.scripts]

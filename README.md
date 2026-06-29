@@ -13,11 +13,18 @@ It optimizes any app with (a) a decision point about what context/config to use 
 |---|---|---|
 | **sidekick** | which skills to recall · budget | drop-in for `SkillStore`; **67% vs 33%** naive baseline acceptance |
 | **redevops-rag** | `pool · limit · threshold · rerank …` per query | `ContextOSRetrieverTuner`; **0.773 vs 0.323** vs fixed default |
+| **edge-sentinel (SOC)** | which sources to pull per alert (CrowdSec · threat-intel · EDR) | tool-using + approval-gated; **0.900 vs 0.800** always-full baseline |
 
 ```bash
 PYTHONPATH=. python examples/sidekick_learning.py   # discrete-strategy bandit
 PYTHONPATH=. python examples/rag_tuning.py          # numeric-knob tuning
+PYTHONPATH=. python examples/soc_triage.py          # tool-using cybersecurity tenant
 ```
+
+Plus the **ToolPlugin** seam (`contextos/tools/` — how plans reach external systems,
+with an approval-gated audit trail) and **trace exporters** (`contextos/observability/
+exporters.py` — JSONL offline, or Langfuse / OpenLLMetry-OTel when the extras are
+installed).
 
 > Status: **v0.1 vertical slice.** Runs fully offline with stub plugins; the real
 > [redevops-rag](https://github.com/redevops-io/redevops-rag) retrieval and LiteLLM

@@ -121,3 +121,21 @@ class CompressionPlugin(Protocol):
 @runtime_checkable
 class VerifierPlugin(Protocol):
     def verify(self, result: ModelResult, plan: Plan, ctx: BuiltContext) -> Verdict: ...
+
+
+# ──────────────────────────── tools (new seam) ────────────────────────────
+
+
+@runtime_checkable
+class ToolPlugin(Protocol):
+    """How a plan reaches an external system (SIEM, BI core, firewall). See tools/."""
+
+    def spec(self): ...                 # -> ToolSpec
+    def run(self, args: dict): ...      # -> ToolResult
+
+
+@runtime_checkable
+class TraceExporter(Protocol):
+    """How a finalized Trace leaves the process (Langfuse, OTel, JSONL). See observability/."""
+
+    def export(self, trace) -> None: ...

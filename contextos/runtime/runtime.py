@@ -44,7 +44,7 @@ _TIER_MODELS = ("local", "cheap", "premium")
 class ContextRuntime:
     def __init__(self, *, models, retriever, estimator=None, config: Config | None = None,
                  intent=None, candidates=None, optimizer=None, compressor=None,
-                 scheduler=None, verifier=None, plan_cache=None):
+                 scheduler=None, verifier=None, plan_cache=None, exporter=None):
         self.config = config or Config()
         # models: a dict tier->ModelPlugin, or a single ModelPlugin used for all tiers
         if not isinstance(models, dict):
@@ -62,6 +62,7 @@ class ContextRuntime:
         self.scheduler = scheduler or TopoScheduler()
         self.verifier = verifier or CitationVerifier()
         self.plan_cache = plan_cache or NullPlanCache()
+        self.exporter = exporter        # optional TraceExporter (Langfuse/OTel/JSONL)
 
     # ──────────────────────────── construction ────────────────────────────
 
@@ -190,6 +191,11 @@ class ContextRuntime:
         self.estimator.observe(ctx.plan, trace)
         if self.config.trace_dir:
             traces.save_trace(trace, self.config.trace_dir)
+        if self.exporter is not None:   # ship to Langfuse / OTel / JSONL
+            try:
+                self.exporter.export(trace)
+            except Exception:
+                pass
 
         return RunResult(
             answer=result.text, plan=ctx.plan, trace=trace, citations=citations,
