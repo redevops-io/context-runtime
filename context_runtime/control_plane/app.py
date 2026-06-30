@@ -52,6 +52,19 @@ def _build() -> Fleet:
 
 
 app = FastAPI(title="Context Runtime control plane", version="0.1.0")
+
+# CORS so the vibexgen web UI (a different origin) can call /vibex/* directly.
+# Configurable via CR_CORS_ORIGINS (comma-separated); defaults to the vibexgen origins.
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+
+_cors = os.environ.get(
+    "CR_CORS_ORIGINS",
+    "https://vibexgen.io,https://www.vibexgen.io,http://localhost:5173,http://localhost:8080",
+).split(",")
+app.add_middleware(
+    CORSMiddleware, allow_origins=[o.strip() for o in _cors if o.strip()],
+    allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["*"],
+)
 fleet = _build()
 fleet.up()  # (b) stand up every module as a Context Runtime tenant → deployed
 # Hermes 0.17 inbound chatops gateway — daemon thread, started only if a channel
