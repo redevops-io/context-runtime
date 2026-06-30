@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..planner import rules
 from ..types import Candidate, CostModelStatistics, Goal, Plan, PlanScore, Trace
 from . import score as score_mod
 from .statistics import StatisticsStore
@@ -41,11 +42,22 @@ class HeuristicEstimator:
         reranked = "rerank" in steps
         verified = "verify" in steps
 
+        # Intent-aware retrieval: for a multi-hop question the answer lives in the
+        # connections between documents — graph retrieval reaches it, single-hop
+        # structurally cannot. For a single-hop question, graph is just pricier with no
+        # recall edge, so hybrid wins. This is how the planner routes HippoRAG vs redevops-rag.
+        bucket, _risk = rules.classify(goal.text)
+        if bucket == "multi_hop":
+            recall = 0.93 if method == "graph" else recall * 0.55
+        is_graph = method == "graph"
+
         base_acc = TIER_ACCURACY.get(tier, 0.7)
         accuracy = min(0.99, base_acc * (0.7 + 0.3 * recall) + (0.04 if reranked else 0.0))
 
-        cost = TIER_COST.get(tier, 0.1) + (0.01 if reranked else 0.0)
-        latency = TIER_LATENCY.get(tier, 8.0) + (2.0 if reranked else 0.0) + (3.0 if verified else 0.0)
+        # graph retrieval pays for the KG build + Personalized PageRank hop
+        cost = TIER_COST.get(tier, 0.1) + (0.01 if reranked else 0.0) + (0.03 if is_graph else 0.0)
+        latency = (TIER_LATENCY.get(tier, 8.0) + (2.0 if reranked else 0.0)
+                   + (3.0 if verified else 0.0) + (5.0 if is_graph else 0.0))
 
         hallucination = TIER_HALLUCINATION.get(tier, 0.12) * (0.5 if verified else 1.0)
         risk = {"low": 0.1, "medium": 0.3, "high": 0.6}.get(goal.constraints.sensitivity, 0.1)

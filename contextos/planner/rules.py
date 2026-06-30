@@ -14,6 +14,10 @@ from ..types import IntentBucket, Retrieval
 INTENT_RULES: list[tuple[re.Pattern, IntentBucket, str]] = [
     (re.compile(r"\b(error|exception|stack ?trace|code|status)\s*[:#]?\s*\w*\d", re.I), "exact_lookup", "low"),
     (re.compile(r"\b[A-Z]{2,}-\d+\b"), "exact_lookup", "low"),                 # JIRA-123, ERR-500
+    # multi-hop: the answer lives in the CONNECTIONS between documents, not one chunk
+    (re.compile(r"(relat\w*|connect\w*|link\w*|depend\w*|\bchain\b|\bacross\b|trace\w*|"
+                r"lead\w*\s+to|root\s+cause|between\s+.+\s+and\s+|"
+                r"how\s+(is|does|are|do)\b.*\b(affect|impact|cause)\w*)", re.I), "multi_hop", "low"),
     (re.compile(r"\b(deploy|incident|outage|failed|failure|rollback|postmortem)\b", re.I), "incident", "medium"),
     (re.compile(r"\b(terraform|kubectl|production|prod|migration|delete|drop)\b", re.I), "high_risk", "high"),
     (re.compile(r"\b(secret|password|api[_ ]?key|private|pii|credential)\b", re.I), "sensitive", "high"),
@@ -31,6 +35,8 @@ BUCKET_DEFAULTS: dict[IntentBucket, tuple[tuple[Retrieval, ...], str, bool]] = {
     "synthesis":      (("hybrid",), "single_shot", False),
     "high_risk":      (("hybrid",), "single_shot", True),
     "sensitive":      (("hybrid",), "single_shot", True),
+    # multi_hop generates BOTH a graph candidate and a hybrid one; the cost model picks
+    "multi_hop":      (("graph", "hybrid"), "single_shot", False),
     "unknown":        (("hybrid",), "single_shot", False),
 }
 
@@ -43,6 +49,7 @@ BUCKET_TIERS: dict[IntentBucket, tuple[str, ...]] = {
     "synthesis":      ("cheap", "premium"),
     "high_risk":      ("premium",),
     "sensitive":      ("local",),          # restricted data stays local
+    "multi_hop":      ("cheap", "premium"),
     "unknown":        ("local", "cheap"),
 }
 

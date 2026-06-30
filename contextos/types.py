@@ -59,7 +59,7 @@ class Goal:
 
 IntentBucket = Literal[
     "exact_lookup", "conceptual", "incident", "code_reasoning",
-    "synthesis", "high_risk", "sensitive", "unknown",
+    "synthesis", "high_risk", "sensitive", "multi_hop", "unknown",
 ]
 
 

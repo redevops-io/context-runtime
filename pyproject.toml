@@ -13,8 +13,10 @@ dependencies = [
 [project.optional-dependencies]
 # Real model transport across 100+ providers (the ModelPlugin binding).
 litellm = ["litellm>=1.40"]
-# Hybrid retrieval binding (DuckDB vector + BM25 + RRF + rerank).
+# Single-hop hybrid retrieval (DuckDB vector + BM25 + RRF + rerank).
 rag = ["redevops-rag @ git+https://github.com/redevops-io/redevops-rag.git"]
+# Multi-hop graph retrieval (knowledge graph + Personalized PageRank).
+hipporag = ["hipporag @ git+https://github.com/redevops-io/HippoRAG.git"]
 # Physical execution binding (the SchedulerPlugin compiles to Dagster runs).
 dagster = ["dagster>=1.7"]
 # Observability export.

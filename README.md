@@ -36,8 +36,15 @@ installed).
 ```bash
 pip install -e .                 # core (offline stub path, zero heavy deps)
 pip install -e ".[litellm]"      # real models across 100+ providers
-pip install -e ".[rag]"          # redevops-rag hybrid retrieval (DuckDB + BM25 + rerank)
+pip install -e ".[rag]"          # redevops-rag — single-hop hybrid retrieval
+pip install -e ".[hipporag]"     # HippoRAG — multi-hop graph retrieval (the planner picks per query)
 ```
+
+**Single-hop vs multi-hop is a per-query decision.** The planner classifies intent and
+routes: BM25/hybrid (redevops-rag) when the answer is in one chunk, **graph (HippoRAG)**
+when it lives in the connections between documents — and the cost model only pays the
+graph premium when it's warranted. `python examples/hop_routing.py` shows single-hop
+missing the bridge document that multi-hop surfaces.
 
 ## 30-second tour
 
