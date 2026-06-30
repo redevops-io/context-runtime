@@ -797,3 +797,27 @@ def agent_run(req: RunRequest) -> dict:
         return fleet._plan(req.module, "", "answer", req.question)
     except (KeyError, ValueError) as e:
         raise HTTPException(404, str(e))
+
+
+class OutcomeRequest(BaseModel):
+    module: str
+    question: str
+    success: bool
+
+
+@app.post("/agent/outcome", dependencies=[Depends(require_api_key)])
+def agent_outcome(req: OutcomeRequest) -> dict:
+    """Close the learning loop: report whether a planned answer succeeded so the
+    module's tenant updates its policy. (This is how the fleet self-improves.)"""
+    if req.module not in fleet.tenants:
+        raise HTTPException(404, f"module {req.module} not deployed")
+    reward = fleet.record_outcome(req.module, req.question, req.success)
+    return {"module": req.module, "reward": reward, "policy": fleet.tenants[req.module].policy()}
+
+
+@app.get("/agent/policy/{module}")
+def agent_policy(module: str) -> dict:
+    """The module tenant's current learned policy (best source bundle per intent)."""
+    if module not in fleet.tenants:
+        raise HTTPException(404, f"module {module} not deployed")
+    return {"module": module, "policy": fleet.tenants[module].policy()}

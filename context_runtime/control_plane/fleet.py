@@ -109,6 +109,7 @@ class Fleet:
         return {
             "kind": "result", "module": module_name, "agent": agent, "action": action,
             "intent": r.kind, "sources": list(r.bundle.sources),
+            "available_sources": list(tenant.spec.sources),
             "recommended_action": r.recommended_action, "context": r.context,
             "plan_id": r.plan.id, "policy": tenant.policy(),
         }
