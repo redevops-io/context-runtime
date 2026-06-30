@@ -190,6 +190,31 @@ class VibexgenPlanner:
     def policy(self) -> dict[str, str]:
         return self.bandit.policy()
 
+    def scoreboard(self) -> list[dict]:
+        """Per (template·scenario) context: chains ranked by learned score — for the UI."""
+        rows = []
+        for ctx, arms in self.bandit.stats.items():
+            ranked = sorted(arms.items(), key=lambda kv: kv[1][1], reverse=True)
+            rows.append({
+                "context": ctx,
+                "best": ranked[0][0] if ranked else None,
+                "chains": [{"chain": k, "score": round(v[1], 3), "trials": int(v[0])}
+                           for k, v in ranked if v[0] > 0],
+            })
+        return [r for r in rows if r["chains"]]
+
+    def leaderboard(self) -> list[dict]:
+        """Global ranking of generation chains by average score across all contexts."""
+        agg: dict[str, list[float]] = {}
+        for arms in self.bandit.stats.values():
+            for k, (n, mean) in arms.items():
+                a = agg.setdefault(k, [0.0, 0.0])
+                a[0] += mean * n
+                a[1] += n
+        out = [{"chain": k, "avg_score": round(s / n, 3) if n else 0.0, "trials": int(n)}
+               for k, (s, n) in agg.items() if n > 0]
+        return sorted(out, key=lambda x: x["avg_score"], reverse=True)
+
     @staticmethod
     def _key(template: str, scene: SceneSpec) -> str:
         return hashlib.sha256(f"{template}|{scenario_key(template, scene)}".encode()).hexdigest()[:16]

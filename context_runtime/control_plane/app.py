@@ -821,3 +821,78 @@ def agent_policy(module: str) -> dict:
     if module not in fleet.tenants:
         raise HTTPException(404, f"module {module} not deployed")
     return {"module": module, "policy": fleet.tenants[module].policy()}
+
+
+# ──────────────────────────── vibexgen — video generation planning ────────────────────────────
+from ..integrations.vibexgen import CRITERIA_WEIGHTS, SceneSpec, VibexgenPlanner
+
+vibex = VibexgenPlanner(runtime=fleet.runtime)   # shares the fleet's cost model
+
+
+class ScenePayload(BaseModel):
+    characters: list[str] = []
+    lighting: str = ""
+    scenery: str = ""
+    motion: str = "static"
+    style: str = "realistic"
+    has_speech: bool = False
+
+    def to_spec(self) -> SceneSpec:
+        return SceneSpec(tuple(self.characters), self.lighting, self.scenery,
+                         self.motion, self.style, self.has_speech)
+
+
+class VibexScenarioReq(BaseModel):
+    request: str
+    candidates: list[str]
+
+
+class VibexPlanReq(BaseModel):
+    template: str
+    scene: ScenePayload
+
+
+class VibexScoreReq(BaseModel):
+    template: str
+    scene: ScenePayload
+    scores: dict[str, float]
+    gen_cost_usd: float = 0.0
+    gen_latency_s: float = 0.0
+
+
+@app.get("/vibex/criteria")
+def vibex_criteria() -> dict:
+    """The scoring criteria + weights — the UI renders one grading slider per criterion."""
+    return {"criteria": CRITERIA_WEIGHTS}
+
+
+@app.post("/vibex/scenario")
+def vibex_scenario(req: VibexScenarioReq) -> dict:
+    """Stage 1: pick the best of 2-3 candidate scenario texts BEFORE generating."""
+    c = vibex.select_scenario(req.request, req.candidates)
+    return {"index": c.index, "scenario": c.scenario, "predicted": c.predicted}
+
+
+@app.post("/vibex/plan")
+def vibex_plan(req: VibexPlanReq) -> dict:
+    """Stage 2: the suggested generation chain for this template + scene (shown pre-generation)."""
+    scene = req.scene.to_spec()
+    chain = vibex.plan_chain(req.template, scene)
+    return {"chain": chain.key, "engine": chain.engine, "mode": chain.mode, "model": chain.model,
+            "steps": chain.steps, "resolution": chain.resolution,
+            "est_cost_units": round(chain.cost_units(), 3),
+            "suggestion": vibex.suggest(req.template, scene)}
+
+
+@app.post("/vibex/score", dependencies=[Depends(require_api_key)])
+def vibex_score(req: VibexScoreReq) -> dict:
+    """Stage 3: record the user's multi-criteria scores → the policy learns."""
+    scene = req.scene.to_spec()
+    reward = vibex.record_scores(req.template, scene, req.scores, req.gen_cost_usd, req.gen_latency_s)
+    return {"reward": reward, "suggestion": vibex.suggest(req.template, scene)}
+
+
+@app.get("/vibex/scoreboard")
+def vibex_scoreboard() -> dict:
+    """Leaderboard of generation chains by learned score — for the UI scoreboard."""
+    return {"leaderboard": vibex.leaderboard(), "by_context": vibex.scoreboard()}
