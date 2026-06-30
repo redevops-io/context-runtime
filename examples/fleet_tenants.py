@@ -1,6 +1,6 @@
 """The migrated fleet — every business module learning its cheapest source policy.
 
-Each agentic module (plus net-new tenants from the use-cases doc) is now a ContextOS
+Each agentic module (plus net-new tenants from the use-cases doc) is now a Context Runtime
 tenant with a goal and a metric. This runs the whole catalog offline: for each module
 a hidden decisive source exists per question kind, and every tenant learns the cheapest
 bundle that meets its goal — proving the old hand-wired fleet collapses into one
@@ -10,8 +10,8 @@ data-driven pattern.
 """
 from __future__ import annotations
 
-from contextos import ContextRuntime
-from contextos.integrations.modules import CATALOG, ModuleTenant, question_kind, reward
+from context_runtime import ContextRuntime
+from context_runtime.integrations.modules import CATALOG, ModuleTenant, question_kind, reward
 
 # one representative question per module + its hidden decisive source
 PROBES = {
@@ -47,7 +47,7 @@ def run(rounds: int = 60) -> None:
             r = tenant.handle(q)
             success = latent in r.bundle.sources
             tuned.append(tenant.record_outcome(q, success))
-            from contextos.integrations.modules import SourceBundle
+            from context_runtime.integrations.modules import SourceBundle
             fb = SourceBundle(tuple(spec.sources))
             full.append(reward(latent in fb.sources, fb, len(spec.sources)))
         kind = question_kind(q)
@@ -55,7 +55,7 @@ def run(rounds: int = 60) -> None:
         print(f"{name:<15}{spec.core:<18}{sum(tuned[-12:])/12:>16.3f}{sum(full[-12:])/12:>14.3f}  {learned}")
 
     print("\nEvery module: one goal, one metric, a learned cheapest-sufficient source policy.")
-    print("16 hand-wired fleet controllers → one data-driven ContextOS tenant pattern.")
+    print("16 hand-wired fleet controllers → one data-driven Context Runtime tenant pattern.")
 
 
 if __name__ == "__main__":

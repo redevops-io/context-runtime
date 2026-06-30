@@ -1,12 +1,12 @@
 """The ToolPlugin seam: specs, the approval gate, the audit log, ToolRetriever."""
 from __future__ import annotations
 
-from contextos.plugins import base
-from contextos.tools import (
+from context_runtime.plugins import base
+from context_runtime.tools import (
     ApprovalPolicy, ToolRegistry, ToolResult, ToolRetriever, ToolSpec,
 )
-from contextos.tools.base import function_tool
-from contextos.types import Hit
+from context_runtime.tools.base import function_tool
+from context_runtime.types import Hit
 
 
 def _read_tool():

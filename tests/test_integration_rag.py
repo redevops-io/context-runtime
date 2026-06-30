@@ -1,8 +1,8 @@
-"""redevops-rag × ContextOS tenant: config arms, quality reward, tuning loop."""
+"""redevops-rag × Context Runtime tenant: config arms, quality reward, tuning loop."""
 from __future__ import annotations
 
-from contextos.integrations.redevops_rag import (
-    ContextOSRetrieverTuner,
+from context_runtime.integrations.redevops_rag import (
+    ContextRuntimeRetrieverTuner,
     DEFAULT_ARMS,
     RetrievalConfig,
     reciprocal_rank,
@@ -31,14 +31,14 @@ def test_reward_prefers_cheaper_config_at_equal_quality():
 
 
 def test_choose_routes_through_planner():
-    tuner = ContextOSRetrieverTuner()
+    tuner = ContextRuntimeRetrieverTuner()
     cfg = tuner.choose("look up error code 429")
     assert isinstance(cfg, RetrievalConfig)
     assert tuner._key("look up error code 429") in tuner._pending
 
 
 def test_record_outcome_closes_loop_and_calibrates():
-    tuner = ContextOSRetrieverTuner()
+    tuner = ContextRuntimeRetrieverTuner()
     before = tuner.runtime.estimator.statistics().fields[0].sample_count
     tuner.choose("how do we rotate api keys")
     r = tuner.record_outcome("how do we rotate api keys", quality=0.9, latency_s=0.3)
@@ -48,7 +48,7 @@ def test_record_outcome_closes_loop_and_calibrates():
 
 
 def test_tuner_learns_best_config_for_a_bucket():
-    tuner = ContextOSRetrieverTuner(bandit=_rag_bandit(0.1))
+    tuner = ContextRuntimeRetrieverTuner(bandit=_rag_bandit(0.1))
     good = DEFAULT_ARMS[2]
     rng = [0xABCDEF]
     for _ in range(60):

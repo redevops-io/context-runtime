@@ -1,17 +1,17 @@
-"""redevops-rag × ContextOS — tune retrieval knobs per query intent (replay harness).
+"""redevops-rag × Context Runtime — tune retrieval knobs per query intent (replay harness).
 
-Same shape as the sidekick harness: the FULL ContextOS machinery is real (planner,
+Same shape as the sidekick harness: the FULL Context Runtime machinery is real (planner,
 bandit, cost-model), only the *retrieval-quality signal* is simulated via a hidden
 latent-best config per intent (a real run measures quality from labels / answer
-correctness, needing the [rag] extra + torch). If ContextOS is tuning well, its
+correctness, needing the [rag] extra + torch). If Context Runtime is tuning well, its
 reward (quality − efficiency penalty) should beat the library's fixed default config.
 
     python examples/rag_tuning.py
 """
 from __future__ import annotations
 
-from contextos.integrations.redevops_rag import (
-    ContextOSRetrieverTuner,
+from context_runtime.integrations.redevops_rag import (
+    ContextRuntimeRetrieverTuner,
     DEFAULT_ARMS,
     reward_from_quality,
     _rag_bandit,
@@ -51,7 +51,7 @@ def _quality(chosen_key: str, bucket: str, rng: list[int]) -> float:
 
 
 def run(rounds: int = 40) -> None:
-    tuner = ContextOSRetrieverTuner(bandit=_rag_bandit(0.15))
+    tuner = ContextRuntimeRetrieverTuner(bandit=_rag_bandit(0.15))
     rng = [0xC0FFEE]
     tuned: list[float] = []
     fixed: list[float] = []
@@ -72,7 +72,7 @@ def run(rounds: int = 40) -> None:
 
     w = 10
     print(f"reward = retrieval-quality − efficiency-penalty (higher = better & cheaper)\n")
-    print(f"  ContextOS (tuned per intent): {sum(tuned[-w:]) / w:.3f}")
+    print(f"  Context Runtime (tuned per intent): {sum(tuned[-w:]) / w:.3f}")
     print(f"  redevops-rag fixed default:   {sum(fixed[-w:]) / w:.3f}")
     print("\n── learned config policy (best knobs per intent bucket) ──")
     for bucket, key in tuner.policy().items():

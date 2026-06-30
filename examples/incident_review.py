@@ -4,12 +4,12 @@
 
 Shows run() vs explain() vs simulate() over a tiny in-memory corpus, with zero
 external deps (stub model + in-memory store). Swap the runtime for
-``ContextRuntime.from_config("contextos.yaml")`` with model=litellm, store=redevops_rag
+``ContextRuntime.from_config("context_runtime.yaml")`` with model=litellm, store=redevops_rag
 to run the *same plan* against real models and a real index.
 """
 from __future__ import annotations
 
-from contextos import ContextRuntime, SourceRef
+from context_runtime import ContextRuntime, SourceRef
 
 CORPUS = [
     {"chunk_id": "deploy-x.md::0", "filename": "deploy-x.md",

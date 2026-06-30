@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import json
 
-from contextos import ContextRuntime
-from contextos.observability.exporters import JsonlExporter, MultiExporter
-from contextos.plugins import base
+from context_runtime import ContextRuntime
+from context_runtime.observability.exporters import JsonlExporter, MultiExporter
+from context_runtime.plugins import base
 
 
 def test_jsonl_exporter_writes_a_line(tmp_path):
@@ -35,5 +35,5 @@ def test_multi_exporter_tolerates_a_failing_sink(tmp_path):
 
 def test_langfuse_and_otel_import_without_their_deps():
     # constructing the exporter must not require the optional dep (lazy import on export)
-    from contextos.observability.exporters import LangfuseExporter, OpenLLMetryExporter
+    from context_runtime.observability.exporters import LangfuseExporter, OpenLLMetryExporter
     LangfuseExporter(); OpenLLMetryExporter()

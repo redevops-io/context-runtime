@@ -1,7 +1,7 @@
 """The business-module fleet: catalog instantiates, tenants handle/learn/gate generically."""
 from __future__ import annotations
 
-from contextos.integrations.modules import (
+from context_runtime.integrations.modules import (
     CATALOG, ModuleTenant, SourceBundle, build_fleet, question_kind, reward,
 )
 

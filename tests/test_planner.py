@@ -1,10 +1,10 @@
 """Planner behavior: intent classification, candidate generation, constraint feasibility."""
 from __future__ import annotations
 
-from contextos import ContextRuntime
-from contextos.constraints.hard import feasible
-from contextos.planner.intent import RuleIntentAnalyzer
-from contextos.types import Constraints, Goal
+from context_runtime import ContextRuntime
+from context_runtime.constraints.hard import feasible
+from context_runtime.planner.intent import RuleIntentAnalyzer
+from context_runtime.types import Constraints, Goal
 
 
 def _goal(text, **c):

@@ -1,4 +1,4 @@
-"""ContextOS routes single-hop (redevops-rag) vs multi-hop (HippoRAG) per query.
+"""Context Runtime routes single-hop (redevops-rag) vs multi-hop (HippoRAG) per query.
 
 The control plane's job: recognize when an answer lives in the CONNECTIONS between
 documents (multi-hop → graph) versus inside one chunk (single-hop → hybrid), and only
@@ -9,12 +9,12 @@ store + the SimGraph multi-hop retriever (HippoRAG's dependency-free stand-in).
 """
 from __future__ import annotations
 
-from contextos import ContextRuntime, Goal
-from contextos.adapters.model_stub import StubModel
-from contextos.adapters.store_inmemory import InMemoryStore
-from contextos.adapters.store_hipporag import SimGraphRetriever
-from contextos.adapters.store_router import HopRouterRetriever
-from contextos.runtime.config import Config
+from context_runtime import ContextRuntime, Goal
+from context_runtime.adapters.model_stub import StubModel
+from context_runtime.adapters.store_inmemory import InMemoryStore
+from context_runtime.adapters.store_hipporag import SimGraphRetriever
+from context_runtime.adapters.store_router import HopRouterRetriever
+from context_runtime.runtime.config import Config
 
 _TIERS = ("local", "cheap", "premium")
 

@@ -1,7 +1,7 @@
 """edge-sentinel SOC tenant: tools assemble evidence, bandit learns cheap sufficient bundles, blocks are gated."""
 from __future__ import annotations
 
-from contextos.integrations.edge_sentinel import (
+from context_runtime.integrations.edge_sentinel import (
     DEFAULT_BUNDLES, SOCTriageTenant, _soc_bandit, reward_triage, soc_bucket,
 )
 

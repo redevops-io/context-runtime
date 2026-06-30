@@ -1,6 +1,6 @@
-"""edge-sentinel × ContextOS — SOC triage tenant (tool-using, approval-gated).
+"""edge-sentinel × Context Runtime — SOC triage tenant (tool-using, approval-gated).
 
-Shows the cybersecurity use case end to end, offline: ContextOS plans which sources to
+Shows the cybersecurity use case end to end, offline: Context Runtime plans which sources to
 pull for each alert, runs them as ToolPlugins (CrowdSec/threat-intel/EDR — simulated
 when no live LAPI), assembles the evidence, recommends an approval-gated block, and
 learns the cheapest source bundle that still reaches the right verdict.
@@ -9,7 +9,7 @@ learns the cheapest source bundle that still reaches the right verdict.
 """
 from __future__ import annotations
 
-from contextos.integrations.edge_sentinel import (
+from context_runtime.integrations.edge_sentinel import (
     DEFAULT_BUNDLES, SOCTriageTenant, _soc_bandit, reward_triage, soc_bucket,
 )
 
@@ -53,7 +53,7 @@ def run(rounds: int = 72) -> None:
 
     w = 18
     print(f"\nreward = correct-verdict − source-cost (higher = right AND cheaper)\n")
-    print(f"  ContextOS (learned bundles): {sum(learned[-w:]) / w:.3f}")
+    print(f"  Context Runtime (learned bundles): {sum(learned[-w:]) / w:.3f}")
     print(f"  baseline (always full set):  {sum(baseline_full[-w:]) / w:.3f}")
     print("\n── learned source policy per SOC bucket ──")
     for bucket, key in soc.policy().items():

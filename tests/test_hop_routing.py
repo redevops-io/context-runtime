@@ -1,11 +1,11 @@
 """Single-hop vs multi-hop routing: intent → method, the router, and SimGraph multi-hop."""
 from __future__ import annotations
 
-from contextos import ContextRuntime, Goal
-from contextos.adapters.store_hipporag import HippoRAGRetriever, SimGraphRetriever
-from contextos.adapters.store_inmemory import InMemoryStore
-from contextos.adapters.store_router import HopRouterRetriever
-from contextos.plugins import base
+from context_runtime import ContextRuntime, Goal
+from context_runtime.adapters.store_hipporag import HippoRAGRetriever, SimGraphRetriever
+from context_runtime.adapters.store_inmemory import InMemoryStore
+from context_runtime.adapters.store_router import HopRouterRetriever
+from context_runtime.plugins import base
 
 CORPUS = [
     {"chunk_id": "d1", "filename": "d1", "text": "Mitochondrial dysfunction impairs ATP production in neurons.", "created_at": None},
@@ -35,7 +35,7 @@ def test_graph_costs_more_so_single_hop_queries_avoid_it():
     # for a non-multi-hop query, a graph candidate must score LOWER than hybrid
     rt = ContextRuntime.default([])
     g = Goal(text="What is reciprocal rank fusion?")
-    from contextos.types import Candidate, StepSpec
+    from context_runtime.types import Candidate, StepSpec
     hybrid = Candidate(steps=(StepSpec("retrieve", {"method": "hybrid"}),), model_tier="cheap")
     graph = Candidate(steps=(StepSpec("retrieve", {"method": "graph"}),), model_tier="cheap")
     assert rt.optimizer.score(hybrid, g).total > rt.optimizer.score(graph, g).total
@@ -71,7 +71,7 @@ def test_hipporag_binding_is_lazy():
 def test_end_to_end_multihop_run_uses_bridge():
     router = HopRouterRetriever(single_hop=InMemoryStore(list(CORPUS)),
                                graph=SimGraphRetriever(list(CORPUS)))
-    from contextos.adapters.model_stub import StubModel
+    from context_runtime.adapters.model_stub import StubModel
     rt = ContextRuntime(models={t: StubModel(tier=t) for t in ("local", "cheap", "premium")},
                         retriever=router)
     res = rt.run(MULTIHOP)

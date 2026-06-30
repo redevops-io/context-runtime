@@ -1,4 +1,4 @@
-# ContextOS — Specification (v0.1-draft)
+# Context Runtime — Specification (v0.1-draft)
 
 Normative interface specification. Where [ARCHITECTURE.md](./ARCHITECTURE.md)
 explains *why* and [ROADMAP.md](./ROADMAP.md) explains *when*, this document pins

@@ -1,9 +1,9 @@
-# ContextOS — Roadmap
+# Context Runtime — Roadmap
 
 Phasing for the Context Runtime. The guiding rule from [ARCHITECTURE.md](./ARCHITECTURE.md):
-**ContextOS is a thin decision layer over a thick reused substrate.** Each phase
+**Context Runtime is a thin decision layer over a thick reused substrate.** Each phase
 ships the smallest decision-making increment on top of OSS we already assemble, and
-*proves* it with a benchmark — ContextOS must be more than architectural language.
+*proves* it with a benchmark — Context Runtime must be more than architectural language.
 
 **The optimizer matures across phases — not the model call.** Don't optimize the
 model call first; optimize the *context plan*.
@@ -33,7 +33,7 @@ Foundations the original plan deferred but that everything else depends on:
 3. **EXPLAIN + SIMULATE from day one.** `runtime.explain(goal)` (debug a plan) and
    `runtime.simulate(goal)` (forecast its cost/latency/token envelope without
    executing) are near-free once the planner emits a Plan object. EXPLAIN makes
-   ContextOS legible ("debug AI like SQL"); SIMULATE is the enterprise
+   Context Runtime legible ("debug AI like SQL"); SIMULATE is the enterprise
    budgeting/approval seam. Both v0.1; SIMULATE's confidence intervals widen/narrow
    as the cost-model statistics accumulate (honest from the first run).
 4. **Reasoner + Scheduler seams exist from v0.1**, even as trivial defaults
@@ -88,13 +88,13 @@ dynamic plugin loading.
 
 **Exit benchmarks:**
 - *(plan §11)* answer questions over a 500-page corpus; compare (1) naive long
-  context, (2) vector-only RAG, (3) hybrid RAG, (4) hybrid+reranker, (5) ContextOS
+  context, (2) vector-only RAG, (3) hybrid RAG, (4) hybrid+reranker, (5) Context Runtime
   planned context — on accuracy, citation correctness, tokens, latency, cost.
 - *(new — Developer Time / LOC)* re-implement one example pipeline hand-rolled vs.
-  ContextOS and record the LOC delta. This is both a real maintenance metric and the
+  Context Runtime and record the LOC delta. This is both a real maintenance metric and the
   sharpest selling point.
 
-**Ship gate:** ContextOS plan beats hybrid+reranker on cost-at-equal-accuracy,
+**Ship gate:** Context Runtime plan beats hybrid+reranker on cost-at-equal-accuracy,
 produces a replayable trace for every run, `explain()` returns a populated plan, and
 `simulate()` returns a cost/latency/token envelope (with intervals from the
 cost-model statistics, however wide at first).
@@ -127,7 +127,7 @@ the graph informs selection; CP-SAT finds feasible plans where greedy knapsack f
 
 ## v0.3 — Knowledge memory lifecycle + the online learning loop (the moat)
 
-**Goal:** the cost model *learns* from observed outcomes. This is where ContextOS
+**Goal:** the cost model *learns* from observed outcomes. This is where Context Runtime
 stops being a clever static planner and becomes a runtime that improves.
 
 - Memory (the lifecycle sub-concern of the Knowledge Layer) → migrate mem0 →
@@ -182,7 +182,7 @@ are declarative and enforced.
 - `policy/presidio.py` → **Microsoft Presidio** PII/secret detection drives
   "sensitive data → local model only."
 - `policy/safety.py` → **native** safety scan as the fast inline pre-filter;
-  approval gates + append-only audit log (ContextOS is the control plane).
+  approval gates + append-only audit log (Context Runtime is the control plane).
 
 **Exit:** policy tests prove `no_secret_exfiltration`, `require_human_approval_for_
 prod`, and `local_model_for_sensitive_docs` are enforced, not advisory.
@@ -238,4 +238,4 @@ Intent → Planner → Execution Graph → Scheduler → Execution     (mirrors 
 | Learning loop in **v0.3**, after observability | Bandits/BO need logged plan→outcome data, which only exists once v0.1 traces flow. |
 | Policy in **v0.5**, after agents | Policy governs *actions*; meaningful actions arrive with the agent scheduler (v0.4). The fast `safety.py` pre-filter ships earlier as a stopgap. |
 | Dynamic plugin loading in **v1.0**, contracts in **v0.1** | Stable interfaces first; an out-of-tree registry before the interfaces are proven is premature. |
-| Benchmarks **every phase** (incl. Developer-Time/LOC) | ContextOS must prove it is more than architectural language; each phase has an exit gate, not just features. |
+| Benchmarks **every phase** (incl. Developer-Time/LOC) | Context Runtime must prove it is more than architectural language; each phase has an exit gate, not just features. |

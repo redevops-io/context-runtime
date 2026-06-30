@@ -1,9 +1,9 @@
-"""sidekick × ContextOS integration: drop-in compat, bandit learning, loop closure."""
+"""sidekick × Context Runtime integration: drop-in compat, bandit learning, loop closure."""
 from __future__ import annotations
 
-from contextos import ContextRuntime
-from contextos.integrations.sidekick import (
-    ContextOSSkillStore,
+from context_runtime import ContextRuntime
+from context_runtime.integrations.sidekick import (
+    ContextRuntimeSkillStore,
     DEFAULT_ARMS,
     EpsilonGreedyBandit,
     Skill,
@@ -14,7 +14,7 @@ from contextos.integrations.sidekick import (
 
 def _store(tmp_path):
     rt = ContextRuntime.default([])
-    store = ContextOSSkillStore(tmp_path / "skills", runtime=rt)
+    store = ContextRuntimeSkillStore(tmp_path / "skills", runtime=rt)
     store.save(Skill("retry-flaky", "tests fail intermittently", "wrap in retry", ["pytest passes"]))
     store.save(Skill("add-flag", "new cli option", "argparse add_argument", ["--flag works"]))
     return store
@@ -71,10 +71,10 @@ def test_bandit_learns_the_rewarding_arm():
     assert b.policy()["code_reasoning"] == good.key
 
 
-def test_contextos_beats_naive_over_a_task_stream():
+def test_context_runtime_beats_naive_over_a_task_stream():
     """End-to-end mechanism check (the harness in miniature)."""
     rt = ContextRuntime.default([])
-    store = ContextOSSkillStore("/tmp/contextos_test_skills", runtime=rt, bandit=EpsilonGreedyBandit(DEFAULT_ARMS, epsilon=0.15))
+    store = ContextRuntimeSkillStore("/tmp/context_runtime_test_skills", runtime=rt, bandit=EpsilonGreedyBandit(DEFAULT_ARMS, epsilon=0.15))
     store.save(Skill("port-codes", "map error codes", "bm25 over logs", []))
     latent = "bm25:3:1500"
 

@@ -1,23 +1,23 @@
-"""sidekick × ContextOS — prove the learning loop closes (replay harness).
+"""sidekick × Context Runtime — prove the learning loop closes (replay harness).
 
 A real benchmark needs headless Claude Code sessions + the redevops-rag retriever
 (torch), neither of which runs in a CI sandbox. So this harness keeps the FULL
-ContextOS machinery real (planner, retriever, bandit, cost-model statistics) and only
+Context Runtime machinery real (planner, retriever, bandit, cost-model statistics) and only
 *simulates the acceptance signal* the way sidekick's metrics would report it — via a
-hidden "latent best strategy" per task type. If ContextOS is learning, its acceptance
+hidden "latent best strategy" per task type. If Context Runtime is learning, its acceptance
 rate should climb toward the baseline-beating ceiling as the bandit discovers that
 latent optimum from reward alone.
 
     python examples/sidekick_learning.py
 
-Output: a learning curve (ContextOS vs. a fixed naive-recall baseline) + the learned
+Output: a learning curve (Context Runtime vs. a fixed naive-recall baseline) + the learned
 per-bucket recall policy.
 """
 from __future__ import annotations
 
-from contextos import ContextRuntime
-from contextos.integrations.sidekick import (
-    ContextOSSkillStore,
+from context_runtime import ContextRuntime
+from context_runtime.integrations.sidekick import (
+    ContextRuntimeSkillStore,
     Skill,
     SubtaskOutcome,
     _sidekick_bandit,
@@ -66,7 +66,7 @@ def _simulate_outcome(chosen_key: str, latent_best: str, rng: list[int]) -> Subt
 
 def run(rounds: int = 30) -> None:
     rt = ContextRuntime.default([])
-    store = ContextOSSkillStore(".contextos/skills_demo", runtime=rt,
+    store = ContextRuntimeSkillStore(".context_runtime/skills_demo", runtime=rt,
                                 bandit=_sidekick_bandit(0.15))
     for sk in SKILLS:
         store.save(sk)
@@ -79,7 +79,7 @@ def run(rounds: int = 30) -> None:
     print(f"{'round':>5} {'task':<42} {'bucket':<14} {'chosen':<14} {'ok?':<4} reward")
     for i in range(rounds):
         task, _bucket, latent = TASKS[i % len(TASKS)]
-        # ── ContextOS path: bandit picks a strategy, recall, simulate, learn ──
+        # ── Context Runtime path: bandit picks a strategy, recall, simulate, learn ──
         store.recall(task, limit=3)
         plan, strat = store._pending[store._key(task)]
         out = _simulate_outcome(strat.key, latent, rng)
@@ -100,7 +100,7 @@ def run(rounds: int = 30) -> None:
         return sum(h[-window:]) / min(window, len(h))
 
     print("\n── acceptance over last", window, "rounds ──")
-    print(f"  ContextOS (learning):  {rate(history):.0%}")
+    print(f"  Context Runtime (learning):  {rate(history):.0%}")
     print(f"  naive baseline (fixed): {rate(base_history):.0%}")
     print("\n── learned recall policy (best strategy per intent bucket) ──")
     for bucket, key in store.bandit.policy().items():

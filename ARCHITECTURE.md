@@ -1,20 +1,20 @@
-# ContextOS — Architecture
+# Context Runtime — Architecture
 
-> **Mental model: ContextOS is a database query planner for LLM context.**
+> **Mental model: Context Runtime is a database query planner for LLM context.**
 >
 > The application no longer says *"retrieve these chunks, rerank them, summarize
 > them, send them to Claude."* It says **"I need an answer."** Everything else
 > becomes an **execution plan** the runtime decides — exactly as SQL replaced
 > *open table → scan pages → hash join → sort* with `SELECT ...`.
 >
-> That makes ContextOS an **infrastructure layer** that higher-level frameworks
+> That makes Context Runtime an **infrastructure layer** that higher-level frameworks
 > (LangGraph, CrewAI, LlamaIndex) build *on top of* — a far more durable position
 > than competing with them.
 
 This document is the engineering architecture. It commits to two things the
 original plan left open:
 
-1. **What we reuse vs. build.** ContextOS is a *thin decision layer over a thick
+1. **What we reuse vs. build.** Context Runtime is a *thin decision layer over a thick
    reused substrate*. The novel code is the **Planner pipeline + Cost Model + trace
    schema + plugin contracts**. Almost everything else is assembly of existing OSS.
 2. **How decisions are made.** Not linear programming — a **cost-based query
@@ -50,24 +50,24 @@ until then — don't build an entry-point registry before the interfaces are pro
 
 ## 2. The substrate we reuse
 
-ContextOS does **not** reimplement retrieval, routing, agent orchestration, provider
+Context Runtime does **not** reimplement retrieval, routing, agent orchestration, provider
 SDKs, policy, or memory from scratch. It composes existing code behind plugin
 contracts.
 
 ### 2.1 In-house repos (already own)
 
-| ContextOS plugin | Repo | What it provides |
+| Context Runtime plugin | Repo | What it provides |
 |---|---|---|
 | **Retriever** | [`redevops-rag`](https://github.com/redevops-io/redevops-rag) (single-hop) + [`HippoRAG`](https://github.com/redevops-io/HippoRAG) (multi-hop) | DuckDB dense + BM25 → **RRF** → rerank for single-hop; knowledge graph + Personalized PageRank for multi-hop. The planner routes between them per query. |
-| **Router** | native (`contextos/adapters/model_litellm.py`) | Capability-tiered routing (local → cheap → premium), per-task budget, fallback up tiers. *ContextOS is the control plane — routing is native; prototyped in the now-retired agentic-os.* |
-| **Policy / Tools** | native (`contextos/tools/`, `contextos/policy/`) | ApprovalPolicy + dangerous-pattern scan, human-in-the-loop gates, append-only audit log. *Absorbed from agentic-os `safety.py`/`control_plane`.* |
+| **Router** | native (`context_runtime/adapters/model_litellm.py`) | Capability-tiered routing (local → cheap → premium), per-task budget, fallback up tiers. *Context Runtime is the control plane — routing is native; prototyped in the now-retired agentic-os.* |
+| **Policy / Tools** | native (`context_runtime/tools/`, `context_runtime/policy/`) | ApprovalPolicy + dangerous-pattern scan, human-in-the-loop gates, append-only audit log. *Absorbed from agentic-os `safety.py`/`control_plane`.* |
 | **Agent Scheduler** | [`sidekick`](https://github.com/redevops-io/sidekick) `orchestrator.py`, `planner.py`, `worktree.py` | DAG decomposition → bounded parallel waves → isolated worktrees → acceptance checks → merge. Validated 5.4× speedup, 0 conflicts. |
 | **Compression (structural) + Token Budget** | `sidekick` `context_budget.py`, `memory.py` | `clip()` + `reduce_transcript()` (tiered, dedup). |
 | **Observability seed** | `sidekick` `metrics.py`, `dashboard.py`, `events.py` | Per-agent token/turn/cost/latency + live trace doc. |
 
 ### 2.2 External OSS (glue in, do not build)
 
-| ContextOS plugin/component | Primary OSS | Role / alternatives |
+| Context Runtime plugin/component | Primary OSS | Role / alternatives |
 |---|---|---|
 | **Model / Store adapters (6, 5.6)** | **LiteLLM** | Unified API for 100+ providers, normalized cost/token, fallbacks, prompt-cache passthrough. *Replaces the hand-written `providers/` directory.* |
 | **Knowledge Layer — graph (5.2)** | **Kùzu** (embedded property graph) | `contains/derived_from/supersedes/contradicts` edges. Alt: `networkx`, Neo4j, **OpenLineage+Marquez** (Dagster-native lineage). |
@@ -78,7 +78,7 @@ contracts.
 | **Policy (5.10)** | **Open Policy Agent (Rego)** + **Presidio** (PII) | §5.10 YAML → Rego; `safety.py` stays as fast inline pre-filter. |
 | **Token counting (5.11)** | `tiktoken` + provider tokenizers (LiteLLM) | — |
 | **Observability (5.12)** | **OpenTelemetry + OpenLLMetry** → **Langfuse** | Self-hostable trace/cost/eval + replay (principle #7). Alt: Arize **Phoenix**. |
-| **Execution (5.8 / §4)** | **Dagster** | Runs the Execution Graph; ContextOS *decides* it. |
+| **Execution (5.8 / §4)** | **Dagster** | Runs the Execution Graph; Context Runtime *decides* it. |
 | **Optimizer (§6)** | **OR-Tools CP-SAT** · **Optuna** · **River** · (Ray Tune later) | Constrained selection · offline tuning · online contextual bandits. |
 
 ### 2.3 Plugin contracts (the only thing the runtime knows)
@@ -120,7 +120,7 @@ The runtime never imports `openai`, `anthropic`, `duckdb`, or knows the string
  Application
      │  runtime.run(goal, sources, constraints)   ·   runtime.explain(goal) → EXPLAIN
      ▼
-┌──────────────────────────── ContextOS Runtime ────────────────────────────┐
+┌──────────────────────────── Context Runtime Runtime ────────────────────────────┐
 │                                                                            │
 │   ┌─────────── PLANNER PIPELINE (the core, §5.1) ───────────┐              │
 │   │  Intent Analyzer → Candidate Generator → Cost Optimizer │              │
@@ -166,7 +166,7 @@ than a pure DAG. It must express: conditional branches, loops/retries, parallel
 waves, human approval gates, agent fan-out, verification nodes, merge, and
 **rollback**.
 
-- **ContextOS plans the Execution Graph; Dagster executes it.** Because Dagster is
+- **Context Runtime plans the Execution Graph; Dagster executes it.** Because Dagster is
   fundamentally a DAG-of-assets executor, loops and rollback are handled by the
   runtime compiling the Execution Graph to **one or more** Dagster runs (driving
   iterations, conditional re-planning, and compensating actions across runs) — not
@@ -303,11 +303,11 @@ The Cost Model gets its own package, on a path to learned then neural estimators
 exactly like PostgreSQL statistics:
 
 ```
-contextos/planner/        # intent, candidates (orchestration)
-contextos/costmodel/      # PlanScore + estimators: v1 heuristic → learned → neural
-contextos/constraints/    # hard-constraint definitions (feasibility)
-contextos/optimizer/      # knapsack / CP-SAT selection over feasible set
-contextos/execution/      # Execution Graph IR → Dagster compilation
+context_runtime/planner/        # intent, candidates (orchestration)
+context_runtime/costmodel/      # PlanScore + estimators: v1 heuristic → learned → neural
+context_runtime/constraints/    # hard-constraint definitions (feasibility)
+context_runtime/optimizer/      # knapsack / CP-SAT selection over feasible set
+context_runtime/execution/      # Execution Graph IR → Dagster compilation
 ```
 
 **The objective (soft) — what the Cost Optimizer maximizes:**
@@ -371,8 +371,8 @@ value-density** suffices. That is the v0.1 → v0.2 boundary.
 ## 7. Public API — `run`, `plan`, and `explain`
 
 ```python
-from contextos import ContextRuntime
-runtime = ContextRuntime.from_config("contextos.yaml")
+from context_runtime import ContextRuntime
+runtime = ContextRuntime.from_config("context_runtime.yaml")
 
 # The core abstraction is run, not ask:
 result = runtime.run(
@@ -461,9 +461,9 @@ observability: {exporter: openllmetry, sink: langfuse, traces: true}
 ## 9. Repository structure (revised)
 
 ```
-contextos/
+context_runtime/
   ARCHITECTURE.md  ROADMAP.md  SPEC.md  README.md  pyproject.toml
-  contextos/
+  context_runtime/
     runtime/        runtime.py  lifecycle.py  config.py  explain.py        # EXPLAIN
     planner/        intent.py  candidates.py  rules.py                     # NEW — split (WHAT)
     costmodel/      score.py  estimators.py  statistics.py                # NEW — first-class + trust layer
@@ -497,7 +497,7 @@ reasoner/` and the Planner split (planner=*what*, scheduler=*when/where*).
 
 Standard: retrieval accuracy, answer correctness, citation accuracy, token
 reduction, latency, cost, lost-in-the-middle, stale detection, reproducibility,
-verification effectiveness — plus the **ContextOS vs. naive/vector/hybrid/+reranker**
+verification effectiveness — plus the **Context Runtime vs. naive/vector/hybrid/+reranker**
 corpus benchmark.
 
 **New — Developer Time / Lines-of-Code eliminated.** Everyone benchmarks accuracy,
@@ -506,7 +506,7 @@ latency, cost. Nobody benchmarks *how much glue code disappears*:
 ```
 Task: incident-review pipeline
   Hand-rolled (LangGraph)     ~420 LOC
-  ContextOS                     ~38 LOC
+  Context Runtime                     ~38 LOC
 ```
 
 This is both a real metric (maintenance surface) and the sharpest selling point — it
@@ -514,7 +514,7 @@ is the SQL argument made concrete.
 
 ---
 
-## 11. What ContextOS is *not*
+## 11. What Context Runtime is *not*
 
 Not a chatbot framework, RAG library, vector DB, agent framework, prompt templater,
 or model SDK. **It is the query planner that sits *beneath* LangGraph, CrewAI,

@@ -1,4 +1,4 @@
-# ContextOS
+# Context Runtime
 
 **An efficiency optimizer for a fleet of apps** — a database query planner for LLM
 context. The application says *"I need an answer"*; the runtime decides what the model
@@ -9,10 +9,10 @@ planners did for SQL. See [POSITIONING.md](./POSITIONING.md) for the thesis.
 It optimizes any app with (a) a decision point about what context/config to use and
 (b) a measurable outcome. Two tenants are built and green:
 
-| Tenant | ContextOS tunes | Result |
+| Tenant | Context Runtime tunes | Result |
 |---|---|---|
 | **sidekick** | which skills to recall · budget | drop-in for `SkillStore`; **67% vs 33%** naive baseline acceptance |
-| **redevops-rag** | `pool · limit · threshold · rerank …` per query | `ContextOSRetrieverTuner`; **0.773 vs 0.323** vs fixed default |
+| **redevops-rag** | `pool · limit · threshold · rerank …` per query | `ContextRuntimeRetrieverTuner`; **0.773 vs 0.323** vs fixed default |
 | **edge-sentinel (SOC)** | which sources to pull per alert (CrowdSec · threat-intel · EDR) | tool-using + approval-gated; **0.900 vs 0.800** always-full baseline |
 
 ```bash
@@ -21,8 +21,8 @@ PYTHONPATH=. python examples/rag_tuning.py          # numeric-knob tuning
 PYTHONPATH=. python examples/soc_triage.py          # tool-using cybersecurity tenant
 ```
 
-Plus the **ToolPlugin** seam (`contextos/tools/` — how plans reach external systems,
-with an approval-gated audit trail) and **trace exporters** (`contextos/observability/
+Plus the **ToolPlugin** seam (`context_runtime/tools/` — how plans reach external systems,
+with an approval-gated audit trail) and **trace exporters** (`context_runtime/observability/
 exporters.py` — JSONL offline, or Langfuse / OpenLLMetry-OTel when the extras are
 installed).
 
@@ -49,7 +49,7 @@ missing the bridge document that multi-hop surfaces.
 ## 30-second tour
 
 ```python
-from contextos import ContextRuntime, SourceRef
+from context_runtime import ContextRuntime, SourceRef
 
 rt = ContextRuntime.default(docs)          # offline: stub model + in-memory store
 
@@ -72,8 +72,8 @@ Or from the CLI / config:
 
 ```bash
 PYTHONPATH=. python examples/incident_review.py
-contextos --corpus ./docs run "what's our incident process?"
-contextos --config contextos.yaml explain --analyze "why did deploy X fail?"
+context-runtime --corpus ./docs run "what's our incident process?"
+context-runtime --config context_runtime.yaml explain --analyze "why did deploy X fail?"
 ```
 
 ## What's implemented (v0.1)

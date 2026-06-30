@@ -9,11 +9,11 @@ import json
 
 import pytest
 
-from contextos import ContextRuntime, jsonio
-from contextos.adapters.model_stub import StubModel
-from contextos.adapters.store_inmemory import InMemoryStore
-from contextos.plugins import base
-from contextos.types import ExecutionGraph, Plan, Trace
+from context_runtime import ContextRuntime, jsonio
+from context_runtime.adapters.model_stub import StubModel
+from context_runtime.adapters.store_inmemory import InMemoryStore
+from context_runtime.plugins import base
+from context_runtime.types import ExecutionGraph, Plan, Trace
 
 DOCS = [
     {"chunk_id": "deploy.md::0", "filename": "deploy.md",
@@ -40,7 +40,7 @@ def test_model_and_store_implement_contracts(rt):
 def test_same_retriever_contract_local_and_cloud():
     # plugin-first: a second store impl must satisfy the SAME contract (binding is lazy,
     # so we assert the class conforms structurally without importing redevops_rag).
-    from contextos.adapters.store_redevops import RedevopsRagRetriever
+    from context_runtime.adapters.store_redevops import RedevopsRagRetriever
     r = RedevopsRagRetriever()
     assert hasattr(r, "search") and hasattr(r, "index") and hasattr(r, "info")
     assert isinstance(r, base.RetrieverPlugin)
@@ -67,8 +67,8 @@ def test_cost_estimator_observe_and_statistics(rt):
 
 
 def test_reasoner_and_scheduler_seams_exist(rt):
-    from contextos.reasoner.single_shot import SingleShotReasoner
-    from contextos.scheduler.schedule import TopoScheduler
+    from context_runtime.reasoner.single_shot import SingleShotReasoner
+    from context_runtime.scheduler.schedule import TopoScheduler
     assert isinstance(SingleShotReasoner(StubModel()), base.ReasonerPlugin)
     assert isinstance(TopoScheduler(), base.SchedulerPlugin)
     # the reason node — not a raw model call — is what the graph carries
@@ -133,7 +133,7 @@ def test_rejects_higher_major_spec_version():
 
 def test_v01_requires_no_v02_subsystems(rt):
     # Plan Cache is the null/always-miss stub in v0.1
-    from contextos.plancache.cache import NullPlanCache
+    from context_runtime.plancache.cache import NullPlanCache
     assert isinstance(rt.plan_cache, NullPlanCache)
     plan = rt.plan("Explain why deployment X failed")
     assert plan.cache in ("miss", "hit", "bypass")
