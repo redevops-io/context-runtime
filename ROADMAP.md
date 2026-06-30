@@ -67,14 +67,14 @@ model calls than hand-rolled RAG.
 - **`execution/graph.py`** — the Execution Graph IR (even if v0.1 only emits linear
   graphs, the IR carries branch/loop/approval/rollback kinds so v0.4 slots in
   without a rewrite). It is the Planner→Scheduler boundary artifact.
-- `plugins/base.py` — plugin contracts; `adapters/` model (LiteLLM + agentic-os tier
+- `plugins/base.py` — plugin contracts; `adapters/` model (LiteLLM + native cost-tiered
   policy) and store (DuckDB **and** pgvector, same interface)
 - trace schema + `observability/` (OpenLLMetry → Langfuse)
 
 **Assemble (reuse, don't build):**
 - Retrieval → **redevops-rag** behind `StoreAdapter`
 - Providers → **LiteLLM** (deletes the hand-written `providers/` dir)
-- Routing policy → **agentic-os** `router.py`
+- Routing policy → **native** cost-tiered router (prototyped in the now-retired agentic-os)
 - Structural compression + token clipping → **sidekick** `context_budget.py`
 - Semantic compression → **LLMLingua-2**
 - Memory → **mem0** (simple store; Graphiti deferred to v0.3)
@@ -181,8 +181,8 @@ are declarative and enforced.
   decisions (the §5.10 YAML becomes real Rego).
 - `policy/presidio.py` → **Microsoft Presidio** PII/secret detection drives
   "sensitive data → local model only."
-- `policy/safety.py` → **agentic-os** safety scan as the fast inline pre-filter;
-  approval gates + append-only audit log from `agentic-os` control plane.
+- `policy/safety.py` → **native** safety scan as the fast inline pre-filter;
+  approval gates + append-only audit log (ContextOS is the control plane).
 
 **Exit:** policy tests prove `no_secret_exfiltration`, `require_human_approval_for_
 prod`, and `local_model_for_sensitive_docs` are enforced, not advisory.

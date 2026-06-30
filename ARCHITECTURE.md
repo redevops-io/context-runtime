@@ -58,9 +58,9 @@ contracts.
 
 | ContextOS plugin | Repo | What it provides |
 |---|---|---|
-| **Retriever** | [`redevops-rag`](https://github.com/redevops-io/redevops-rag) | DuckDB dense (bge-small) + BM25 FTS → **RRF** → recency + keyword priors → optional **bge-reranker-v2-m3**. *This is the hybrid retriever.* |
-| **Router** | [`agentic-os`](https://github.com/redevops-io/agentic-os) `router.py` | Capability-tiered routing (local → cheap → premium), per-task budget with `BudgetExceeded`, fallback up tiers. |
-| **Policy** | `agentic-os` `safety.py` + `control_plane` | Dangerous-pattern scan, human-in-the-loop approval gates, append-only audit log. |
+| **Retriever** | [`redevops-rag`](https://github.com/redevops-io/redevops-rag) (single-hop) + [`HippoRAG`](https://github.com/redevops-io/HippoRAG) (multi-hop) | DuckDB dense + BM25 → **RRF** → rerank for single-hop; knowledge graph + Personalized PageRank for multi-hop. The planner routes between them per query. |
+| **Router** | native (`contextos/adapters/model_litellm.py`) | Capability-tiered routing (local → cheap → premium), per-task budget, fallback up tiers. *ContextOS is the control plane — routing is native; prototyped in the now-retired agentic-os.* |
+| **Policy / Tools** | native (`contextos/tools/`, `contextos/policy/`) | ApprovalPolicy + dangerous-pattern scan, human-in-the-loop gates, append-only audit log. *Absorbed from agentic-os `safety.py`/`control_plane`.* |
 | **Agent Scheduler** | [`sidekick`](https://github.com/redevops-io/sidekick) `orchestrator.py`, `planner.py`, `worktree.py` | DAG decomposition → bounded parallel waves → isolated worktrees → acceptance checks → merge. Validated 5.4× speedup, 0 conflicts. |
 | **Compression (structural) + Token Budget** | `sidekick` `context_budget.py`, `memory.py` | `clip()` + `reduce_transcript()` (tiered, dedup). |
 | **Observability seed** | `sidekick` `metrics.py`, `dashboard.py`, `events.py` | Per-agent token/turn/cost/latency + live trace doc. |
@@ -438,7 +438,7 @@ runtime:
     store:   duckdb                  # swap → pgvector / lancedb, same plan
     retriever: redevops_rag
     knowledge: mem0                  # → graphiti at v0.3
-    router:  agentic_os_tiers
+    router:  native_tiers
     policy:  opa
   plan_cache: {enabled: true, ttl_seconds: 3600, match: semantic}
 

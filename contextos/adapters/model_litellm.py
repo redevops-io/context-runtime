@@ -1,8 +1,9 @@
 """LiteLLMModel — the real ModelPlugin binding (SPEC §4.3).
 
-Wraps LiteLLM for transport + token counting + cost across 100+ providers, and uses
-agentic-os ``router.py`` tier policy when available. Lazy-imports both so the core
-package installs and the stub path runs without these deps.
+Wraps LiteLLM for transport + token counting + cost across 100+ providers, with a
+native cost-tiered routing policy (``Tier`` below) — ContextOS is the control plane, so
+routing lives here rather than in a separate service. Lazy-imports LiteLLM so the core
+package installs and the stub path runs without it.
 
 Install:  pip install "contextos[litellm]"
 """
@@ -23,7 +24,7 @@ class Tier:
 
 
 class LiteLLMModel:
-    """ModelPlugin over LiteLLM. ``tiers`` mirrors agentic-os Tier policy."""
+    """ModelPlugin over LiteLLM with a native cost-tiered routing policy."""
 
     def __init__(self, tiers: list[Tier] | None = None, default_tier: str = "cheap"):
         self.tiers = {t.name: t for t in (tiers or [])}

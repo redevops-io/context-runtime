@@ -49,17 +49,25 @@ The learning core (`integrations/bandit.py` — a contextual bandit, the v0.1 st
 for v0.3 River) and the cost-model statistics are **shared across all tenants**. Only
 the *arms* (what to choose) and the *reward* (how to score it) are app-specific.
 
-## The first three tenants (all redevops repos)
+## The tenants (all redevops repos)
 
 | Tenant | Decision point ContextOS optimizes | Reward (the app's own metric) | Status |
 |---|---|---|---|
-| **sidekick** (coding agent) | which skills to recall · bundle size · token budget | acceptance rate · first-try · tokens | **built, green** — drop-in for `SkillStore`; learned correct per-bucket policy; 67% vs 33% naive baseline |
-| **redevops-rag** (retrieval) | `pool · limit · vector_threshold · recency · keyword priors · rerank` per query intent | retrieval quality − efficiency penalty | **built, green** — `ContextOSRetrieverTuner`; learned correct config per bucket; 0.773 vs 0.323 fixed default |
-| **agentic-os** (fleet) | which model tier per task · when to escalate | task success · cost-per-good-answer | next — its router becomes a ContextOS-learned policy |
+| **sidekick** (coding agent) | which skills to recall · bundle size · token budget | acceptance rate · first-try · tokens | **built, green** — drop-in for `SkillStore`; 67% vs 33% naive baseline |
+| **redevops-rag** (retrieval) | `pool · limit · vector_threshold · recency · keyword priors · rerank` per query intent | retrieval quality − efficiency penalty | **built, green** — `ContextOSRetrieverTuner`; 0.773 vs 0.323 fixed default |
+| **edge-sentinel** (SOC) | which sources to pull per alert (CrowdSec · threat-intel · EDR) | correct verdict − source cost | **built, green** — tool-using + approval-gated; 0.900 vs 0.800 always-full |
+| **business modules** (billing · support · BI · compliance …) | which sources/cores to query · which model tier | task success · cost-per-good-answer | next — each becomes a tenant with a goal + a metric |
 
-The first two are *proof that the pattern generalizes across very different decision
-types*: sidekick chooses among **discrete strategies**, redevops-rag tunes **numeric
-knobs**. Same bandit, same cost-model, same wrap. That is the whole bet.
+These prove the pattern generalizes across very different decision types: sidekick
+chooses among **discrete strategies**, redevops-rag tunes **numeric knobs**,
+edge-sentinel selects **sources/tools with side effects**. Same bandit, same
+cost-model, same wrap. That is the whole bet.
+
+**ContextOS *is* the control plane.** It supersedes the earlier `agentic-os` fleet
+controller — the routing, approval/safety, and audit-log capabilities prototyped there
+now live natively in ContextOS (`adapters/model_litellm.py`, `tools/`,
+`observability/`). The business modules that the old fleet ran become **tenants**: each
+gets a goal, a metric, and a learned policy, instead of a hand-wired controller.
 
 ## Why this is a more durable position
 
@@ -69,9 +77,10 @@ knobs**. Same bandit, same cost-model, same wrap. That is the whole bet.
 - **It compounds.** Every run of every tenant produces a `(plan, outcome)` row that
   sharpens the shared cost model. The fleet gets more efficient the more it runs —
   the asset is the accumulated statistics, not the code.
-- **It dovetails with agentic-os.** agentic-os runs a *fleet of agents*; ContextOS is
-  the *efficiency layer over that fleet* — every agent's context/config decisions,
-  planned and learned, under one budget and one trace.
+- **It is the fleet's control plane.** ContextOS plans, optimizes, and learns every
+  agent's context/config decisions under one budget and one trace — the role the
+  earlier `agentic-os` controller filled, now done by a learned planner instead of
+  hand-wired routing.
 
 ## What "efficiency" concretely means
 
@@ -85,6 +94,7 @@ exactly the job a learned planner exists to do.
 
 This reframes the [ROADMAP](./ROADMAP.md): the tenants are how each capability earns
 its place. sidekick exercised the **discrete-strategy bandit**; redevops-rag exercises
-**numeric tuning** (the Optuna/BO half); agentic-os will exercise **model routing
+**numeric tuning** (the Optuna/BO half); edge-sentinel exercises **tool/source
+selection with side effects**; the business modules will exercise **model routing
 under budget**. v0.3's River loop and v0.2's CP-SAT are not abstract milestones — they
 are the upgrades the tenants ask for once the v0.1 bandit's limits show.

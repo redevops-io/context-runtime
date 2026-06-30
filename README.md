@@ -86,7 +86,7 @@ contextos --config contextos.yaml explain --analyze "why did deploy X fail?"
 | **Execution Graph IR** | linear graph carrying branch/loop/rollback kinds | full shapes (v0.4) |
 | **Scheduler** | topo-sort waves | Dagster / cost-aware (v2) |
 | **Reasoner** | `SingleShotReasoner` (one model) | mixtures: plan-worker-critic (v0.3+) |
-| **Model plugin** | offline `StubModel` | **LiteLLM** + agentic-os tier policy |
+| **Model plugin** | offline `StubModel` | **LiteLLM** + native cost-tiered routing |
 | **Retriever/Store** | `InMemoryStore` (keyword) | **redevops-rag** (DuckDB+BM25+RRF+rerank) |
 | **Compression** | sidekick `clip` structural pack | LLMLingua-2 semantic (v0.1 optional) |
 | **Verifier** | citation/grounding check | RAGAS / Instructor |

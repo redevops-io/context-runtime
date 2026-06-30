@@ -262,7 +262,7 @@ class ModelCapabilities:
 @dataclass(frozen=True)
 class ModelRequest:
     messages: tuple[dict[str, str], ...]
-    capability: str = "draft"        # maps to agentic-os Tier.good_for
+    capability: str = "draft"        # maps to the native Tier.good_for
     max_tokens: int = 1024
     system: str | None = None
     tools: tuple[dict, ...] | None = None
@@ -286,7 +286,7 @@ class ModelPlugin(Protocol):
 ```
 
 **Binding (v0.1):** `LiteLLMModel` wraps LiteLLM for transport + token counting +
-cost, and uses **agentic-os `router.py`** (`Tier`/`Task`/`Router`/`BudgetExceeded`)
+cost, with a **native cost-tiered routing policy** (`Tier`/`Task`/`Router`/`BudgetExceeded`)
 as the tier-selection policy. `ModelRequest.capability` ↔ `Task.capability`;
 `ModelResult` mirrors `RouteResult` (`tier`, `model`, `text`, `est_cost_usd`) plus
 token counts.
@@ -668,7 +668,7 @@ versions, plugin versions)`. `execute` MAY be non-deterministic (model sampling)
 
 A runtime is **v0.1-conformant** iff it:
 
-- [ ] implements `ModelPlugin` (LiteLLM + agentic-os tier policy) and `StorePlugin`
+- [ ] implements `ModelPlugin` (LiteLLM + native cost-tiered routing) and `StorePlugin`
       for **both** DuckDB and pgvector behind the *same* `RetrieverPlugin` contract;
 - [ ] implements the three planner Protocols (Intent / Candidate / Optimizer) with a
       rule-table intent analyzer and a **heuristic** `costmodel` producing `PlanScore`
