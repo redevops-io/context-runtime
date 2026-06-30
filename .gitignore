@@ -13,8 +13,8 @@ venv/
 .ruff_cache/
 .mypy_cache/
 
-# ContextOS runtime artifacts (traces, cost-model stats, demo skill stores)
-.contextos/
+# Context Runtime artifacts (traces, cost-model stats, demo skill stores)
+.context_runtime/
 
 # Local env
 .env

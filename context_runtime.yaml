@@ -1,4 +1,4 @@
-# ContextOS runtime config (plugin-first; same plan runs local or cloud — SPEC §8).
+# Context Runtime config (plugin-first; same plan runs local or cloud — SPEC §8).
 runtime:
   plugins:
     model: stub          # "stub" (offline) | "litellm"
