@@ -1,0 +1,88 @@
+# The redevops.io Agentic Business OS — module catalog (the fleet registry).
+# Context Runtime's control plane reads this to stand each module up as a tenant
+# (a goal + a metric + a learned policy). Ports match the agentic-os-stack compose.
+modules:
+  - name: sidekick
+    repo: redevops-io/sidekick
+    pain: autonomous coding
+    port: 8200
+    agents: [coder]
+    approval_required: []
+  - name: agentic-billing
+    repo: redevops-io/agentic-billing
+    pain: payments & reconciliation
+    port: 8201
+    agents: [checkout, reconciliation, dunning]
+    approval_required: [refund, dunning]
+  - name: control-tower
+    repo: redevops-io/control-tower
+    pain: business intelligence
+    port: 8202
+    agents: [analyst]
+    approval_required: []
+  - name: edge-sentinel
+    repo: redevops-io/edge-sentinel
+    pain: network security & systems
+    port: 8203
+    agents: [triage, remediation]
+    approval_required: [remediation]
+  - name: market-radar
+    repo: redevops-io/market-radar
+    pain: competitive intelligence
+    port: 8204
+    agents: [watcher, briefer]
+    approval_required: []
+  - name: growth-engine
+    repo: redevops-io/growth-engine
+    pain: marketing attribution
+    port: 8205
+    agents: [attribution, channel_optimizer]
+    approval_required: []
+  - name: social-autopilot
+    repo: redevops-io/social-autopilot
+    pain: social-media growth
+    port: 8206
+    agents: [content, engagement]
+    approval_required: [post]
+  - name: agentic-support
+    repo: redevops-io/agentic-support
+    pain: customer support
+    port: 8207
+    agents: [responder, escalation]
+    approval_required: [escalate]
+  - name: agentic-compliance
+    repo: redevops-io/agentic-compliance
+    pain: compliance & data-privacy
+    port: 8208
+    agents: [monitor, evidence]
+    approval_required: [remediate]
+  - name: agentic-books
+    repo: redevops-io/agentic-books
+    pain: bookkeeping & close
+    port: 8209
+    agents: [categorize, reconcile, close]
+    approval_required: [close]
+  - name: agentic-crm
+    repo: redevops-io/agentic-crm
+    pain: CRM & pipeline
+    port: 8210
+    agents: [score, research, draft, qualify]
+    approval_required: []
+  - name: lifecycle
+    repo: redevops-io/lifecycle
+    pain: lifecycle messaging
+    port: 8211
+    agents: [segment, campaign, automation]
+    approval_required: [send_campaign]
+  - name: agentic-privacy
+    repo: redevops-io/agentic-privacy
+    pain: data-subject requests
+    port: 8212
+    agents: [intake, access, delete, retention]
+    approval_required: [fulfill_dsar]
+  - name: growth-assistant
+    repo: redevops-io/growth-assistant
+    pain: growth strategy & outreach
+    port: 8213
+    agents: [strategy, content, outreach, hiring]
+    approval_required: []

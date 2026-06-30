@@ -15,6 +15,7 @@ venv/
 
 # Context Runtime artifacts (traces, cost-model stats, demo skill stores)
 .context_runtime/
+.context-runtime/
 
 # Local env
 .env
