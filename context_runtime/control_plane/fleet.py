@@ -13,6 +13,9 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 
+from pathlib import Path
+
+from ..costmodel.estimators import HeuristicEstimator
 from ..integrations.modules import CATALOG, ModuleSpec, ModuleTenant
 from ..runtime.runtime import ContextRuntime
 from .context import Approval, Context
@@ -51,11 +54,16 @@ class ModuleStatus:
 
 class Fleet:
     def __init__(self, registry: Registry, router=None, context: Context | None = None,
-                 workdir=None, runtime: ContextRuntime | None = None):
+                 workdir=None, runtime: ContextRuntime | None = None, home: str | None = None):
         self.registry = registry
         self.router = router                      # kept for app compatibility; unused
-        self.context = context or Context(".context-runtime")
-        self.runtime = runtime or ContextRuntime.default([])   # ONE shared runtime → fleet learning
+        self.home = Path(home or ".context-runtime")   # persistence root (the /data volume)
+        self.context = context or Context(self.home)
+        # ONE shared runtime; its cost-model statistics persist so calibration survives restarts
+        if runtime is None:
+            estimator = HeuristicEstimator(stats_path=str(self.home / "costmodel_stats.json"))
+            runtime = ContextRuntime.default([], estimator=estimator)
+        self.runtime = runtime
         self.tenants: dict[str, ModuleTenant] = {}
         self._up: set[str] = set()
         self.jobs: dict[str, dict] = {}
@@ -68,8 +76,11 @@ class Fleet:
         out = []
         for n in (names or self._names()):
             m = self.registry.get(n)
-            # the fleet gates approvals (via Context); the tenant's own tools default-deny
-            self.tenants[n] = ModuleTenant(spec_for(m), runtime=self.runtime, approver=lambda a: False)
+            # the fleet gates approvals (via Context); the tenant's own tools default-deny.
+            # each tenant's learned policy persists to the /data volume → survives restarts.
+            self.tenants[n] = ModuleTenant(
+                spec_for(m), runtime=self.runtime, approver=lambda a: False,
+                persist_path=str(self.home / "bandits" / f"{n}.json"))
             self._up.add(n)
             out.append(ModuleStatus(n, True, m.agents, "context-runtime tenant"))
         return out

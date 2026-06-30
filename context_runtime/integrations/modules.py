@@ -164,11 +164,12 @@ class ModuleTenant:
     """One business module as a Context Runtime tenant (goal + metric + learned policy)."""
 
     def __init__(self, spec: ModuleSpec, runtime: ContextRuntime | None = None,
-                 bandit: EpsilonGreedyBandit | None = None, approver=None, epsilon: float = 0.12):
+                 bandit: EpsilonGreedyBandit | None = None, approver=None, epsilon: float = 0.12,
+                 persist_path: str | None = None):
         self.spec = spec
         self.runtime = runtime or ContextRuntime.default([])
         self.arms = _bundles(spec.sources)
-        self.bandit = bandit or EpsilonGreedyBandit(self.arms, epsilon=epsilon)
+        self.bandit = bandit or EpsilonGreedyBandit(self.arms, epsilon=epsilon, persist_path=persist_path)
         self.registry = ToolRegistry(ApprovalPolicy(mode="deny_side_effects", approver=approver))
         for s in spec.sources:
             self.registry.register(_source_tool(spec.name, s))

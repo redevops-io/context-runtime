@@ -136,10 +136,10 @@ class VibexgenPlanner:
     learned policy, then learn from the user's multi-criteria scores."""
 
     def __init__(self, runtime: ContextRuntime | None = None, bandit: EpsilonGreedyBandit | None = None,
-                 chains: tuple[GenerationChain, ...] = DEFAULT_CHAINS):
+                 chains: tuple[GenerationChain, ...] = DEFAULT_CHAINS, persist_path: str | None = None):
         self.runtime = runtime or ContextRuntime.default([])
         self.chains = chains
-        self.bandit = bandit or _vibex_bandit()
+        self.bandit = bandit or EpsilonGreedyBandit(chains, epsilon=0.12, persist_path=persist_path)
         self._pending: dict[str, tuple[str, GenerationChain]] = {}
 
     # ── stage 1: choose the scenario BEFORE the expensive generation ──

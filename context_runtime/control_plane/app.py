@@ -47,8 +47,9 @@ def _build() -> Fleet:
     router = Router.from_config(cfg.get("router", {"tiers": []}))
     # Hermes 0.17 chat notifier — no-op until a Telegram/Slack token is configured.
     notifier = channels.Notifier()
-    ctx = Context(os.environ.get("CONTEXT_RUNTIME_HOME") or os.environ.get("AGENTIC_OS_HOME", ".context-runtime"), notifier=notifier)
-    return Fleet(registry, router, ctx)
+    home = os.environ.get("CONTEXT_RUNTIME_HOME") or os.environ.get("AGENTIC_OS_HOME", ".context-runtime")
+    ctx = Context(home, notifier=notifier)
+    return Fleet(registry, router, ctx, home=home)   # learned policies persist under home (/data)
 
 
 app = FastAPI(title="Context Runtime control plane", version="0.1.0")
@@ -839,7 +840,8 @@ def agent_policy(module: str) -> dict:
 # ──────────────────────────── vibexgen — video generation planning ────────────────────────────
 from ..integrations.vibexgen import CRITERIA_WEIGHTS, SceneSpec, VibexgenPlanner
 
-vibex = VibexgenPlanner(runtime=fleet.runtime)   # shares the fleet's cost model
+vibex = VibexgenPlanner(runtime=fleet.runtime,   # shares the fleet's cost model
+                        persist_path=str(fleet.home / "vibex_bandit.json"))   # learning survives restarts
 
 
 class ScenePayload(BaseModel):
