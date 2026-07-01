@@ -911,3 +911,75 @@ def vibex_score(req: VibexScoreReq) -> dict:
 def vibex_scoreboard() -> dict:
     """Leaderboard of generation chains by learned score — for the UI scoreboard."""
     return {"leaderboard": vibex.leaderboard(), "by_context": vibex.scoreboard()}
+
+
+# ──────────────────────────── LibreChat — self-learning retrieval (LLM-judged) ────────────────────────────
+from ..integrations.librechat import LibreChatTenant   # noqa: E402
+
+librechat = LibreChatTenant(runtime=fleet.runtime,   # shares the fleet cost model + persists its policy
+                            persist_path=str(fleet.home / "librechat_bandit.json"))
+_lc_corpus = os.getenv("CR_CORPUS_DIR", "")
+if _lc_corpus and os.path.isdir(_lc_corpus):
+    try:
+        librechat.ingest(_lc_corpus)   # ingest a pre-built normalized corpus at startup
+    except Exception:
+        pass
+
+
+def _hits_json(hits) -> list[dict]:
+    return [{"chunk_id": h.chunk_id, "filename": h.filename, "score": round(h.score, 4),
+             "text": h.text[:600]} for h in hits]
+
+
+class LcIngestReq(BaseModel):
+    path: str
+
+
+class LcRetrieveReq(BaseModel):
+    request: str
+
+
+class LcJudgeReq(BaseModel):
+    request: str
+    score: float
+
+
+@app.post("/librechat/ingest", dependencies=[Depends(require_api_key)])
+def librechat_ingest(req: LcIngestReq) -> dict:
+    """Index a (pre-built, normalized) corpus directory into LibreChat's retriever."""
+    if not os.path.isdir(req.path):
+        raise HTTPException(400, f"not a directory: {req.path}")
+    return {"ingested": librechat.ingest(req.path)}
+
+
+@app.post("/librechat/retrieve")
+def librechat_retrieve(req: LcRetrieveReq) -> dict:
+    """Plan + retrieve context for a request using the learned strategy (no judging yet)."""
+    ctx = librechat.retrieve(req.request)
+    return {"request": ctx.request, "strategy": ctx.strategy.key,
+            "method": ctx.strategy.method, "final_k": ctx.strategy.final_k,
+            "hits": _hits_json(ctx.hits), "context": ctx.context, "plan_id": ctx.plan.id,
+            "suggestion": librechat.suggest(req.request)}
+
+
+@app.post("/librechat/judge", dependencies=[Depends(require_api_key)])
+def librechat_judge(req: LcJudgeReq) -> dict:
+    """Close the loop: an external LLM judge posts the retrieval-quality score (0..1) for
+    the last retrieve of this request; the policy learns which strategy the judge rewards."""
+    reward = librechat.record_judgment(req.request, max(0.0, min(1.0, req.score)))
+    return {"reward": reward, "suggestion": librechat.suggest(req.request), "policy": librechat.policy()}
+
+
+@app.post("/librechat/chat", dependencies=[Depends(require_api_key)])
+def librechat_chat(req: LcRetrieveReq) -> dict:
+    """Self-contained loop: retrieve → (offline heuristic) judge → learn, in one call."""
+    ctx, score, reward = librechat.handle(req.request)
+    return {"request": ctx.request, "strategy": ctx.strategy.key, "score": score, "reward": reward,
+            "hits": _hits_json(ctx.hits), "context": ctx.context,
+            "suggestion": librechat.suggest(req.request)}
+
+
+@app.get("/librechat/policy")
+def librechat_policy() -> dict:
+    """The retrieval strategy LibreChat has learned per request-type."""
+    return {"policy": librechat.policy()}
