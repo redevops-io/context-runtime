@@ -17,6 +17,10 @@ litellm = ["litellm>=1.40"]
 rag = ["redevops-rag @ git+https://github.com/redevops-io/redevops-rag.git"]
 # Multi-hop graph retrieval (knowledge graph + Personalized PageRank).
 hipporag = ["hipporag @ git+https://github.com/redevops-io/HippoRAG.git"]
+# Semantic (embedding) retrieval + hybrid BM25⊕semantic fusion — deterministic ONNX
+# embeddings (no torch) that bridge synonyms/morphology lexical BM25 can't. The runtime
+# falls back to pure BM25 when this isn't installed.
+embeddings = ["fastembed>=0.3", "numpy>=1.24"]
 # Physical execution binding (the SchedulerPlugin compiles to Dagster runs).
 dagster = ["dagster>=1.7"]
 # Multimodal ingestion (mixed assets → normalized text corpus). Text-layer formats
