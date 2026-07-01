@@ -1083,10 +1083,35 @@ def _forward_to_upstream(messages: list[dict], req: ChatCompletionReq) -> tuple[
     return answer, data.get("usage", {}), data.get("model", _UPSTREAM_MODEL or _SHIM_MODEL_ID)
 
 
+# Recent conversation signatures — an identical conversation re-sent means the user hit
+# "regenerate" (the last answer was unsatisfactory). Bounded to avoid unbounded growth.
+_shim_seen: dict[int, bool] = {}
+
+
+def _infer_feedback(req: "ChatCompletionReq", request_text: str) -> None:
+    """Turn LibreChat's real behaviour into the app's NATIVE reward — no UI patch needed:
+      • the user asked a NEW question after a prior answer → that prior turn was KEPT;
+      • the exact conversation was re-sent (Regenerate) → that answer was REGENERATED.
+    These implicit signals are the primary learning path (the LLM judge is only a bootstrap)."""
+    user_msgs = [m for m in req.messages if m.role == "user"]
+    assistant_msgs = [m for m in req.messages if m.role == "assistant"]
+    if len(user_msgs) >= 2 and assistant_msgs:            # a completed prior turn the user moved on from
+        prior = user_msgs[-2].content
+        if prior and prior != request_text:
+            librechat.record_feedback(prior, "kept")
+    key = hash(tuple((m.role, m.content) for m in req.messages))
+    if _shim_seen.get(key):                               # identical conversation re-sent → Regenerate
+        librechat.record_feedback(request_text, "regenerated")
+    if len(_shim_seen) > 512:
+        _shim_seen.clear()
+    _shim_seen[key] = True
+
+
 def _chat_core(req: ChatCompletionReq) -> dict:
-    """The self-learning chat turn: retrieve → augment → answer → judge → learn."""
+    """The self-learning chat turn: infer native feedback → retrieve → augment → answer."""
     user_msgs = [m for m in req.messages if m.role == "user"]
     request_text = user_msgs[-1].content if user_msgs else ""
+    _infer_feedback(req, request_text)                           # native implicit reward (primary)
     ctx = librechat.retrieve(request_text)                       # learned retrieval strategy
     system = ("You are a helpful assistant. Answer using the RETRIEVED CONTEXT below when "
               "relevant, citing [n]. If it is insufficient, say so.\n\n"
