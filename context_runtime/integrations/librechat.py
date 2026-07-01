@@ -85,14 +85,19 @@ def llm_judge(model) -> Judge:
             "on-topic, 0.0 = irrelevant/empty). Reply with ONLY the number.\n\n"
             f"USER REQUEST:\n{request}\n\nRETRIEVED CONTEXT:\n{context[:2000]}\n\nSCORE:")
         from ..types import ModelRequest
-        # Reasoning models (e.g. kimi-k2.6) emit reasoning before the answer and return
-        # empty content when max_tokens is tiny — reasoning grows with context size, so
-        # give ample headroom for the number to land after the reasoning.
+        # Reasoning models (e.g. kimi-k2.6) emit reasoning before the answer and can
+        # exhaust max_tokens mid-reasoning, returning EMPTY content — and reasoning
+        # length is non-deterministic. Give ample headroom and retry on an empty reply
+        # so a transient over-reason doesn't silently score 0.
         import os
-        budget = int(os.getenv("CR_JUDGE_MAX_TOKENS", "1024"))
-        result = model.complete(ModelRequest(messages=[{"role": "user", "content": prompt}],
-                                              capability="judge", max_tokens=budget))
-        return _parse_score(result.text)
+        budget = int(os.getenv("CR_JUDGE_MAX_TOKENS", "2048"))
+        attempts = int(os.getenv("CR_JUDGE_RETRIES", "2"))
+        for _ in range(max(1, attempts)):
+            result = model.complete(ModelRequest(messages=[{"role": "user", "content": prompt}],
+                                                 capability="judge", max_tokens=budget))
+            if (result.text or "").strip():
+                return _parse_score(result.text)
+        return 0.0
     return _judge
 
 
