@@ -1,0 +1,43 @@
+# Quick LibreChat deployment wired to the Context Runtime self-learning shim.
+#
+# Minimal stack: LibreChat `api` + `mongodb` only (the fork's full compose also runs
+# meilisearch/pgvector/rag-api/ollama — not needed for the Context Runtime endpoint).
+# LibreChat talks to the Context Runtime control plane's OpenAI-compatible shim (/v1),
+# so every chat turn retrieves context (a learned strategy), answers, and learns.
+#
+# Run the control plane separately (host or container), pointed at a built corpus:
+#   CR_CORPUS_DIR=/path/to/corpus \
+#   uvicorn context_runtime.control_plane.app:app --host 0.0.0.0 --port 8091
+# Optionally set CR_UPSTREAM_BASE_URL/CR_UPSTREAM_API_KEY/CR_UPSTREAM_MODEL to forward
+# to a real model (Kimi/Groq/Ollama); offline it answers from the retrieved context.
+#
+# Then:  CONTEXT_RUNTIME_URL=http://host.docker.internal:8091 docker compose up -d
+# Open http://localhost:3080 → pick the "Context Runtime (self-learning RAG)" endpoint.
+
+services:
+  api:
+    image: ghcr.io/danny-avila/librechat-dev:latest
+    ports:
+      - "3080:3080"
+    depends_on:
+      - mongodb
+    environment:
+      - HOST=0.0.0.0
+      - MONGO_URI=mongodb://mongodb:27017/LibreChat
+      - CONFIG_PATH=/app/librechat.yaml
+      # the Context Runtime control-plane base (its /v1 shim). host.docker.internal lets
+      # the container reach a control plane running on the host.
+      - CONTEXT_RUNTIME_URL=${CONTEXT_RUNTIME_URL:-http://host.docker.internal:8091}
+      - CONTEXT_RUNTIME_API_KEY=${CONTEXT_RUNTIME_API_KEY:-context-runtime}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./librechat.yaml:/app/librechat.yaml:ro
+
+  mongodb:
+    image: mongo:7
+    volumes:
+      - mongodb_data:/data/db
+
+volumes:
+  mongodb_data:

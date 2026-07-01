@@ -1,0 +1,21 @@
+# Minimal LibreChat config exposing only the Context Runtime self-learning endpoint.
+# (The full fork config lives in the LibreChat repo; this is the quick-deploy subset.)
+version: 1.2.1
+cache: true
+
+endpoints:
+  custom:
+    # Every chat turn → Context Runtime plans + retrieves context (learned strategy),
+    # injects it, answers, then judges retrieval quality and learns. Points at the
+    # control plane's OpenAI-compatible shim (/v1).
+    - name: "Context Runtime"
+      apiKey: "${CONTEXT_RUNTIME_API_KEY}"
+      baseURL: "${CONTEXT_RUNTIME_URL}/v1"
+      models:
+        default:
+          - "context-runtime"
+        fetch: true
+      titleConvo: true
+      titleModel: "context-runtime"
+      summarize: false
+      modelDisplayLabel: "Context Runtime (self-learning RAG)"
