@@ -916,7 +916,20 @@ def vibex_scoreboard() -> dict:
 # ──────────────────────────── LibreChat — self-learning retrieval (LLM-judged) ────────────────────────────
 from ..integrations.librechat import LibreChatTenant   # noqa: E402
 
+# Opt into deterministic semantic retrieval (embeddings ⊕ BM25) when CR_EMBEDDINGS=1 and
+# the [embeddings] extra is installed — otherwise pure BM25. Embedding the corpus at index
+# time is costly, so it's opt-in.
+_lc_retriever = None
+if os.getenv("CR_EMBEDDINGS") == "1":
+    try:
+        from ..adapters.store_semantic import HybridRetriever, embeddings_available
+        if embeddings_available():
+            _lc_retriever = HybridRetriever()
+    except Exception:
+        _lc_retriever = None
+
 librechat = LibreChatTenant(runtime=fleet.runtime,   # shares the fleet cost model + persists its policy
+                            retriever=_lc_retriever,
                             persist_path=str(fleet.home / "librechat_bandit.json"))
 _lc_corpus = os.getenv("CR_CORPUS_DIR", "")
 if _lc_corpus and os.path.isdir(_lc_corpus):
