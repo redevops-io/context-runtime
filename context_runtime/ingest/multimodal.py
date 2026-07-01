@@ -221,10 +221,38 @@ def _safe_id(rel: str, n: int) -> str:
     return f"{n:04d}_{stem[:80]}"
 
 
+def chunk_text(text: str, size: int, overlap: int = 120) -> list[str]:
+    """Split text into ~size-char passages on paragraph boundaries (deterministic).
+    Focused passages let the retriever surface the right lab panel instead of a whole
+    multi-panel document. size <= 0 disables chunking (one passage = the whole doc)."""
+    text = text.strip()
+    if size <= 0 or len(text) <= size:
+        return [text] if text else []
+    paras = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
+    chunks: list[str] = []
+    cur = ""
+    for para in paras:
+        if len(para) > size:  # a huge paragraph — hard-split it
+            for i in range(0, len(para), size - overlap):
+                piece = para[i:i + size]
+                if piece.strip():
+                    chunks.append(piece.strip())
+            continue
+        if cur and len(cur) + len(para) + 2 > size:
+            chunks.append(cur.strip())
+            cur = (cur[-overlap:] + "\n\n" + para) if overlap else para  # carry a little context
+        else:
+            cur = (cur + "\n\n" + para) if cur else para
+    if cur.strip():
+        chunks.append(cur.strip())
+    return chunks or ([text] if text else [])
+
+
 def build_corpus(sources: list[str], out_dir: str, *, follow_symlinks: bool = True,
-                 limit: int | None = None, verbose: bool = False) -> CorpusStats:
-    """Walk `sources`, extract each asset to text, and write `<out_dir>/<id>.txt`
-    (with a provenance header) + `<out_dir>/manifest.jsonl`. Returns build stats."""
+                 limit: int | None = None, chunk_chars: int = 900, verbose: bool = False) -> CorpusStats:
+    """Walk `sources`, extract each asset to text, split into ~chunk_chars passages, and
+    write one `<out_dir>/<id>.txt` per passage (with a provenance header) +
+    `<out_dir>/manifest.jsonl`. chunk_chars<=0 keeps one passage per document."""
     ex = Extractors()
     stats = CorpusStats(out_dir=out_dir, availability=_availability(ex).as_dict())
     out = Path(out_dir)
@@ -265,15 +293,21 @@ def build_corpus(sources: list[str], out_dir: str, *, follow_symlinks: bool = Tr
             stats.asr_used += 1
         n += 1
         doc_id = _safe_id(label, n)
-        header = f"[source: {label} · kind: {kind}]\n\n"
-        (out / f"{doc_id}.txt").write_text(header + text, encoding="utf-8")
-        manifest.write(json.dumps({
-            "id": doc_id, "source": label, "kind": kind,
-            "chars": len(text), "path": abs_path,
-        }, ensure_ascii=False) + "\n")
-        stats.written += 1
+        passages = chunk_text(text, chunk_chars)
+        multi = len(passages) > 1
+        for pi, passage in enumerate(passages):
+            cid = f"{doc_id}_p{pi:02d}" if multi else doc_id
+            tag = f" · passage {pi + 1}/{len(passages)}" if multi else ""
+            header = f"[source: {label} · kind: {kind}{tag}]\n\n"
+            (out / f"{cid}.txt").write_text(header + passage, encoding="utf-8")
+            manifest.write(json.dumps({
+                "id": cid, "source": label, "kind": kind, "passage": pi,
+                "chars": len(passage), "path": abs_path,
+            }, ensure_ascii=False) + "\n")
+            stats.written += 1
+        stats.by_kind[kind + "_chunks"] = stats.by_kind.get(kind + "_chunks", 0) + len(passages)
         if verbose:
-            print(f"  {kind:6} {len(text):>7} chars  {label}")
+            print(f"  {kind:6} {len(text):>7} chars → {len(passages):>3} passage(s)  {label}")
 
     manifest.close()
     return stats
@@ -285,9 +319,12 @@ def _main(argv: list[str] | None = None) -> int:
     ap.add_argument("sources", nargs="+", help="files or folders to ingest")
     ap.add_argument("--out", required=True, help="output corpus directory")
     ap.add_argument("--limit", type=int, default=None, help="cap the number of assets")
+    ap.add_argument("--chunk-chars", type=int, default=900,
+                    help="passage size in chars (0 = one passage per document)")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args(argv)
-    stats = build_corpus(args.sources, args.out, limit=args.limit, verbose=args.verbose)
+    stats = build_corpus(args.sources, args.out, limit=args.limit,
+                         chunk_chars=args.chunk_chars, verbose=args.verbose)
     print(json.dumps(stats.as_dict(), indent=2, ensure_ascii=False))
     return 0
 
