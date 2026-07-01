@@ -1036,10 +1036,16 @@ def _forward_to_upstream(messages: list[dict], req: ChatCompletionReq) -> tuple[
                  "No relevant context was retrieved for this request."
         return answer, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, _SHIM_MODEL_ID
     payload = {"model": _UPSTREAM_MODEL or _SHIM_MODEL_ID, "messages": messages, "stream": False}
-    if req.temperature is not None:
+    # Reasoning upstreams (e.g. kimi-k2.6) need a temperature the model accepts and enough
+    # max_tokens to finish reasoning AND write the answer — LibreChat's own params are often
+    # too small (→ empty content). Enforce a configurable floor + optional temperature.
+    floor = int(os.getenv("CR_UPSTREAM_MAX_TOKENS", "2048"))
+    payload["max_tokens"] = max(req.max_tokens or 0, floor)
+    temp_override = os.getenv("CR_UPSTREAM_TEMPERATURE")
+    if temp_override:
+        payload["temperature"] = float(temp_override)
+    elif req.temperature is not None:
         payload["temperature"] = req.temperature
-    if req.max_tokens is not None:
-        payload["max_tokens"] = req.max_tokens
     headers = {"Authorization": f"Bearer {_UPSTREAM_KEY}"} if _UPSTREAM_KEY else {}
     with httpx.Client(timeout=90) as client:
         r = client.post(f"{_UPSTREAM_BASE}/chat/completions", json=payload, headers=headers)
