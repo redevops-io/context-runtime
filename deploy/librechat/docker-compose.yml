@@ -34,7 +34,8 @@ services:
       - CREDS_IV=${CREDS_IV:-a1b2c3d4e5f60718293a4b5c6d7e8f90}
       # the Context Runtime control-plane base (its /v1 shim). host.docker.internal lets
       # the container reach a control plane running on the host.
-      - CONTEXT_RUNTIME_URL=${CONTEXT_RUNTIME_URL:-http://host.docker.internal:8091}
+      - CONTEXT_RUNTIME_URL=${CONTEXT_RUNTIME_URL:-http://host.docker.internal:8092}
+      - CONTEXT_RUNTIME_GO_URL=${CONTEXT_RUNTIME_GO_URL:-http://host.docker.internal:8093}
       - CONTEXT_RUNTIME_API_KEY=${CONTEXT_RUNTIME_API_KEY:-context-runtime}
     extra_hosts:
       - "host.docker.internal:host-gateway"
