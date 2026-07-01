@@ -83,10 +83,15 @@ def llm_judge(model) -> Judge:
             "REQUEST and the CONTEXT the system retrieved, rate from 0.0 to 1.0 how well "
             "the context lets an assistant answer the request (1.0 = fully sufficient and "
             "on-topic, 0.0 = irrelevant/empty). Reply with ONLY the number.\n\n"
-            f"USER REQUEST:\n{request}\n\nRETRIEVED CONTEXT:\n{context[:4000]}\n\nSCORE:")
+            f"USER REQUEST:\n{request}\n\nRETRIEVED CONTEXT:\n{context[:2000]}\n\nSCORE:")
         from ..types import ModelRequest
+        # Reasoning models (e.g. kimi-k2.6) emit reasoning before the answer and return
+        # empty content when max_tokens is tiny — reasoning grows with context size, so
+        # give ample headroom for the number to land after the reasoning.
+        import os
+        budget = int(os.getenv("CR_JUDGE_MAX_TOKENS", "1024"))
         result = model.complete(ModelRequest(messages=[{"role": "user", "content": prompt}],
-                                              capability="judge", max_tokens=8))
+                                              capability="judge", max_tokens=budget))
         return _parse_score(result.text)
     return _judge
 
