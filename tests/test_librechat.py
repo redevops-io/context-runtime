@@ -85,3 +85,34 @@ def test_handle_runs_retrieve_judge_learn_in_one_call(tmp_path):
     ctx, score, reward = t.handle("lipid profile cholesterol LDL")
     assert ctx.hits and 0.0 <= score <= 1.0 and reward >= 0.0
     assert t.policy(), "handle() should have updated the policy"
+
+
+def test_implicit_feedback_learns_from_native_signals(tmp_path):
+    """The app's native implicit signal (kept/regenerated) is the primary online reward —
+    no LLM judge in the loop."""
+    from context_runtime.integrations.librechat import DEFAULT_STRATEGIES, LibreChatTenant
+
+    t = LibreChatTenant(corpus_dir=_corpus(tmp_path))
+    request = "steroid profile testosterone results"
+    latent = DEFAULT_STRATEGIES[2].key  # the strategy users "keep"
+
+    for _ in range(60):
+        ctx = t.retrieve(request)
+        # a user keeps the answer when the good strategy was used, else regenerates.
+        signal = "kept" if ctx.strategy.key == latent else "regenerated"
+        r = t.record_feedback(request, signal)
+        assert r >= 0.0
+    assert t.suggest(request) == latent, f"learned {t.suggest(request)}, want {latent}"
+
+
+def test_feedback_maps_signals_to_rewards(tmp_path):
+    from context_runtime.integrations.librechat import SIGNAL_REWARDS, LibreChatTenant
+    t = LibreChatTenant(corpus_dir=_corpus(tmp_path))
+    t.retrieve("lipid panel")
+    up = t.record_feedback("lipid panel", "thumbs_up")
+    t.retrieve("lipid panel")
+    down = t.record_feedback("lipid panel", "thumbs_down")
+    assert up > down                    # a kept/thumbs-up answer rewards higher than a regenerate
+    assert SIGNAL_REWARDS["thumbs_up"] > SIGNAL_REWARDS["regenerated"]
+    # an unknown request (never retrieved) yields no update.
+    assert t.record_feedback("never asked", "kept") == 0.0

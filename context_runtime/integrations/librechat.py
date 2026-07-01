@@ -53,6 +53,16 @@ DEFAULT_STRATEGIES: tuple[RetrievalStrategy, ...] = (
 
 COST_LAMBDA = 0.15   # how much retrieval cost trades against judged quality
 
+# Implicit user actions → a retrieval-quality score in [0,1]. This is the app's NATIVE
+# success signal (the fleet-pattern reward): a kept/thumbs-up answer means the retrieved
+# context was good; a regenerate/thumbs-down means it wasn't. Cheaper, truer, and
+# deterministic vs. an LLM judge — which becomes only a cold-start bootstrap.
+SIGNAL_REWARDS: dict[str, float] = {
+    "thumbs_up": 1.0, "kept": 0.9, "copied": 0.9, "accepted": 0.9, "cited": 0.9,
+    "follow_up": 0.6, "edited": 0.5, "neutral": 0.5,
+    "regenerated": 0.15, "abandoned": 0.1, "thumbs_down": 0.0, "rejected": 0.0,
+}
+
 
 # ──────────────────────────── the LLM judge (the reward signal) ────────────────────────────
 
@@ -153,6 +163,7 @@ class LibreChatTenant:
         self.bandit = bandit or EpsilonGreedyBandit(strategies, epsilon=0.12, persist_path=persist_path)
         self.judge = judge or heuristic_judge
         self._pending: dict[str, tuple[Plan, RetrievalStrategy]] = {}
+        self._last: dict[str, tuple[Plan, RetrievalStrategy]] = {}   # for late implicit feedback
 
     def ingest(self, corpus_dir: str) -> dict:
         """Index (more of) the corpus into the retriever."""
@@ -160,29 +171,46 @@ class LibreChatTenant:
 
     def retrieve(self, request: str) -> ChatContext:
         """Plan the request, let the bandit pick a strategy, and retrieve context.
-        No judging yet — call record_judgment (or handle) to close the loop."""
+        No judging yet — call record_feedback (native signal) or record_judgment (bootstrap)."""
         plan = self.runtime.plan(Goal(text=request))
         strategy = self.bandit.select(plan.intent.bucket)
         hits = tuple(self.retriever.search(request, k=strategy.final_k, method=strategy.method))
         if strategy.rerank:
             hits = hits[:strategy.final_k]
         context = "\n\n".join(f"[{i+1}] {h.text}" for i, h in enumerate(hits))
-        self._pending[self._key(request)] = (plan, strategy)
+        key = self._key(request)
+        self._pending[key] = (plan, strategy)
+        self._last[key] = (plan, strategy)   # persists so implicit feedback can arrive later
         return ChatContext(request, strategy, hits, context, plan)
 
-    def record_judgment(self, request: str, score: float) -> float:
-        """Feed the judged retrieval quality (0..1) back: the policy learns which strategy
-        yields the best-judged context for this kind of request. Returns the reward."""
-        key = self._key(request)
-        if key not in self._pending:
+    def record_feedback(self, request: str, signal: str) -> float:
+        """Learn from an IMPLICIT user action (kept / regenerated / thumbs_up / …) — the
+        app's NATIVE success signal. This is the primary online reward (cheaper, truer, and
+        deterministic vs. an LLM judge, which is now only a cold-start bootstrap)."""
+        entry = self._last.get(self._key(request))
+        if entry is None:
             return 0.0
-        plan, strategy = self._pending.pop(key)
+        plan, strategy = entry
+        return self._learn(request, plan, strategy, SIGNAL_REWARDS.get(signal, 0.5))
+
+    def _learn(self, request: str, plan: Plan, strategy: RetrievalStrategy, score: float) -> float:
         reward = reward_from_judgment(score, strategy, self.strategies)
         self.bandit.update(plan.intent.bucket, strategy, reward)
         self.runtime.estimator.observe(plan, Trace(
             plan_id=plan.id, goal_text=request, actual_tokens=strategy.final_k * 200,
             verification_passed=score >= 0.6))
         return reward
+
+    def record_judgment(self, request: str, score: float) -> float:
+        """Feed a judged retrieval-quality score (0..1) back — used for the offline
+        heuristic/LLM cold-start BOOTSTRAP. Prefer record_feedback (the app's native
+        implicit signal) for online learning."""
+        key = self._key(request)
+        entry = self._pending.pop(key, None) or self._last.get(key)
+        if entry is None:
+            return 0.0
+        plan, strategy = entry
+        return self._learn(request, plan, strategy, score)
 
     def handle(self, request: str, judge: Judge | None = None) -> tuple[ChatContext, float, float]:
         """Retrieve → judge → learn, in one call. Returns (context, judged_score, reward)."""

@@ -970,6 +970,21 @@ def librechat_judge(req: LcJudgeReq) -> dict:
     return {"reward": reward, "suggestion": librechat.suggest(req.request), "policy": librechat.policy()}
 
 
+class LcFeedbackReq(BaseModel):
+    request: str
+    signal: str   # thumbs_up | kept | copied | regenerated | thumbs_down | edited | …
+
+
+@app.post("/librechat/feedback", dependencies=[Depends(require_api_key)])
+def librechat_feedback(req: LcFeedbackReq) -> dict:
+    """The app's NATIVE reward: map a user action (kept / regenerated / thumbs / …) to a
+    retrieval-quality signal so the policy learns from REAL usage — no LLM in the loop.
+    This is the primary online learning path; /librechat/judge is a cold-start bootstrap."""
+    reward = librechat.record_feedback(req.request, req.signal)
+    return {"signal": req.signal, "reward": reward,
+            "suggestion": librechat.suggest(req.request), "policy": librechat.policy()}
+
+
 @app.post("/librechat/chat", dependencies=[Depends(require_api_key)])
 def librechat_chat(req: LcRetrieveReq) -> dict:
     """Self-contained loop: retrieve → (offline heuristic) judge → learn, in one call."""
