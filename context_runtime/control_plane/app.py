@@ -983,3 +983,112 @@ def librechat_chat(req: LcRetrieveReq) -> dict:
 def librechat_policy() -> dict:
     """The retrieval strategy LibreChat has learned per request-type."""
     return {"policy": librechat.policy()}
+
+
+# ──────────────────────────── OpenAI-compatible shim (LibreChat self-learning bridge) ────────────────────────────
+# LibreChat (and any OpenAI-compatible client) points a custom endpoint at /v1 here.
+# Every chat turn: Context Runtime plans + retrieves context for the user's message
+# (its learned strategy), injects it, forwards to an upstream model (or answers from the
+# context), then judges retrieval quality and learns — so the DEPLOYED chat app becomes
+# a self-learning Context Runtime tenant. Config via env:
+#   CR_UPSTREAM_BASE_URL / CR_UPSTREAM_API_KEY / CR_UPSTREAM_MODEL  (OpenAI-compatible upstream)
+import json  # noqa: E402
+import time as _time  # noqa: E402
+
+from fastapi.responses import StreamingResponse  # noqa: E402
+
+from ..integrations.librechat import heuristic_judge as _heuristic_judge  # noqa: E402
+
+_UPSTREAM_BASE = os.getenv("CR_UPSTREAM_BASE_URL", "").rstrip("/")
+_UPSTREAM_KEY = os.getenv("CR_UPSTREAM_API_KEY", "")
+_UPSTREAM_MODEL = os.getenv("CR_UPSTREAM_MODEL", "")
+_SHIM_MODEL_ID = os.getenv("CR_SHIM_MODEL_ID", "context-runtime")
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str = ""
+
+
+class ChatCompletionReq(BaseModel):
+    model: str = _SHIM_MODEL_ID
+    messages: list[ChatMessage]
+    stream: bool = False
+    temperature: float | None = None
+    max_tokens: int | None = None
+
+
+@app.get("/v1/models")
+def v1_models() -> dict:
+    """OpenAI-compatible model list — LibreChat populates its model dropdown from this."""
+    return {"object": "list", "data": [
+        {"id": _SHIM_MODEL_ID, "object": "model", "created": int(_time.time()), "owned_by": "context-runtime"}]}
+
+
+def _forward_to_upstream(messages: list[dict], req: ChatCompletionReq) -> tuple[str, dict, str]:
+    """Forward the augmented messages to an OpenAI-compatible upstream. Returns
+    (answer, usage, model_name). Falls back to a grounded extractive answer offline."""
+    if not _UPSTREAM_BASE:
+        # offline / no upstream: answer straight from the retrieved context (grounded stub)
+        ctx_preamble = next((m["content"] for m in messages if m["role"] == "system"), "")
+        body = ctx_preamble.split("RETRIEVED CONTEXT:", 1)[-1].strip()
+        answer = ("Based on the retrieved context:\n\n" + body[:1200]) if body else \
+                 "No relevant context was retrieved for this request."
+        return answer, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, _SHIM_MODEL_ID
+    payload = {"model": _UPSTREAM_MODEL or _SHIM_MODEL_ID, "messages": messages, "stream": False}
+    if req.temperature is not None:
+        payload["temperature"] = req.temperature
+    if req.max_tokens is not None:
+        payload["max_tokens"] = req.max_tokens
+    headers = {"Authorization": f"Bearer {_UPSTREAM_KEY}"} if _UPSTREAM_KEY else {}
+    with httpx.Client(timeout=90) as client:
+        r = client.post(f"{_UPSTREAM_BASE}/chat/completions", json=payload, headers=headers)
+        r.raise_for_status()
+        data = r.json()
+    answer = (data.get("choices") or [{}])[0].get("message", {}).get("content", "") or ""
+    return answer, data.get("usage", {}), data.get("model", _UPSTREAM_MODEL or _SHIM_MODEL_ID)
+
+
+def _chat_core(req: ChatCompletionReq) -> dict:
+    """The self-learning chat turn: retrieve → augment → answer → judge → learn."""
+    user_msgs = [m for m in req.messages if m.role == "user"]
+    request_text = user_msgs[-1].content if user_msgs else ""
+    ctx = librechat.retrieve(request_text)                       # learned retrieval strategy
+    system = ("You are a helpful assistant. Answer using the RETRIEVED CONTEXT below when "
+              "relevant, citing [n]. If it is insufficient, say so.\n\n"
+              f"RETRIEVED CONTEXT:\n{ctx.context[:6000]}")
+    fwd = [{"role": "system", "content": system}] + [m.model_dump() for m in req.messages]
+    answer, usage, model_name = _forward_to_upstream(fwd, req)
+    score = _heuristic_judge(request_text, ctx.context, ctx.hits)  # retrieval-quality reward
+    reward = librechat.record_judgment(request_text, score)
+    return {
+        "id": f"chatcmpl-{ctx.plan.id}", "object": "chat.completion", "created": int(_time.time()),
+        "model": model_name,
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": answer}, "finish_reason": "stop"}],
+        "usage": usage or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "context_runtime": {
+            "strategy": ctx.strategy.key, "retrieval_score": round(score, 4), "reward": reward,
+            "citations": [h.chunk_id for h in ctx.hits], "suggestion": librechat.suggest(request_text),
+        },
+    }
+
+
+@app.post("/v1/chat/completions")
+def v1_chat_completions(req: ChatCompletionReq):
+    """OpenAI-compatible chat completions — the LibreChat self-learning entry point."""
+    result = _chat_core(req)
+    if not req.stream:
+        return result
+    # minimal SSE stream: one content delta + the final stop, OpenAI delta format.
+    def _sse():
+        content = result["choices"][0]["message"]["content"]
+        base = {"id": result["id"], "object": "chat.completion.chunk", "created": result["created"],
+                "model": result["model"]}
+        first = {**base, "choices": [{"index": 0, "delta": {"role": "assistant", "content": content},
+                                      "finish_reason": None}]}
+        yield f"data: {json.dumps(first, ensure_ascii=False)}\n\n"
+        last = {**base, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                "context_runtime": result["context_runtime"]}
+        yield f"data: {json.dumps(last, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+    return StreamingResponse(_sse(), media_type="text/event-stream")
