@@ -19,3 +19,7 @@ venv/
 
 # Local env
 .env
+
+# sidekick orchestrator working dirs
+.sidekick/
+.sidekick-*/
