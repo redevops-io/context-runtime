@@ -60,7 +60,10 @@ from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
 _cors = os.environ.get(
     "CR_CORS_ORIGINS",
-    "https://vibexgen.io,https://www.vibexgen.io,http://localhost:5173,http://localhost:8080",
+    # vibexgen origins + LibreChat (the retrieval-comparison panel fetches /librechat/compare
+    # from the browser at :3080, so its origin must be allowed or the panel silently hides).
+    "https://vibexgen.io,https://www.vibexgen.io,http://localhost:5173,http://localhost:8080,"
+    "http://localhost:3080,http://127.0.0.1:3080",
 ).split(",")
 app.add_middleware(
     CORSMiddleware, allow_origins=[o.strip() for o in _cors if o.strip()],
