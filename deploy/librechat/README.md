@@ -74,3 +74,18 @@ picks the best method" thesis visible to users.
   on the host). To point it at the Go runtime (8093) or a remote host, set
   `VITE_CR_COMPARE_URL` before building the frontend (or edit the default in
   `RetrievalCompare.tsx`).
+
+## Cross-language search (CR_QUERY_LANGS)
+
+By default retrieval is same-language — an English question won't match a Russian corpus
+(no retrieval method bridges languages). Opt in on the control plane:
+
+```bash
+CR_QUERY_LANGS=ru                     # corpus language(s); "ru" or "ru,en"
+CR_QUERY_XLATE_MODEL=moonshot-v1-8k   # a FAST model for translation (reasoning models take 60s+)
+```
+
+The runtime translates the query's key terms into those languages before retrieving, so
+"any cholesterol results?" surfaces the Russian lipid PDFs (холестерин/липидный профиль).
+Translations are cached (first query per phrase pays the LLM latency, then instant) and
+fail-open. Works for both the chat and the Libre Query Board, on both runtimes.
