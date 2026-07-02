@@ -975,6 +975,19 @@ def librechat_retrieve(req: LcRetrieveReq) -> dict:
             "suggestion": librechat.suggest(req.request)}
 
 
+class LcCompareReq(BaseModel):
+    request: str
+    k: int = 5
+
+
+@app.post("/librechat/compare")
+def librechat_compare(req: LcCompareReq) -> dict:
+    """Retrieval transparency: run every method (bm25/vector/hybrid/community/graph) side by
+    side and report what the learned policy chose + served. Powers the LibreChat comparison
+    panel that shows users WHY Context Runtime's answer is better than any single method."""
+    return librechat.compare(req.request, k=max(1, min(req.k, 10)))
+
+
 @app.post("/librechat/judge", dependencies=[Depends(require_api_key)])
 def librechat_judge(req: LcJudgeReq) -> dict:
     """Close the loop: an external LLM judge posts the retrieval-quality score (0..1) for

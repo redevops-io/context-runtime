@@ -16,7 +16,15 @@
 
 services:
   api:
-    image: ghcr.io/danny-avila/librechat-dev:latest
+    # Deep-fork build: builds LibreChat from the local fork so the Context Runtime
+    # retrieval-comparison panel (client/src/components/Chat/Input/RetrievalCompare.tsx,
+    # rendered under the chat box by ChatView.tsx) is baked into the frontend bundle.
+    # First build is slow (full node build); rebuild only when the fork changes.
+    # To drop the panel, comment `build:` out and restore the prebuilt `image:` below.
+    build:
+      context: ../../../LibreChat
+      dockerfile: Dockerfile
+    # image: ghcr.io/danny-avila/librechat-dev:latest   # ← prebuilt image (no panel)
     ports:
       - "3080:3080"
     depends_on:

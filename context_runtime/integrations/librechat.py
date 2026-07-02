@@ -53,6 +53,9 @@ DEFAULT_STRATEGIES: tuple[RetrievalStrategy, ...] = (
     RetrievalStrategy("community", 4, False),  # global/broad (aggregation questions)
 )
 
+# The retrieval methods the transparency view (compare()) runs side-by-side.
+COMPARE_METHODS = ("bm25", "vector", "hybrid", "community", "graph")
+
 COST_LAMBDA = 0.15   # how much retrieval cost trades against judged quality
 
 # Implicit user actions → a retrieval-quality score in [0,1]. This is the app's NATIVE
@@ -184,6 +187,36 @@ class LibreChatTenant:
         self._pending[key] = (plan, strategy)
         self._last[key] = (plan, strategy)   # persists so implicit feedback can arrive later
         return ChatContext(request, strategy, hits, context, plan)
+
+    def compare(self, request: str, k: int = 5) -> dict:
+        """Retrieval transparency: run EVERY method side-by-side and report what the learned
+        policy actually chose + served. This is the 'show your work' view — it makes the
+        core thesis visible: the runtime evaluates strategies and serves the best one. Read
+        only — no bandit exploration, no state mutation, so it never perturbs learning."""
+        per: dict[str, list[dict]] = {}
+        for m in COMPARE_METHODS:
+            try:
+                hits = self.retriever.search(request, k=k, method=m)
+            except Exception:
+                hits = ()
+            per[m] = [{"chunk_id": h.chunk_id, "filename": h.filename,
+                       "score": round(float(h.score), 4), "snippet": (h.text or "")[:240]}
+                      for h in hits]
+        plan = self.runtime.plan(Goal(text=request))
+        bucket = plan.intent.bucket
+        key = self.bandit.policy().get(bucket)
+        chosen = next((s for s in self.strategies if s.key == key), None) or self.strategies[1]
+        hits = self.retriever.search(request, k=chosen.final_k, method=chosen.method)
+        if chosen.rerank:
+            hits = hits[:chosen.final_k]
+        served = "\n\n".join(f"[{i + 1}] {h.text}" for i, h in enumerate(hits))
+        return {
+            "request": request,
+            "methods": per,
+            "chosen": {"key": chosen.key, "method": chosen.method, "final_k": chosen.final_k,
+                       "rerank": chosen.rerank, "bucket": bucket, "learned": key is not None},
+            "served": {"context": served[:4000], "citations": [h.chunk_id for h in hits]},
+        }
 
     def record_feedback(self, request: str, signal: str) -> float:
         """Learn from an IMPLICIT user action (kept / regenerated / thumbs_up / …) — the

@@ -56,3 +56,21 @@ and chat. Watch the policy learn: `GET http://localhost:8091/librechat/policy`.
 
 The same custom endpoint is also registered in the full fork config
 (`LibreChat/librechat.yaml`) for deploying alongside its other endpoints.
+
+## Retrieval-comparison panel (transparency)
+
+The fork adds a **Context Runtime panel under the chat box** that, for each request,
+shows what BM25 / vector / hybrid / community / graph retrieval each return side by side
+and highlights the strategy the learned policy actually served — making the "the runtime
+picks the best method" thesis visible to users.
+
+- Frontend: `LibreChat/client/src/components/Chat/Input/RetrievalCompare.tsx`, rendered by
+  `ChatView.tsx` under `<ChatForm>`.
+- Data: read-only `POST /librechat/compare {request,k}` on the control plane (both the
+  Python and Go runtimes implement it). CORS is already open on both.
+- Because it's a frontend change, LibreChat must be **built from the fork** — the compose
+  now uses `build:` instead of the prebuilt image (`docker compose up -d --build`).
+- The panel calls `http://localhost:8092/librechat/compare` by default (the browser runs
+  on the host). To point it at the Go runtime (8093) or a remote host, set
+  `VITE_CR_COMPARE_URL` before building the frontend (or edit the default in
+  `RetrievalCompare.tsx`).
