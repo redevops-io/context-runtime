@@ -7,13 +7,22 @@ replayable plan, and **learns from the outcome**. It does for AI context what qu
 planners did for SQL. See [POSITIONING.md](./POSITIONING.md) for the thesis.
 
 It optimizes any app with (a) a decision point about what context/config to use and
-(b) a measurable outcome. Two tenants are built and green:
+(b) a measurable outcome. Eleven tenants are built and green (each number is the
+learned-vs-baseline reward its offline `examples/<tenant>.py` prints):
 
 | Tenant | Context Runtime tunes | Result |
 |---|---|---|
 | **sidekick** | which skills to recall · budget | drop-in for `SkillStore`; **67% vs 33%** naive baseline acceptance |
 | **redevops-rag** | `pool · limit · threshold · rerank …` per query | `ContextRuntimeRetrieverTuner`; **0.773 vs 0.323** vs fixed default |
 | **edge-sentinel (SOC)** | which sources to pull per alert (CrowdSec · threat-intel · EDR) | tool-using + approval-gated; **0.900 vs 0.800** always-full baseline |
+| **growth-engine** | which attribution window + source bundle per lead-source query | **7.851 vs 5.282** vs fixed window |
+| **control-tower** | which Metabase query set per "ask anything" question | **5.326 vs 1.643** vs core query set |
+| **agentic-billing** | which usage/invoice/dunning signals to pull per account | **4.122 vs 2.442** vs full-stack |
+| **social-autopilot** | which channel/timing/content strategy per goal | **3.875 vs 0.773** vs fixed strategy |
+| **agentic-support** | which KB/tickets/account context to retrieve per ticket | **3.679 vs 2.394** vs full-context |
+| **agentic-books** | which ledgers/reports to pull per books question | **3.632 vs 2.430** vs full-books |
+| **market-radar** | which competitor watches to sweep per intel question | **3.611 vs 0.403** vs full-sweep |
+| **agentic-compliance** | which rule-family evidence to pull per finding | **3.562 vs 2.463** vs full-evidence |
 
 ```bash
 PYTHONPATH=. python examples/sidekick_learning.py   # discrete-strategy bandit
