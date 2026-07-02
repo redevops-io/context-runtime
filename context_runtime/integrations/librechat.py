@@ -40,7 +40,8 @@ class RetrievalStrategy:
 
     def cost_units(self) -> float:
         # deeper retrieval + a rerank pass cost more; the frontier is cheapest-good-enough.
-        return self.final_k / 5.0 + (0.8 if self.rerank else 0.0) + (0.4 if self.method == "graph" else 0.0)
+        extra = 0.4 if self.method == "graph" else (0.3 if self.method == "community" else 0.0)
+        return self.final_k / 5.0 + (0.8 if self.rerank else 0.0) + extra
 
 
 DEFAULT_STRATEGIES: tuple[RetrievalStrategy, ...] = (
@@ -49,6 +50,7 @@ DEFAULT_STRATEGIES: tuple[RetrievalStrategy, ...] = (
     RetrievalStrategy("hybrid", 8, True),     # thorough + rerank
     RetrievalStrategy("vector", 5, False),    # semantic
     RetrievalStrategy("graph", 6, False),     # multi-hop (connective questions)
+    RetrievalStrategy("community", 4, False),  # global/broad (aggregation questions)
 )
 
 COST_LAMBDA = 0.15   # how much retrieval cost trades against judged quality

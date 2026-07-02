@@ -10,14 +10,18 @@ from __future__ import annotations
 from ..types import Hit, PluginInfo, Retrieval
 
 _GRAPH_METHODS = {"graph"}
+_COMMUNITY_METHODS = {"community"}
 
 
 class HopRouterRetriever:
-    def __init__(self, single_hop, graph):
+    def __init__(self, single_hop, graph, community=None):
         self.single_hop = single_hop      # RetrieverPlugin: bm25/vector/hybrid
         self.graph = graph                # RetrieverPlugin: graph/multi-hop
+        self.community = community          # RetrieverPlugin: community/global (optional)
 
     def search(self, query: str, k: int, method: Retrieval = "hybrid") -> list[Hit]:
+        if method in _COMMUNITY_METHODS and self.community is not None:
+            return self.community.search(query, k, method)
         if method in _GRAPH_METHODS:
             return self.graph.search(query, k, method)
         return self.single_hop.search(query, k, method)
@@ -25,11 +29,14 @@ class HopRouterRetriever:
     def index(self, path: str) -> dict:
         a = self.single_hop.index(path) if hasattr(self.single_hop, "index") else {}
         b = self.graph.index(path) if hasattr(self.graph, "index") else {}
-        return {"single_hop": a, "graph": b}
+        out = {"single_hop": a, "graph": b}
+        if self.community is not None and hasattr(self.community, "index"):
+            out["community"] = self.community.index(path)
+        return out
 
     def info(self) -> PluginInfo:
         caps = set()
-        for r in (self.single_hop, self.graph):
-            if hasattr(r, "info"):
+        for r in (self.single_hop, self.graph, self.community):
+            if r is not None and hasattr(r, "info"):
                 caps |= set(r.info().capabilities)
         return PluginInfo(name="hop_router", kind="retriever", capabilities=frozenset(caps))

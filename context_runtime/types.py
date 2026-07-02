@@ -140,7 +140,7 @@ class Plan:
 # ──────────────────────────── §4.4/4.5 retrieval + model ────────────────────────────
 
 Retrieval = Literal[
-    "vector", "bm25", "hybrid", "graph", "sql", "api", "logs", "file", "code",
+    "vector", "bm25", "hybrid", "graph", "community", "sql", "api", "logs", "file", "code",
 ]
 
 
