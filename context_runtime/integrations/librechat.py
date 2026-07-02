@@ -200,7 +200,8 @@ class LibreChatTenant:
             except Exception:
                 hits = ()
             per[m] = [{"chunk_id": h.chunk_id, "filename": h.filename,
-                       "score": round(float(h.score), 4), "snippet": (h.text or "")[:240]}
+                       "score": round(float(h.score), 4), "snippet": (h.text or "")[:240],
+                       "text": (h.text or "")[:1500]}  # full passage for click-to-expand
                       for h in hits]
         plan = self.runtime.plan(Goal(text=request))
         bucket = plan.intent.bucket

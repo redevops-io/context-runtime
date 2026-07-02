@@ -29,8 +29,8 @@ def test_compare_runs_every_method():
     assert bm25 and bm25[0]["chunk_id"] in ("s1", "s2", "s3")
     community = out["methods"]["community"]
     assert community and community[0]["chunk_id"].startswith("community::")
-    # each hit carries the fields the panel renders
-    assert set(bm25[0]) >= {"chunk_id", "filename", "score", "snippet"}
+    # each hit carries the fields the panel renders (incl. full text for click-to-expand)
+    assert set(bm25[0]) >= {"chunk_id", "filename", "score", "snippet", "text"}
 
 
 def test_compare_reports_chosen_and_served():
