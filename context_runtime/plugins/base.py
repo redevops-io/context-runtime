@@ -6,11 +6,13 @@ registration is v1.0.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Protocol, runtime_checkable
 
 from ..types import (
     BuiltContext,
     Candidate,
+    Constraints,
     CostModelStatistics,
     ExecutionGraph,
     Goal,
@@ -22,13 +24,13 @@ from ..types import (
     Plan,
     PlanScore,
     PluginInfo,
+    RawAsset,
     ReasonRequest,
     Retrieval,
     Schedule,
     Trace,
     Verdict,
 )
-from ..types import Constraints
 
 
 @runtime_checkable
@@ -98,6 +100,39 @@ class RetrieverPlugin(Protocol):
 @runtime_checkable
 class StorePlugin(Protocol):
     def index(self, path: str) -> dict: ...
+    def info(self) -> PluginInfo: ...
+
+
+# ──────────────────────────── §4.8 ingestion (source → quality → extract) ────────────────────────────
+
+
+@runtime_checkable
+class SourcePlugin(Protocol):
+    """Where raw data comes from: a local folder, a dlt connector, an API. The
+    connector half of ingestion — it pulls, it does not parse. See sources/."""
+
+    def read(self) -> Iterable[RawAsset]: ...
+    def info(self) -> PluginInfo: ...
+
+
+@runtime_checkable
+class ExtractorPlugin(Protocol):
+    """Turns a RawAsset into normalized text. The parse half of ingestion (PDF→text,
+    OCR, ASR, table recognition). Returns (text, kind); text may be empty when the
+    required backend is absent. See ingest/."""
+
+    def supports(self, asset: RawAsset) -> bool: ...
+    def extract(self, asset: RawAsset) -> tuple[str, str]: ...
+    def info(self) -> PluginInfo: ...
+
+
+@runtime_checkable
+class QualityPlugin(Protocol):
+    """Optional pre-index gate: clean, normalize or reject extracted text before it is
+    chunked and indexed (dedup, boilerplate stripping, LLM/sidekick-driven review).
+    Returns cleaned text, or None to drop the asset. See ingest/quality.py."""
+
+    def review(self, text: str, asset: RawAsset) -> str | None: ...
     def info(self) -> PluginInfo: ...
 
 

@@ -29,6 +29,13 @@ dagster = ["dagster>=1.7"]
 ingest = ["pypdf>=4.0", "python-docx>=1.1", "beautifulsoup4>=4.12", "lxml>=5.0"]
 ingest-multimodal = ["pypdf>=4.0", "python-docx>=1.1", "beautifulsoup4>=4.12", "lxml>=5.0",
                      "rapidocr-onnxruntime>=1.3", "faster-whisper>=1.0"]
+# Data connectors (SourcePlugin) — dlt is a library-shaped, Apache-2.0 connector suite
+# (SQL / REST / filesystem / S3 / SaaS). Connectors run Python-side; the Go runtime
+# consumes the normalized output. Absent this, only the local-folder source is available.
+connectors = ["dlt>=1.0"]
+# OCR + table recognition (ExtractorPlugin) — PaddleOCR/PP-Structure (Apache-2.0). Adds
+# multilingual OCR and lab-table extraction on top of the base rapidocr backend.
+ocr = ["paddleocr>=2.7", "paddlepaddle>=2.6"]
 # Observability export.
 otel = ["opentelemetry-sdk>=1.20"]
 langfuse = ["langfuse>=2.0"]

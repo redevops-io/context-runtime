@@ -47,6 +47,25 @@ class SourceRef:
     version: str | None = None  # content fingerprint → Plan-Cache key (SPEC §7)
 
 
+@dataclass
+class RawAsset:
+    """One unit of data pulled from a SourcePlugin, before extraction (SPEC §4.8).
+
+    A source yields RawAssets (a file on disk, a row from a dlt connector, an API
+    record). An ExtractorPlugin turns each into normalized text; a QualityPlugin may
+    clean or drop it before it is chunked and indexed. Exactly one of ``data`` (raw
+    bytes needing extraction) or ``text`` (already-textual payload) is typically set.
+    """
+
+    id: str                                   # stable id within the source
+    uri: str | None = None                    # where it came from (path/url/table)
+    data: bytes | None = None                 # raw bytes (PDF/image/audio…) to extract
+    text: str | None = None                   # already-textual payload (row/api record)
+    mime: str | None = None                   # hint, e.g. "application/pdf"
+    label: str | None = None                  # human provenance label
+    meta: dict = field(default_factory=dict)  # arbitrary source metadata
+
+
 @dataclass(frozen=True)
 class Goal:
     text: str
@@ -363,6 +382,7 @@ class PluginInfo:
     kind: Literal[
         "model", "reasoner", "store", "retriever", "scheduler", "knowledge",
         "compression", "verifier", "router", "policy", "planner",
+        "source", "extractor", "quality",
     ]
     version: str = "0.1"
     capabilities: frozenset[str] = frozenset()

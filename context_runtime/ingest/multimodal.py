@@ -204,6 +204,7 @@ class CorpusStats:
     out_dir: str
     written: int = 0
     skipped_empty: int = 0
+    dropped_quality: int = 0
     by_kind: dict = field(default_factory=dict)
     ocr_used: int = 0
     asr_used: int = 0
@@ -211,8 +212,8 @@ class CorpusStats:
 
     def as_dict(self) -> dict:
         return {"out_dir": self.out_dir, "written": self.written,
-                "skipped_empty": self.skipped_empty, "by_kind": self.by_kind,
-                "ocr_used": self.ocr_used, "asr_used": self.asr_used,
+                "skipped_empty": self.skipped_empty, "dropped_quality": self.dropped_quality,
+                "by_kind": self.by_kind, "ocr_used": self.ocr_used, "asr_used": self.asr_used,
                 "availability": self.availability}
 
 
@@ -249,68 +250,24 @@ def chunk_text(text: str, size: int, overlap: int = 120) -> list[str]:
 
 
 def build_corpus(sources: list[str], out_dir: str, *, follow_symlinks: bool = True,
-                 limit: int | None = None, chunk_chars: int = 900, verbose: bool = False) -> CorpusStats:
+                 limit: int | None = None, chunk_chars: int = 900, verbose: bool = False,
+                 quality=None) -> CorpusStats:
     """Walk `sources`, extract each asset to text, split into ~chunk_chars passages, and
     write one `<out_dir>/<id>.txt` per passage (with a provenance header) +
-    `<out_dir>/manifest.jsonl`. chunk_chars<=0 keeps one passage per document."""
+    `<out_dir>/manifest.jsonl`. chunk_chars<=0 keeps one passage per document.
+
+    This is now a thin wrapper over the pluggable pipeline: a LocalFolderSource +
+    MultimodalExtractor (+ optional QualityPlugin). Same corpus output as before — the
+    connector/extractor seams are just first-class now."""
+    from ..sources.local import LocalFolderSource
+    from .extractors import MultimodalExtractor
+    from .pipeline import ingest_corpus
+
     ex = Extractors()
-    stats = CorpusStats(out_dir=out_dir, availability=_availability(ex).as_dict())
-    out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    # manifest lives BESIDE the corpus dir, not inside it, so a folder-index (Python or
-    # the Go store) ingests only the extracted .txt docs — never the manifest.
-    manifest = (out.parent / f"{out.name}.manifest.jsonl").open("w", encoding="utf-8")
-
-    files: list[tuple[str, str]] = []  # (abs_path, provenance label)
-    for src in sources:
-        base = Path(src)
-        if base.is_file():
-            files.append((str(base), base.name))
-            continue
-        for p in sorted(base.rglob("*")):
-            try:
-                if p.is_file() or (follow_symlinks and p.is_symlink() and p.resolve().is_file()):
-                    files.append((str(p), str(p.relative_to(base))))
-            except OSError:
-                continue
-    if limit:
-        files = files[:limit]
-
-    n = 0
-    for abs_path, label in files:
-        text, kind = extract_text(abs_path, ex)
-        if kind in ("unsupported",):
-            continue
-        stats.by_kind[kind] = stats.by_kind.get(kind, 0) + 1
-        if len(text) < _MIN_CHARS:
-            stats.skipped_empty += 1
-            if verbose:
-                print(f"  skip (empty {kind}): {label}")
-            continue
-        if kind == "image":
-            stats.ocr_used += 1
-        elif kind in ("audio", "video"):
-            stats.asr_used += 1
-        n += 1
-        doc_id = _safe_id(label, n)
-        passages = chunk_text(text, chunk_chars)
-        multi = len(passages) > 1
-        for pi, passage in enumerate(passages):
-            cid = f"{doc_id}_p{pi:02d}" if multi else doc_id
-            tag = f" · passage {pi + 1}/{len(passages)}" if multi else ""
-            header = f"[source: {label} · kind: {kind}{tag}]\n\n"
-            (out / f"{cid}.txt").write_text(header + passage, encoding="utf-8")
-            manifest.write(json.dumps({
-                "id": cid, "source": label, "kind": kind, "passage": pi,
-                "chars": len(passage), "path": abs_path,
-            }, ensure_ascii=False) + "\n")
-            stats.written += 1
-        stats.by_kind[kind + "_chunks"] = stats.by_kind.get(kind + "_chunks", 0) + len(passages)
-        if verbose:
-            print(f"  {kind:6} {len(text):>7} chars → {len(passages):>3} passage(s)  {label}")
-
-    manifest.close()
-    return stats
+    source = LocalFolderSource(sources, follow_symlinks=follow_symlinks, limit=limit)
+    return ingest_corpus(source, out_dir, extractor=MultimodalExtractor(ex), quality=quality,
+                         chunk_chars=chunk_chars, verbose=verbose,
+                         availability=_availability(ex).as_dict())
 
 
 def _main(argv: list[str] | None = None) -> int:
