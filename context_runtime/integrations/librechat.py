@@ -159,9 +159,13 @@ class LibreChatTenant:
     def __init__(self, corpus_dir: str | None = None, runtime: ContextRuntime | None = None,
                  retriever=None, bandit: EpsilonGreedyBandit | None = None,
                  strategies: tuple[RetrievalStrategy, ...] = DEFAULT_STRATEGIES,
-                 judge: Judge | None = None, persist_path: str | None = None):
+                 judge: Judge | None = None, persist_path: str | None = None,
+                 query_expander=None):
         self.runtime = runtime or ContextRuntime.default([])
         self.retriever = retriever or InMemoryStore([])
+        # optional query rewrite applied to the RETRIEVAL query only (e.g. cross-language
+        # expansion). Planning, learning keys, and the answer keep the original request.
+        self.query_expander = query_expander
         if corpus_dir:
             self.retriever.index(corpus_dir)
         self.strategies = strategies
@@ -179,7 +183,8 @@ class LibreChatTenant:
         No judging yet — call record_feedback (native signal) or record_judgment (bootstrap)."""
         plan = self.runtime.plan(Goal(text=request))
         strategy = self.bandit.select(plan.intent.bucket)
-        hits = tuple(self.retriever.search(request, k=strategy.final_k, method=strategy.method))
+        rq = self._expand(request)
+        hits = tuple(self.retriever.search(rq, k=strategy.final_k, method=strategy.method))
         if strategy.rerank:
             hits = hits[:strategy.final_k]
         context = "\n\n".join(f"[{i+1}] {h.text}" for i, h in enumerate(hits))
@@ -188,15 +193,25 @@ class LibreChatTenant:
         self._last[key] = (plan, strategy)   # persists so implicit feedback can arrive later
         return ChatContext(request, strategy, hits, context, plan)
 
+    def _expand(self, request: str) -> str:
+        """Apply the optional query rewrite (cross-language expansion) for retrieval only."""
+        if self.query_expander is None:
+            return request
+        try:
+            return self.query_expander(request) or request
+        except Exception:
+            return request
+
     def compare(self, request: str, k: int = 5) -> dict:
         """Retrieval transparency: run EVERY method side-by-side and report what the learned
         policy actually chose + served. This is the 'show your work' view — it makes the
         core thesis visible: the runtime evaluates strategies and serves the best one. Read
         only — no bandit exploration, no state mutation, so it never perturbs learning."""
+        rq = self._expand(request)
         per: dict[str, list[dict]] = {}
         for m in COMPARE_METHODS:
             try:
-                hits = self.retriever.search(request, k=k, method=m)
+                hits = self.retriever.search(rq, k=k, method=m)
             except Exception:
                 hits = ()
             per[m] = [{"chunk_id": h.chunk_id, "filename": h.filename,
@@ -207,7 +222,7 @@ class LibreChatTenant:
         bucket = plan.intent.bucket
         key = self.bandit.policy().get(bucket)
         chosen = next((s for s in self.strategies if s.key == key), None) or self.strategies[1]
-        hits = self.retriever.search(request, k=chosen.final_k, method=chosen.method)
+        hits = self.retriever.search(rq, k=chosen.final_k, method=chosen.method)
         if chosen.rerank:
             hits = hits[:chosen.final_k]
         served = "\n\n".join(f"[{i + 1}] {h.text}" for i, h in enumerate(hits))

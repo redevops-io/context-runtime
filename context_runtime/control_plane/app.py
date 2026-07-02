@@ -931,8 +931,63 @@ if os.getenv("CR_EMBEDDINGS") == "1":
     except Exception:
         _lc_retriever = None
 
+# Cross-language search (opt-in via CR_QUERY_LANGS, e.g. "ru" or "ru,en"): a query is
+# expanded with LLM translations into the corpus language(s) BEFORE retrieval, so an
+# English question matches a Russian corpus (no retrieval method can bridge languages —
+# it must happen on the query side). Uses the same upstream as the shim; cached; fail-open.
+_QUERY_LANGS = [s.strip() for s in os.getenv("CR_QUERY_LANGS", "").split(",") if s.strip()]
+_xlate_cache: dict[tuple[str, str], str] = {}
+
+
+def _translate_query(text: str, lang: str) -> str:
+    key = (lang, text)
+    if key in _xlate_cache:
+        return _xlate_cache[key]
+    base = os.getenv("CR_UPSTREAM_BASE_URL", "").rstrip("/")
+    out = ""
+    if base:
+        try:
+            import httpx
+            headers = {"Content-Type": "application/json"}
+            if k := os.getenv("CR_UPSTREAM_API_KEY"):
+                headers["Authorization"] = f"Bearer {k}"
+            # generous timeout: reasoning upstreams take tens of seconds to expand a query.
+            r = httpx.post(base + "/chat/completions", timeout=120, headers=headers, json={
+                # a FAST (non-reasoning) model via CR_QUERY_XLATE_MODEL keeps expansion snappy —
+                # reasoning models can take 60s+ per query. Falls back to the answer upstream.
+                "model": os.getenv("CR_QUERY_XLATE_MODEL") or os.getenv("CR_UPSTREAM_MODEL", "") or "default",
+                "messages": [{"role": "user", "content":
+                              f"Expand a search query for a document index. Translate the KEY "
+                              f"search terms of the query into {lang} (base/nominative form) and "
+                              f"add a few closely-related {lang} terms a matching document would "
+                              f"use. Output ONLY the terms, space-separated — no sentences, no "
+                              f"punctuation, no notes.\n\nQuery: {text}"}],
+                # dedicated (generous) budget: reasoning upstreams (kimi-k2.6) return EMPTY
+                # if they exhaust tokens mid-reasoning, and this is cached so cost is one-off.
+                "max_tokens": int(os.getenv("CR_QUERY_XLATE_MAX_TOKENS", "4096")),
+                "temperature": float(os.getenv("CR_UPSTREAM_TEMPERATURE", "1"))})
+            out = (r.json()["choices"][0]["message"]["content"] or "").strip()
+        except Exception:
+            out = ""
+    if out:  # cache successes only — a transient failure must NOT permanently disable expansion
+        _xlate_cache[key] = out
+    return out
+
+
+def _query_expander(text: str) -> str:
+    if not _QUERY_LANGS:
+        return text
+    parts = [text]
+    for lang in _QUERY_LANGS:
+        t = _translate_query(text, lang)
+        if t and t.lower() != text.lower():
+            parts.append(t)
+    return " ".join(parts)
+
+
 librechat = LibreChatTenant(runtime=fleet.runtime,   # shares the fleet cost model + persists its policy
                             retriever=_lc_retriever,
+                            query_expander=_query_expander if _QUERY_LANGS else None,
                             persist_path=str(fleet.home / "librechat_bandit.json"))
 _lc_corpus = os.getenv("CR_CORPUS_DIR", "")
 if _lc_corpus and os.path.isdir(_lc_corpus):
