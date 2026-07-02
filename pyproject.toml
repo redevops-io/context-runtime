@@ -57,6 +57,13 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["context_runtime"]
 
+# Some optional-dependency extras (e.g. `rag`) use direct URL/VCS references;
+# hatchling requires this to be opted in, else building a wheel from an sdist/
+# tarball (as the reference apps do: `context-runtime @ .../main.tar.gz`) fails
+# metadata generation even though those extras aren't being installed.
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
