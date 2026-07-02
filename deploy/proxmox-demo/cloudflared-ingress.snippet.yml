@@ -1,0 +1,12 @@
+# Add this hostname rule to the cloudflared ingress (the templated ingress in
+# ffmpeg-mcp-aws/ansible/local/deploy-cloudflared.yml, next to the demo.redevops.io rule),
+# then re-run deploy-cloudflared.yml. It routes the tunnel to the Caddy front on the host.
+#
+# The Caddy container publishes :8092 on the host (see chat-demo.compose.yml), so:
+#   Cloudflare edge → cloudflared → http://192.168.40.105:8092 (caddy) → librechat / control plane
+#
+# You ALSO must create the DNS CNAME manually in redevops.io's OWN Cloudflare zone
+# (cross-account — cannot be scripted from these playbooks): see README.md step 1.
+
+- hostname: chat.redevops.io
+  service: http://192.168.40.105:8092

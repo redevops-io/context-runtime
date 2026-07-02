@@ -1,0 +1,83 @@
+# Public LibreQB × FinanceBench demo — LibreChat (no-login guest mode) + the Context
+# Runtime control plane, fronted by one Caddy so the browser talks to a single origin
+# (chat.redevops.io). cloudflared routes chat.redevops.io → caddy:80.
+#
+#   caddy  :80   /librechat/* /v1/*  → contextruntime:8092   (Query Board + chat shim)
+#                everything else      → librechat:3080        (the SPA)
+#
+# Deploy: rsync this dir + ../../.financebench/corpus + the contextos repo to the host,
+# render .env (secrets), then `docker compose -f chat-demo.compose.yml up -d --build`.
+# See README.md for the full runbook (incl. the manual cross-account CNAME).
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "8092:80" # cloudflared ingress target for chat.redevops.io
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    networks: [chatdemo]
+    depends_on: [librechat, contextruntime]
+
+  contextruntime:
+    # Context Runtime control plane over the FinanceBench corpus — all 5 methods
+    # (bm25/vector/hybrid/graph/community) + /librechat/compare + the /v1 shim.
+    build:
+      context: ${CONTEXTOS_DIR:-../..}
+      dockerfile: deploy/proxmox-demo/Dockerfile.contextruntime
+    restart: unless-stopped
+    environment:
+      - CR_CORPUS_DIR=/corpus
+      - CR_EMBEDDINGS=1
+      - CR_CORS_ORIGINS=https://${CHAT_HOST:-chat.redevops.io}
+      - CR_UPSTREAM_BASE_URL=${KIMI_BASE_URL:-}
+      - CR_UPSTREAM_API_KEY=${KIMI_API_KEY:-}
+      - CR_UPSTREAM_MODEL=${KIMI_MODEL:-}
+      - CR_UPSTREAM_MAX_TOKENS=4096
+      - CR_UPSTREAM_TEMPERATURE=1
+      - CONTEXT_RUNTIME_HOME=/data
+    volumes:
+      - ${CORPUS_DIR:-../../.financebench/corpus}:/corpus:ro
+      - cr_data:/data
+    networks: [chatdemo]
+
+  librechat:
+    # The LibreQB fork. DEMO_MODE=true → per-visitor guest, no login/registration.
+    image: ${LIBRECHAT_IMAGE:-librechat-api:latest}
+    restart: unless-stopped
+    depends_on: [chat-mongo]
+    environment:
+      - HOST=0.0.0.0
+      - MONGO_URI=mongodb://chat-mongo:27017/LibreChat
+      - CONFIG_PATH=/app/librechat.yaml
+      - DEMO_MODE=true
+      - DEMO_SECURE_COOKIE=true
+      - ALLOW_REGISTRATION=false
+      - DOMAIN_CLIENT=https://${CHAT_HOST:-chat.redevops.io}
+      - DOMAIN_SERVER=https://${CHAT_HOST:-chat.redevops.io}
+      # secrets — render from Vault (see README); DEMO defaults must NOT ship to prod.
+      - JWT_SECRET=${JWT_SECRET:?set JWT_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET}
+      - CREDS_KEY=${CREDS_KEY:?set CREDS_KEY}
+      - CREDS_IV=${CREDS_IV:?set CREDS_IV}
+      # LibreChat's custom endpoint points at the control plane over the internal network.
+      - CONTEXT_RUNTIME_URL=http://contextruntime:8092
+      - CONTEXT_RUNTIME_API_KEY=${CONTEXT_RUNTIME_API_KEY:-context-runtime}
+    volumes:
+      - ./librechat.yaml:/app/librechat.yaml:ro
+    networks: [chatdemo]
+
+  chat-mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - chat_mongo:/data/db
+    networks: [chatdemo]
+
+networks:
+  chatdemo:
+    driver: bridge
+
+volumes:
+  chat_mongo:
+  cr_data:

@@ -1,0 +1,19 @@
+# LibreChat config for the public FinanceBench demo — one Context Runtime endpoint,
+# pointed at the control plane over the internal compose network (contextruntime:8092).
+# The Libre Query Board renders under the chat box (baked into the fork's frontend).
+version: 1.2.1
+cache: true
+
+endpoints:
+  custom:
+    - name: "FinanceBench (Context Runtime)"
+      apiKey: "${CONTEXT_RUNTIME_API_KEY}"
+      baseURL: "${CONTEXT_RUNTIME_URL}/v1"
+      models:
+        default:
+          - "context-runtime"
+        fetch: true
+      titleConvo: true
+      titleModel: "context-runtime"
+      summarize: false
+      modelDisplayLabel: "Context Runtime · FinanceBench (self-learning RAG)"

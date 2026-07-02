@@ -1,0 +1,19 @@
+# One origin for the whole demo. cloudflared terminates TLS and forwards
+# chat.redevops.io → caddy:80 (plain HTTP inside the tunnel).
+#
+# The Query Board panel fetches /librechat/compare and the chat hits /v1/* — both must
+# reach the CONTROL PLANE, not LibreChat. Everything else is the LibreChat SPA. Serving
+# both under one host means the panel's fetch is SAME-ORIGIN (no CORS, no 2nd subdomain).
+:80 {
+	# Context Runtime control plane: the Query Board data + the OpenAI-compatible shim.
+	handle /librechat/* {
+		reverse_proxy contextruntime:8092
+	}
+	handle /v1/* {
+		reverse_proxy contextruntime:8092
+	}
+	# Everything else → the LibreChat app (SPA + its own /api).
+	handle {
+		reverse_proxy librechat:3080
+	}
+}
