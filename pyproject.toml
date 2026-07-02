@@ -40,6 +40,9 @@ connectors = ["dlt>=1.0"]
 # OCR + table recognition (ExtractorPlugin) — PaddleOCR/PP-Structure (Apache-2.0). Adds
 # multilingual OCR and lab-table extraction on top of the base rapidocr backend.
 ocr = ["paddleocr>=2.7", "paddlepaddle>=2.6"]
+# Text-layer PDF table extraction (ExtractorPlugin) — pdfplumber (MIT). Preserves tables
+# from financial filings / reports so figures stay retrievable (vs. flattened text).
+pdf-tables = ["pdfplumber>=0.11"]
 # Observability export.
 otel = ["opentelemetry-sdk>=1.20"]
 langfuse = ["langfuse>=2.0"]

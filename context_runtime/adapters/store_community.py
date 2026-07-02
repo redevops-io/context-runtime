@@ -20,12 +20,19 @@ It implements the RetrieverPlugin contract, so the runtime routes to it via
 from __future__ import annotations
 
 import math
+import os
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
 from ..types import Hit, PluginInfo, Retrieval
 from .store_inmemory import _token_list, _tokens
+
+
+def _community_cap() -> int:
+    """Max passages for GLOBAL community detection; above it, search clusters query
+    candidates instead (query-conditioned). Tunable via CR_COMMUNITY_MAX_NODES."""
+    return int(os.getenv("CR_COMMUNITY_MAX_NODES", "1500"))
 
 
 class CommunityRetriever:
@@ -49,20 +56,34 @@ class CommunityRetriever:
         if self._cache_key == key:
             return self._communities
         n = len(self.docs)
-        tok_sets = [_tokens(d["text"]) for d in self.docs]
-        # global document frequency → down-weight ubiquitous terms (they link everything)
+        # Global community detection is superlinear; past a few thousand passages it becomes
+        # impractical, so above the cap _build returns nothing and search falls back to a
+        # QUERY-CONDITIONED (local) clustering over the query's top candidates — fast at any
+        # scale and more relevant. Tunable via CR_COMMUNITY_MAX_NODES.
+        communities = [] if n > _community_cap() else self._communities_over(list(range(n)))
+        self._communities, self._cache_key = communities, key
+        return communities
+
+    def _communities_over(self, idx: list[int]) -> list[dict]:
+        """Detect communities over a SUBSET of documents (given by global indices). Used both
+        for the full corpus (small n) and for query-conditioned local clustering (large n)."""
+        m = len(idx)
+        if m < 2:
+            return []
+        tok_sets = [_tokens(self.docs[g]["text"]) for g in idx]
         df: dict[str, int] = defaultdict(int)
         for s in tok_sets:
             for t in s:
                 df[t] += 1
-        maxdf = max(3, int(0.30 * n)) if n else 1
-
-        # shared-term counts via an inverted index over discriminative terms only
-        inv: dict[str, list[int]] = defaultdict(list)
-        for i, s in enumerate(tok_sets):
+        # Edges come only from DISCRIMINATIVE terms — cap document-frequency both relatively
+        # (30%) and absolutely (150) so a term shared by hundreds of passages ("revenue")
+        # can't explode the O(df^2) pair count.
+        maxdf = min(max(3, int(0.30 * m)), 150)
+        inv: dict[str, list[int]] = defaultdict(list)  # local (0..m-1) postings
+        for li, s in enumerate(tok_sets):
             for t in s:
                 if df[t] <= maxdf:
-                    inv[t].append(i)
+                    inv[t].append(li)
         shared: dict[tuple[int, int], int] = defaultdict(int)
         for members in inv.values():
             for a in range(len(members)):
@@ -74,26 +95,35 @@ class CommunityRetriever:
                 adj[i][j] = float(c)
                 adj[j][i] = float(c)
 
-        labels = self._greedy_modularity(adj, n)
+        labels = self._greedy_modularity(adj, m)
         groups: dict[int, list[int]] = defaultdict(list)
-        for i, lab in enumerate(labels):
-            groups[lab].append(i)
+        for li, lab in enumerate(labels):
+            groups[lab].append(li)
 
         communities = []
-        for cid, (_, members) in enumerate(sorted(groups.items())):
-            # order members by intra-community degree (centrality), then id — deterministic
-            members.sort(key=lambda i: (-sum(adj[i].get(j, 0.0) for j in members),
-                                        self.docs[i]["chunk_id"]))
+        for cid, (_, locs) in enumerate(sorted(groups.items())):
+            locs.sort(key=lambda li: (-sum(adj[li].get(j, 0.0) for j in locs),
+                                      self.docs[idx[li]]["chunk_id"]))
+            members = [idx[li] for li in locs]  # back to GLOBAL indices
             profile: Counter = Counter()
-            for i in members:
-                profile.update(_token_list(self.docs[i]["text"]))
-            communities.append({
-                "id": cid, "members": members, "profile": profile,
-                "summary": self._summarize(members), "df": df, "n": n,
-            })
-        self._communities = communities
-        self._cache_key = key
+            for g in members:
+                profile.update(_token_list(self.docs[g]["text"]))
+            communities.append({"id": cid, "members": members, "profile": profile,
+                                "summary": self._summarize(members), "df": df, "n": m})
         return communities
+
+    def _candidates(self, query: str, m: int = 300) -> list[int]:
+        """Top-m docs by query-term overlap — the candidate set for local clustering."""
+        qs = _tokens(query)
+        if not qs:
+            return []
+        scored = []
+        for i, d in enumerate(self.docs):
+            ov = len(qs & _tokens(d["text"]))
+            if ov:
+                scored.append((ov, self.docs[i]["chunk_id"], i))
+        scored.sort(key=lambda x: (-x[0], x[1]))
+        return [i for _, _, i in scored[:m]]
 
     @staticmethod
     def _greedy_modularity(adj: dict[int, dict[int, float]], n: int) -> list[int]:
@@ -180,6 +210,9 @@ class CommunityRetriever:
 
     def search(self, query: str, k: int, method: Retrieval = "community") -> list[Hit]:
         communities = self._build()
+        if not communities and len(self.docs) > _community_cap():
+            # corpus too large for global clustering → cluster the query's neighbourhood
+            communities = self._communities_over(self._candidates(query, 300))
         if not communities:
             return []
         q_terms = _tokens(query)

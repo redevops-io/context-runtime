@@ -931,6 +931,20 @@ if os.getenv("CR_EMBEDDINGS") == "1":
     except Exception:
         _lc_retriever = None
 
+# Route community/graph to their real retrievers (not the bm25/vector/hybrid fallback), so
+# the transparency panel shows all FIVE methods genuinely diverging. The HopRouter feeds the
+# same corpus to each via index(); community/graph build lazily on first use.
+if _lc_retriever is not None:
+    try:
+        from ..adapters.store_community import CommunityRetriever
+        from ..adapters.store_hipporag import SimGraphRetriever
+        from ..adapters.store_router import HopRouterRetriever
+        _lc_retriever = HopRouterRetriever(single_hop=_lc_retriever,
+                                           graph=SimGraphRetriever([]),
+                                           community=CommunityRetriever([]))
+    except Exception:
+        pass  # keep the plain hybrid retriever if graph/community can't load
+
 # Cross-language search (opt-in via CR_QUERY_LANGS, e.g. "ru" or "ru,en"): a query is
 # expanded with LLM translations into the corpus language(s) BEFORE retrieval, so an
 # English question matches a Russian corpus (no retrieval method can bridge languages —
