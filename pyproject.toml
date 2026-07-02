@@ -21,6 +21,10 @@ hipporag = ["hipporag @ git+https://github.com/redevops-io/HippoRAG.git"]
 # embeddings (no torch) that bridge synonyms/morphology lexical BM25 can't. The runtime
 # falls back to pure BM25 when this isn't installed.
 embeddings = ["fastembed>=0.3", "numpy>=1.24"]
+# Quantized ANN vector index for the `vector` method at scale (TurboQuant, MIT). A
+# drop-in for brute-force cosine once the corpus is large (16x memory at 2-bit); quality
+# ≈ semantic, the win is memory+speed. Opt-in; the default path stays brute-force exact.
+turbovec = ["turbovec>=0.1", "fastembed>=0.3", "numpy>=1.24"]
 # Physical execution binding (the SchedulerPlugin compiles to Dagster runs).
 dagster = ["dagster>=1.7"]
 # Multimodal ingestion (mixed assets → normalized text corpus). Text-layer formats
