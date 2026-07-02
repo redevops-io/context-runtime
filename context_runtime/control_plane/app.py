@@ -974,11 +974,26 @@ def _translate_query(text: str, lang: str) -> str:
     return out
 
 
+# primary script per language → skip translating a query that is ALREADY in that script
+# (a Russian query must not be "translated to Russian" — that just adds LLM latency).
+_LANG_SCRIPT = {"ru": "Ѐ-ӿ", "uk": "Ѐ-ӿ", "bg": "Ѐ-ӿ",
+                "zh": "一-鿿", "ja": "぀-ヿ", "ko": "가-힯",
+                "ar": "؀-ۿ", "el": "Ͱ-Ͽ", "he": "֐-׿"}
+
+
+def _already_in_script(text: str, lang: str) -> bool:
+    import re
+    rng = _LANG_SCRIPT.get(lang.lower())
+    return bool(rng and re.search(f"[{rng}]", text))
+
+
 def _query_expander(text: str) -> str:
     if not _QUERY_LANGS:
         return text
     parts = [text]
     for lang in _QUERY_LANGS:
+        if _already_in_script(text, lang):
+            continue  # already in this language — no cross-language expansion needed
         t = _translate_query(text, lang)
         if t and t.lower() != text.lower():
             parts.append(t)
