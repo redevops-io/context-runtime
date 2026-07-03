@@ -4,6 +4,29 @@
 version: 1.2.1
 cache: true
 
+# Guests land STRAIGHT on Context Runtime — no "select an Agent" step. modelSpecs with
+# prioritize+enforce makes the single FinanceBench spec the default (and only) model, so
+# a new chat opens ready to type. interface.agents:false removes the "My Agents" builder;
+# endpointsMenu/presets off keep the guest UI to just the one thing this demo is about.
+interface:
+  agents: false
+  endpointsMenu: false
+  presets: false
+  marketplace:
+    use: false
+
+modelSpecs:
+  enforce: true
+  prioritize: true
+  list:
+    - name: "context-runtime"
+      label: "Context Runtime · FinanceBench"
+      default: true
+      description: "Self-learning RAG over the FinanceBench corpus — Context Runtime decides what the model sees before it answers."
+      preset:
+        endpoint: "FinanceBench (Context Runtime)"
+        model: "context-runtime"
+
 endpoints:
   custom:
     - name: "FinanceBench (Context Runtime)"
