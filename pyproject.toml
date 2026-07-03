@@ -21,6 +21,10 @@ hipporag = ["hipporag @ git+https://github.com/redevops-io/HippoRAG.git"]
 # embeddings (no torch) that bridge synonyms/morphology lexical BM25 can't. The runtime
 # falls back to pure BM25 when this isn't installed.
 embeddings = ["fastembed>=0.3", "numpy>=1.24"]
+# Vectorized reciprocal-rank fusion for the sharded parallel retriever (Polars, MIT) —
+# a multi-threaded group-by over the candidate union. Opt-in; the scheduler fans out to
+# shards regardless, and fusion falls back to pure-Python RRF when this isn't installed.
+polars = ["polars>=1.0"]
 # Quantized ANN vector index for the `vector` method at scale (TurboQuant, MIT). A
 # drop-in for brute-force cosine once the corpus is large (16x memory at 2-bit); quality
 # ≈ semantic, the win is memory+speed. Opt-in; the default path stays brute-force exact.
