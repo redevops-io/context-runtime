@@ -945,6 +945,36 @@ if _lc_retriever is not None:
     except Exception:
         pass  # keep the plain hybrid retriever if graph/community can't load
 
+# Heterogeneous multi-source retrieval (opt-in via CR_SHARDS): when a deployment's corpus is
+# a MIX of very different domains (finance, medical, personal notes), index each source as
+# its own shard and fan out in parallel, then route to the domain the query belongs to
+# (coverage routing) instead of fusing everything — which the evidence shows drives
+# cross-domain noise to zero. This puts the whitepaper's heterogeneous-source capability on
+# the live path. Format: CR_SHARDS="finance:/data/fin,medical:/data/med" (or bare dirs).
+_shards_spec = os.getenv("CR_SHARDS", "")
+if _shards_spec:
+    from ..adapters.store_inmemory import InMemoryStore
+    from ..scheduler.parallel_fusion import ShardedRetriever
+    _shards = []
+    for _spec in _shards_spec.split(","):
+        _spec = _spec.strip()
+        if not _spec:
+            continue
+        _name, _sep, _path = _spec.partition(":")
+        if not _sep:   # bare dir → derive a source name from the folder
+            _name, _path = (os.path.basename(_name.rstrip("/")) or "shard"), _name
+        if os.path.isdir(_path):
+            try:
+                _shard = InMemoryStore([], source=_name)
+                _shard.index(_path)
+                _shards.append(_shard)
+            except Exception:
+                pass
+    if _shards:
+        _lc_retriever = ShardedRetriever(
+            _shards, router=os.getenv("CR_SHARD_ROUTER", "coverage"),
+            route_margin=float(os.getenv("CR_ROUTE_MARGIN", "0.15")))
+
 # Cross-language search (opt-in via CR_QUERY_LANGS, e.g. "ru" or "ru,en"): a query is
 # expanded with LLM translations into the corpus language(s) BEFORE retrieval, so an
 # English question matches a Russian corpus (no retrieval method can bridge languages —
@@ -1040,7 +1070,7 @@ librechat = LibreChatTenant(runtime=fleet.runtime,   # shares the fleet cost mod
                             abstain_threshold=_abstain_threshold,
                             reward_beta=float(os.getenv("CR_REWARD_BETA", "0.5")))
 _lc_corpus = os.getenv("CR_CORPUS_DIR", "")
-if _lc_corpus and os.path.isdir(_lc_corpus):
+if _lc_corpus and os.path.isdir(_lc_corpus) and not _shards_spec:   # shards self-index at build
     try:
         librechat.ingest(_lc_corpus)   # ingest a pre-built normalized corpus at startup
     except Exception:
@@ -1143,9 +1173,34 @@ def librechat_policy() -> dict:
 #   CR_UPSTREAM_BASE_URL / CR_UPSTREAM_API_KEY / CR_UPSTREAM_MODEL  (OpenAI-compatible upstream)
 import contextlib  # noqa: E402
 import json  # noqa: E402
+import threading  # noqa: E402
 import time as _time  # noqa: E402
+from concurrent.futures import ThreadPoolExecutor  # noqa: E402
 
 from fastapi.responses import StreamingResponse  # noqa: E402
+
+from ..integrations.librechat import heuristic_judge as _heuristic_judge  # noqa: E402
+from ..integrations.librechat import reward_from_judgment as _reward_from_judgment  # noqa: E402
+
+# Learning (feedback inference + the possibly-LLM judge + the bandit update/persist) runs
+# OFF the response path on this small pool, so the user never waits on a second upstream
+# round-trip or a policy fsync. The tenant/bandit are lock-guarded, so concurrent learning
+# from this pool + the next request is safe.
+_LEARN_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="cr-learn")
+_shim_seen_lock = threading.Lock()
+_pending_learn: set = set()   # in-flight learning futures (for drain / graceful shutdown)
+
+
+def _submit_learn(fn, *args) -> None:
+    fut = _LEARN_POOL.submit(fn, *args)
+    _pending_learn.add(fut)
+    fut.add_done_callback(_pending_learn.discard)
+
+
+def _drain_learning(timeout: float = 5.0) -> None:
+    """Block until in-flight learning completes — for tests and graceful shutdown."""
+    import concurrent.futures
+    concurrent.futures.wait(list(_pending_learn), timeout=timeout)
 
 
 def _nullctx():
@@ -1250,23 +1305,35 @@ def _infer_feedback(req: "ChatCompletionReq", request_text: str) -> None:
         if prior and prior != request_text:
             librechat.record_feedback(prior, "kept")
     key = hash(tuple((m.role, m.content) for m in req.messages))
-    if _shim_seen.get(key):                               # identical conversation re-sent → Regenerate
+    with _shim_seen_lock:                                 # runs on the learn pool → guard the dict
+        regenerated = _shim_seen.get(key)
+        if len(_shim_seen) > 512:
+            _shim_seen.clear()
+        _shim_seen[key] = True
+    if regenerated:                                       # identical conversation re-sent → Regenerate
         librechat.record_feedback(request_text, "regenerated")
-    if len(_shim_seen) > 512:
-        _shim_seen.clear()
-    _shim_seen[key] = True
+
+
+def _learn_in_background(req: ChatCompletionReq, request_text: str, ctx) -> None:
+    """The learning half of a chat turn — off the response path. Infers implicit feedback,
+    runs the (possibly LLM) judge, and records the reward (bandit update + persist)."""
+    try:
+        _infer_feedback(req, request_text)                       # native implicit reward (primary)
+        librechat.annotate_relevance(request_text, ctx.hits)     # per-passage calibration labels (opt-in)
+        score = librechat.judge(request_text, ctx.context, ctx.hits)
+        librechat.record_judgment(request_text, score)
+    except Exception:
+        pass   # learning must never affect the served response
 
 
 def _chat_core(req: ChatCompletionReq) -> dict:
-    """The self-learning chat turn: infer native feedback → retrieve → augment → answer."""
+    """The self-learning chat turn: retrieve → augment → answer (learning is deferred)."""
     user_msgs = [m for m in req.messages if m.role == "user"]
     request_text = user_msgs[-1].content if user_msgs else ""
-    _infer_feedback(req, request_text)                           # native implicit reward (primary)
     # Count this turn as in-flight so the load-aware sizer/bandit see current concurrency.
     tracker = _load_meter.track() if _load_meter is not None else _nullctx()
     with tracker:
         ctx = librechat.retrieve(request_text)                   # learned retrieval strategy
-        librechat.annotate_relevance(request_text, ctx.hits)     # per-passage calibration labels (opt-in)
         if ctx.abstain:
             # Best passage's calibrated P(relevant) is below the floor — answering would be
             # ungrounded. Say so instead of burning an upstream call, and still learn.
@@ -1279,8 +1346,13 @@ def _chat_core(req: ChatCompletionReq) -> dict:
                       f"RETRIEVED CONTEXT:\n{ctx.context[:6000]}")
             fwd = [{"role": "system", "content": system}] + [m.model_dump() for m in req.messages]
             answer, usage, model_name = _forward_to_upstream(fwd, req)
-        score = librechat.judge(request_text, ctx.context, ctx.hits)  # retrieval-quality reward
-        reward = librechat.record_judgment(request_text, score)
+    # Fast, pure display metadata (heuristic judge — no LLM round-trip, no I/O); the real
+    # judge + bandit update run on the learn pool so they never add to response latency.
+    score = _heuristic_judge(request_text, ctx.context, ctx.hits)
+    rel = (sum(ctx.probs) / len(ctx.probs)) if ctx.probs else None
+    reward = _reward_from_judgment(score, ctx.strategy, librechat.strategies,
+                                   rel_signal=rel, beta=librechat.reward_beta)
+    _submit_learn(_learn_in_background, req, request_text, ctx)
     return {
         "id": f"chatcmpl-{ctx.plan.id}", "object": "chat.completion", "created": int(_time.time()),
         "model": model_name,

@@ -208,6 +208,47 @@ def test_tenant_logs_calibration_rows(tmp_path):
     assert rows and "hits" in rows[0] and rows[0]["hits"][0]["score"] > 0
 
 
+def test_tenant_concurrent_retrieve_learn(tmp_path):
+    """Hammer the tenant + bandit from many threads. Without the locks this raises
+    'dict changed size during iteration' or loses updates (FastAPI threadpool concurrency)."""
+    import threading
+    t = LibreChatTenant(retriever=_StubRetriever([0.9, 0.8, 0.7, 0.6, 0.5]),
+                        bandit=None, persist_path=str(tmp_path / "bandit.json"))
+
+    def worker(w):
+        for i in range(40):
+            q = f"q-{w}-{i}"
+            t.retrieve(q)
+            t.record_judgment(q, 0.7)
+            t.record_feedback(q, "kept")
+            t.policy()
+
+    threads = [threading.Thread(target=worker, args=(w,)) for w in range(16)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert t.policy()  # learned something, no crash
+
+
+def test_tenant_with_sharded_retriever_routes():
+    """The live wiring for heterogeneous multi-source: a ShardedRetriever (coverage routing)
+    as the tenant's retriever fans out across per-source shards and routes to the right
+    domain — the whitepaper's heterogeneous-source capability on the tenant path."""
+    from context_runtime.adapters.store_inmemory import InMemoryStore
+    from context_runtime.scheduler.parallel_fusion import ShardedRetriever
+    fin = InMemoryStore([{"chunk_id": "f0", "filename": "10k.txt",
+                          "text": "discharge of liability on the balance sheet and revenue"}], source="finance")
+    med = InMemoryStore([{"chunk_id": "m0", "filename": "note.txt",
+                          "text": "patient discharge summary and blood pressure readings"}], source="medical")
+    sharded = ShardedRetriever([fin, med], router="coverage")
+    t = LibreChatTenant(retriever=sharded)
+    ctx = t.retrieve("patient discharge summary")
+    assert any(h.chunk_id == "m0" for h in ctx.hits)        # routed to the clinical shard
+    assert all(h.chunk_id != "f0" for h in ctx.hits)        # not the 10-K "discharge of liability"
+    assert sharded.index("/whatever")["sharded"] == 2       # index() no-ops over shards
+
+
 def test_tenant_load_aware_bandit_ctx():
     """Load-aware mode must key the bandit by bucket:band and update the SAME key."""
     meter = LoadMeter(mid=1, hi=2)

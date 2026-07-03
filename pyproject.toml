@@ -29,8 +29,9 @@ polars = ["polars>=1.0"]
 # data. The in-memory store is the zero-dep default; this is the real-index backend.
 duckdb = ["duckdb>=1.0"]
 # Postgres full-text store backend (psycopg v3) — the same flat index over tsvector, for
-# data that already lives in Postgres. Optional.
-postgres = ["psycopg[binary]>=3.1"]
+# data that already lives in Postgres. psycopg_pool enables real parallel queries under the
+# concurrent control plane (falls back to a lock-guarded single connection without it). Optional.
+postgres = ["psycopg[binary]>=3.1", "psycopg_pool>=3.2"]
 # Quantized ANN vector index for the `vector` method at scale (TurboQuant, MIT). A
 # drop-in for brute-force cosine once the corpus is large (16x memory at 2-bit); quality
 # ≈ semantic, the win is memory+speed. Opt-in; the default path stays brute-force exact.

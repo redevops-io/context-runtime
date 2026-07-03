@@ -71,4 +71,6 @@ def test_shim_chat_is_self_learning():
     req = "steroid profile hormone results"
     for _ in range(12):
         client.post("/v1/chat/completions", json={"messages": [{"role": "user", "content": req}]})
+    from context_runtime.control_plane.app import _drain_learning
+    _drain_learning()   # learning is now off the response path — wait for it before asserting
     assert client.get("/librechat/policy").json()["policy"], "the shim should learn a retrieval policy"

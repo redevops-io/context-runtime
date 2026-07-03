@@ -90,6 +90,12 @@ every tenant is *quality minus an efficiency penalty*, so Context Runtime conver
 app tunes by hand because the search space is too large and the right answer drifts —
 exactly the job a learned planner exists to do.
 
+Where retrieval-score **calibration** is enabled, "quality" is not the coarse per-query
+judge alone: the reward also blends the mean *calibrated* `P(relevant)` of the passages
+actually served, so the policy is scored on the relevance of what it retrieved — not just
+whether a single scalar judge liked the whole context. See `BENCHMARKS.md` (§ calibrated,
+load-aware retrieval) for the measured effect.
+
 ## Roadmap implication
 
 This reframes the [ROADMAP](./ROADMAP.md): the tenants are how each capability earns

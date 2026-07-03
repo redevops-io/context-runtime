@@ -355,7 +355,12 @@ every run; `statistics()` exposes the numbers.
 ### 6.2 Two learners
 
 - **River (online contextual bandit)** — per-request "which retrieval / which model
-  for *this* query." Learns from streaming feedback. (Vowpal Wabbit at scale.)
+  for *this* query." Learns from streaming feedback. (Vowpal Wabbit at scale.) The
+  reward is *judged quality − efficiency penalty*; when retrieval-score **calibration**
+  is enabled it also blends the mean calibrated `P(relevant)` of the served passages, so
+  the bandit is scored on retrieved relevance, not the coarse per-query judge alone.
+  Learning runs off the response path (the judge + policy update never add to serving
+  latency). See `BENCHMARKS.md`.
 - **Optuna (offline batch)** — global params *and* PlanScore weights: `top_k`,
   reranker threshold, compression ratio, parallel workers, `w_*`. (DSPy is an
   alternative for the prompt/pipeline-compilation slice.)

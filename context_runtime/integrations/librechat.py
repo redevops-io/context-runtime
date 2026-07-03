@@ -234,6 +234,8 @@ class LibreChatTenant:
         # logging), and the exact bandit context used at select time (so update matches).
         self._pending: dict[str, tuple[Plan, RetrievalStrategy, tuple[Hit, ...], str]] = {}
         self._last: dict[str, tuple[Plan, RetrievalStrategy, tuple[Hit, ...], str]] = {}
+        import threading
+        self._maps_lock = threading.Lock()   # guards _pending/_last (FastAPI threadpool)
 
     def ingest(self, corpus_dir: str) -> dict:
         """Index (more of) the corpus into the retriever."""
@@ -273,8 +275,9 @@ class LibreChatTenant:
 
         context = "\n\n".join(f"[{i+1}] {h.text}" for i, h in enumerate(hits))
         key = self._key(request)
-        self._pending[key] = (plan, strategy, hits, ctx_key)
-        self._last[key] = (plan, strategy, hits, ctx_key)   # persists for late implicit feedback
+        with self._maps_lock:
+            self._pending[key] = (plan, strategy, hits, ctx_key)
+            self._last[key] = (plan, strategy, hits, ctx_key)   # persists for late implicit feedback
         return ChatContext(request, strategy, hits, context, plan,
                            probs=probs, max_p_rel=max_p, abstain=abstain)
 
@@ -355,7 +358,8 @@ class LibreChatTenant:
         """Learn from an IMPLICIT user action (kept / regenerated / thumbs_up / …) — the
         app's NATIVE success signal. This is the primary online reward (cheaper, truer, and
         deterministic vs. an LLM judge, which is now only a cold-start bootstrap)."""
-        entry = self._last.get(self._key(request))
+        with self._maps_lock:
+            entry = self._last.get(self._key(request))
         if entry is None:
             return 0.0
         plan, strategy, hits, ctx_key = entry
@@ -399,7 +403,8 @@ class LibreChatTenant:
         heuristic/LLM cold-start BOOTSTRAP. Prefer record_feedback (the app's native
         implicit signal) for online learning."""
         key = self._key(request)
-        entry = self._pending.pop(key, None) or self._last.get(key)
+        with self._maps_lock:
+            entry = self._pending.pop(key, None) or self._last.get(key)
         if entry is None:
             return 0.0
         plan, strategy, hits, ctx_key = entry

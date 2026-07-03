@@ -197,6 +197,12 @@ class ShardedRetriever:
         }
         return fused
 
+    def index(self, path: str) -> dict:
+        """Retriever-interface no-op: shards are their own stores, indexed at construction
+        (one source per shard). Present so a ShardedRetriever is a drop-in wherever a single
+        retriever is expected (e.g. the LibreChat tenant), whose ingest() then no-ops here."""
+        return {"sharded": len(self.shards), "note": "shards are indexed per-source at build time"}
+
     def info(self) -> PluginInfo:
         caps = {"parallel", "rrf"}
         if polars_available():

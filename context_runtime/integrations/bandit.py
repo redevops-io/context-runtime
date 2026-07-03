@@ -28,12 +28,18 @@ class EpsilonGreedyBandit:
 
     def __init__(self, arms: tuple, epsilon: float = 0.15, optimistic: float = 1.0,
                  seed: int = 0x9E3779B9, persist_path: str | None = None):
+        import threading
         self.arms = arms
         self.epsilon = epsilon
         self.optimistic = optimistic
         self.stats: dict[str, dict[str, list[float]]] = {}   # ctx → arm.key → [n, mean]
         self._rng = seed & 0xFFFFFFFF
         self.persist_path = persist_path   # learned policy survives restarts if set
+        # Guards stats + _rng. FastAPI runs sync endpoints in a threadpool (~40 threads)
+        # over one shared bandit; without this, concurrent select/update on the shared
+        # stats dict lose updates or raise "dict changed size during iteration".
+        self._lock = threading.Lock()
+        self._save_lock = threading.Lock()   # serializes disk writes, off the stats lock
         if persist_path:
             self._load()
 
@@ -49,18 +55,25 @@ class EpsilonGreedyBandit:
         return self.stats.setdefault(ctx, {a.key: [0.0, self.optimistic] for a in self.arms})
 
     def select(self, ctx: str):
-        arms = self._ctx(ctx)
-        if self._rand() < self.epsilon:
-            return self.arms[int(self._rand() * len(self.arms)) % len(self.arms)]
-        best = max(arms, key=lambda k: arms[k][1])
-        return next(a for a in self.arms if a.key == best)
+        with self._lock:
+            arms = self._ctx(ctx)
+            if self._rand() < self.epsilon:
+                return self.arms[int(self._rand() * len(self.arms)) % len(self.arms)]
+            best = max(arms, key=lambda k: arms[k][1])
+            return next(a for a in self.arms if a.key == best)
 
     def update(self, ctx: str, arm, reward: float) -> None:
-        arms = self._ctx(ctx)
-        n, mean = arms[arm.key]
-        n += 1
-        arms[arm.key] = [n, mean + (reward - mean) / n]
-        self.save()
+        import json
+        with self._lock:
+            arms = self._ctx(ctx)
+            n, mean = arms[arm.key]
+            n += 1
+            arms[arm.key] = [n, mean + (reward - mean) / n]
+            # serialize a consistent snapshot under the lock; write it to disk outside so
+            # the fsync/rename never blocks concurrent select/update.
+            snapshot = json.dumps(self.stats) if self.persist_path else None
+        if snapshot is not None:
+            self._write_snapshot(snapshot)
 
     # ── persistence (so learning survives restarts) ──
     def _load(self) -> None:
@@ -69,25 +82,35 @@ class EpsilonGreedyBandit:
         if self.persist_path and os.path.exists(self.persist_path):
             try:
                 raw = json.load(open(self.persist_path, encoding="utf-8"))
-                self.stats = {ctx: {k: list(v) for k, v in arms.items()} for ctx, arms in raw.items()}
+                with self._lock:
+                    self.stats = {ctx: {k: list(v) for k, v in arms.items()} for ctx, arms in raw.items()}
             except Exception:
                 pass
 
     def save(self) -> None:
-        if not self.persist_path:
-            return
         import json
+        with self._lock:
+            snapshot = json.dumps(self.stats) if self.persist_path else None
+        if snapshot is not None:
+            self._write_snapshot(snapshot)
+
+    def _write_snapshot(self, data: str) -> None:
+        """Atomically write an already-serialized stats snapshot. Serialized by its own
+        lock (not the stats lock) so persistence I/O stays off the learning hot path."""
         import os
-        os.makedirs(os.path.dirname(self.persist_path) or ".", exist_ok=True)
-        tmp = self.persist_path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(self.stats, f)
-        os.replace(tmp, self.persist_path)   # atomic
+        with self._save_lock:
+            os.makedirs(os.path.dirname(self.persist_path) or ".", exist_ok=True)
+            tmp = self.persist_path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(data)
+            os.replace(tmp, self.persist_path)   # atomic
 
     def policy(self) -> dict[str, str]:
         """Current best arm key per context — the learned policy, for inspection."""
-        return {ctx: max(a, key=lambda k: a[k][1]) for ctx, a in self.stats.items()}
+        with self._lock:
+            return {ctx: max(a, key=lambda k: a[k][1]) for ctx, a in self.stats.items()}
 
     def value(self, ctx: str, arm_key: str) -> tuple[int, float]:
-        a = self._ctx(ctx)[arm_key]
-        return int(a[0]), a[1]
+        with self._lock:
+            a = self._ctx(ctx)[arm_key]
+            return int(a[0]), a[1]

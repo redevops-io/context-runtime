@@ -36,7 +36,12 @@ class DuckDBStore:
 
     def __init__(self, docs: list[dict] | None = None, *, path: str = ":memory:",
                  source: str = "duckdb"):
+        import threading
         self.source = source
+        # A DuckDB connection object is not safe for concurrent use; reads go through
+        # per-call .cursor() (independent connections to the same DB), and writes (insert/
+        # reindex) are serialized by this lock so the control plane can serve concurrently.
+        self._write_lock = threading.Lock()
         self._db = _duckdb().connect(path)
         self._db.execute("INSTALL fts; LOAD fts;")
         self._db.execute(
@@ -50,14 +55,16 @@ class DuckDBStore:
     def _insert(self, docs: list[dict]) -> int:
         rows = [(d["chunk_id"], d.get("filename", ""), d.get("text", ""),
                  float(d.get("ts") or 0.0)) for d in docs]
-        self._db.executemany(
-            "INSERT OR REPLACE INTO docs (chunk_id, filename, text, ts) VALUES (?,?,?,?)", rows)
-        self._n = self._db.execute("SELECT count(*) FROM docs").fetchone()[0]
+        with self._write_lock:
+            self._db.executemany(
+                "INSERT OR REPLACE INTO docs (chunk_id, filename, text, ts) VALUES (?,?,?,?)", rows)
+            self._n = self._db.execute("SELECT count(*) FROM docs").fetchone()[0]
         return len(rows)
 
     def _reindex(self) -> None:
         # (re)build the BM25 index over the text column; overwrite so re-index is idempotent.
-        self._db.execute("PRAGMA create_fts_index('docs','chunk_id','text', overwrite=1)")
+        with self._write_lock:
+            self._db.execute("PRAGMA create_fts_index('docs','chunk_id','text', overwrite=1)")
 
     def index(self, path: str) -> dict:
         """Index a folder of text/markdown files (one chunk per file, matching InMemoryStore)."""
@@ -75,19 +82,23 @@ class DuckDBStore:
         """BM25 (method='bm25'/'hybrid') or most-recent (method='recency')."""
         if not query.strip() or self._n == 0:
             return []
-        if method == "recency":
-            rows = self._db.execute(
-                "SELECT chunk_id, filename, text, ts FROM docs ORDER BY ts DESC LIMIT ?",
-                [k]).fetchall()
-            return [Hit(chunk_id=r[0], filename=r[1], text=r[2], score=0.0,
-                        created_at=str(r[3])) for r in rows]
-        rows = self._db.execute(
-            "SELECT chunk_id, filename, text, score FROM "
-            "(SELECT *, fts_main_docs.match_bm25(chunk_id, ?) AS score FROM docs) sq "
-            "WHERE score IS NOT NULL ORDER BY score DESC LIMIT ?",
-            [query, k]).fetchall()
-        return [Hit(chunk_id=r[0], filename=r[1], text=r[2], score=round(float(r[3]), 4))
-                for r in rows]
+        cur = self._db.cursor()   # independent connection to the same DB → concurrent reads
+        try:
+            if method == "recency":
+                rows = cur.execute(
+                    "SELECT chunk_id, filename, text, ts FROM docs ORDER BY ts DESC LIMIT ?",
+                    [k]).fetchall()
+                return [Hit(chunk_id=r[0], filename=r[1], text=r[2], score=0.0,
+                            created_at=str(r[3])) for r in rows]
+            rows = cur.execute(
+                "SELECT chunk_id, filename, text, score FROM "
+                "(SELECT *, fts_main_docs.match_bm25(chunk_id, ?) AS score FROM docs) sq "
+                "WHERE score IS NOT NULL ORDER BY score DESC LIMIT ?",
+                [query, k]).fetchall()
+            return [Hit(chunk_id=r[0], filename=r[1], text=r[2], score=round(float(r[3]), 4))
+                    for r in rows]
+        finally:
+            cur.close()
 
     def info(self) -> PluginInfo:
         return PluginInfo(name="duckdb", kind="store", version="0.1",
