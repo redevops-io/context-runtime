@@ -67,7 +67,20 @@ class DuckDBStore:
             self._db.execute("PRAGMA create_fts_index('docs','chunk_id','text', overwrite=1)")
 
     def index(self, path: str) -> dict:
-        """Index a folder of text/markdown files (one chunk per file, matching InMemoryStore)."""
+        """Index a corpus. Fast path: a `corpus.parquet` (or a .parquet file) is bulk-loaded
+        with DuckDB's native `read_parquet` in one shot (columnar, no per-file open); else a
+        folder of text/markdown files (one chunk per file, matching InMemoryStore)."""
+        from ..ingest.parquet_corpus import resolve_parquet
+        pq = resolve_parquet(Path(path).expanduser())
+        if pq is not None:
+            with self._write_lock:
+                self._db.execute(
+                    "INSERT OR REPLACE INTO docs (chunk_id, filename, text, ts) "
+                    "SELECT chunk_id, filename, text, COALESCE(ts, 0.0) FROM read_parquet(?)",
+                    [str(pq)])
+                self._n = self._db.execute("SELECT count(*) FROM docs").fetchone()[0]
+            self._reindex()
+            return {"files": 1, "chunks": self._n, "parquet": str(pq)}
         p = Path(path).expanduser()
         docs = []
         for fp in sorted(p.rglob("*")):

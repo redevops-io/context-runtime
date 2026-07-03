@@ -30,7 +30,16 @@ class InMemoryStore:
         self.source = source
 
     def index(self, path: str) -> dict:
-        """Index a folder of text/markdown files (one chunk per file for v0.1 simplicity)."""
+        """Index a corpus. Fast path: a `corpus.parquet` (or a .parquet file) is bulk-loaded
+        columnar; otherwise a folder of text/markdown files (one chunk per file)."""
+        from ..ingest.parquet_corpus import read_corpus_parquet, resolve_parquet
+        pq = resolve_parquet(Path(path).expanduser())
+        if pq is not None:
+            rows = read_corpus_parquet(pq)
+            for r in rows:
+                self.docs.append({"chunk_id": r["chunk_id"], "filename": r["filename"],
+                                  "text": r["text"], "created_at": None})
+            return {"files": 1, "chunks": len(rows), "parquet": str(pq)}
         p = Path(path).expanduser()
         n = 0
         for fp in sorted(p.rglob("*")):

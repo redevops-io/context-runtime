@@ -37,6 +37,7 @@ def ingest_corpus(source, out_dir: str, *, extractor=None, quality=None,
     manifest = (out.parent / f"{out.name}.manifest.jsonl").open("w", encoding="utf-8")
 
     n = 0
+    parquet_rows: list[dict] = []   # collected for a columnar corpus.parquet (fast bulk-load)
     for asset in source.read():
         text, kind = extractor.extract(asset)
         if kind == "unsupported":
@@ -69,6 +70,8 @@ def ingest_corpus(source, out_dir: str, *, extractor=None, quality=None,
             tag = f" · passage {pi + 1}/{len(passages)}" if multi else ""
             header = f"[source: {label} · kind: {kind}{tag}]\n\n"
             (out / f"{cid}.txt").write_text(header + passage, encoding="utf-8")
+            parquet_rows.append({"chunk_id": cid, "filename": f"{cid}.txt",
+                                 "text": header + passage, "ts": 0.0})
             manifest.write(json.dumps({
                 "id": cid, "source": label, "kind": kind, "passage": pi,
                 "chars": len(passage), "path": asset.uri,
@@ -79,4 +82,14 @@ def ingest_corpus(source, out_dir: str, *, extractor=None, quality=None,
             print(f"  {kind:6} {len(text):>7} chars → {len(passages):>3} passage(s)  {label}")
 
     manifest.close()
+    # Also emit a single columnar corpus.parquet for fast bulk-load (DuckDB read_parquet /
+    # one-file ingest at scale). Best-effort: skipped cleanly if no parquet backend is present.
+    if parquet_rows:
+        try:
+            from .parquet_corpus import PARQUET_NAME, parquet_available, write_corpus_parquet
+            if parquet_available():
+                write_corpus_parquet(parquet_rows, out / PARQUET_NAME)
+                stats.by_kind["parquet_rows"] = len(parquet_rows)
+        except Exception:
+            pass   # the .txt corpus is always written; parquet is an optional accelerator
     return stats

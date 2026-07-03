@@ -32,6 +32,10 @@ duckdb = ["duckdb>=1.0"]
 # data that already lives in Postgres. psycopg_pool enables real parallel queries under the
 # concurrent control plane (falls back to a lock-guarded single connection without it). Optional.
 postgres = ["psycopg[binary]>=3.1", "psycopg_pool>=3.2"]
+# Columnar corpus interchange + fast bulk-load (one corpus.parquet vs thousands of .txt).
+# Any one of pyarrow / polars / duckdb satisfies it; pyarrow is the light default. The
+# persistent BM25 index stays native .duckdb — parquet is only the corpus/bulk-load format.
+parquet = ["pyarrow>=14.0"]
 # Quantized ANN vector index for the `vector` method at scale (TurboQuant, MIT). A
 # drop-in for brute-force cosine once the corpus is large (16x memory at 2-bit); quality
 # ≈ semantic, the win is memory+speed. Opt-in; the default path stays brute-force exact.
