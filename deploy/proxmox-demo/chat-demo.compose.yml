@@ -12,8 +12,12 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    security_opt:
+      - apparmor=docker-contextos
     ports:
-      - "8092:80" # cloudflared ingress target for chat.redevops.io
+      # cloudflared ingress target for chat.redevops.io (8092 is taken by erpnext on the
+      # shared host, so default to 8094; override via CHAT_EDGE_PORT).
+      - "${CHAT_EDGE_PORT:-8094}:80"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
     networks: [chatdemo]
@@ -26,6 +30,11 @@ services:
       context: ${CONTEXTOS_DIR:-../..}
       dockerfile: deploy/proxmox-demo/Dockerfile.contextruntime
     restart: unless-stopped
+    # Confined under docker-contextos (docker-default + abi/3.0 pin) — the host's
+    # apparmor 4.1 breaks AF_UNIX create under docker-default, killing uvicorn's
+    # socket.socketpair(). Load the profile first: see apparmor-docker-contextos.profile.
+    security_opt:
+      - apparmor=docker-contextos
     environment:
       - CR_CORPUS_DIR=/corpus
       - CR_EMBEDDINGS=1
@@ -46,6 +55,9 @@ services:
     image: ${LIBRECHAT_IMAGE:-librechat-api:latest}
     restart: unless-stopped
     depends_on: [chat-mongo]
+    # Confined under docker-contextos (see contextruntime + the .profile file).
+    security_opt:
+      - apparmor=docker-contextos
     environment:
       - HOST=0.0.0.0
       - MONGO_URI=mongodb://chat-mongo:27017/LibreChat
@@ -70,6 +82,10 @@ services:
   chat-mongo:
     image: mongo:7
     restart: unless-stopped
+    # Confined under docker-contextos — docker-default breaks mongod's AF_UNIX
+    # listener socket on this host's apparmor 4.1 (see contextruntime + the .profile).
+    security_opt:
+      - apparmor=docker-contextos
     volumes:
       - chat_mongo:/data/db
     networks: [chatdemo]

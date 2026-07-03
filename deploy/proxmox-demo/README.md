@@ -50,6 +50,17 @@ docker build -t librechat-api:latest /path/to/LibreChat   # LibreQB branch check
 **5. Secrets.** Render `.env` from Vault (see `.env.example`): `JWT_*`, `CREDS_KEY/IV`,
 `KIMI_*`. Keep `DEMO_MODE=true`, `ALLOW_REGISTRATION=false`.
 
+**5b. AppArmor profile (this host only).** The host runs apparmor_parser 4.1, whose
+default ABI breaks AF_UNIX socket creation under Docker's stock `docker-default`
+(Python `socket.socketpair()` → `PermissionError [Errno 13]`; mongod → `open: Permission
+denied`). The compose runs every service under `docker-contextos` instead — stock
+docker-default confinement pinned to `abi <abi/3.0>,`. Install + load it once (survives
+reboot via `apparmor.service`):
+```bash
+install -m0644 apparmor-docker-contextos.profile /etc/apparmor.d/docker-contextos
+apparmor_parser -r -W /etc/apparmor.d/docker-contextos
+```
+
 **6. Up.**
 ```bash
 cd /projects/contextos/deploy/proxmox-demo
