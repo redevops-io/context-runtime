@@ -17,6 +17,7 @@ Polars parallelizes the FUSION, not the I/O — the two together are the win.
 """
 from __future__ import annotations
 
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Protocol
@@ -92,18 +93,48 @@ def fuse(ranked_lists: list[list[Hit]], k: int, c: int = 60, engine: str = "auto
         return _rrf_python(ranked_lists, k, c)
 
 
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _coverage(query: str, hit: Hit) -> float:
+    """Fraction of DISTINCT query terms present in a hit's text. Corpus-stat-independent,
+    so it's comparable ACROSS heterogeneous shards where raw BM25 scores are not."""
+    q = set(_WORD_RE.findall(query.lower()))
+    if not q:
+        return 0.0
+    toks = set(_WORD_RE.findall(hit.text.lower()))
+    return len(q & toks) / len(q)
+
+
 class ShardedRetriever:
-    """Fan out a query to N shards concurrently, RRF-fuse the union. Drop-in
-    RetrieverPlugin whose shards are themselves retrievers."""
+    """Fan out a query to N shards concurrently, then combine. Drop-in RetrieverPlugin
+    whose shards are themselves retrievers.
+
+    router:
+      "fuse"     — RRF-fuse every shard's results (max recall; mixes domains, so a
+                   heterogeneous corpus injects cross-domain noise into the top-k).
+      "coverage" — score each shard by its best hit's query-term COVERAGE and fuse only
+                   the shard(s) within `route_margin` of the top — routing a query to the
+                   domain it actually belongs to. Kills cross-domain collision noise
+                   ("discharge summary" → the clinical shard, not the 10-K "discharge of
+                   liability" pages) without needing comparable scores across shards.
+
+    The routing THRESHOLD (route_margin / when to fuse-all vs route) is exactly the kind
+    of policy a Context Runtime bandit learns per query bucket — see
+    integrations/chat_memory.py for that learning pattern.
+    """
 
     def __init__(self, shards: list[_Shard], *, max_workers: int | None = None,
-                 pool_per_shard: int = 3, engine: str = "auto"):
+                 pool_per_shard: int = 3, engine: str = "auto",
+                 router: str = "fuse", route_margin: float = 0.15):
         if not shards:
             raise ValueError("ShardedRetriever needs at least one shard")
         self.shards = shards
         self.max_workers = max_workers or min(16, len(shards))
         self.pool_per_shard = pool_per_shard   # over-fetch per shard before fusion
         self.engine = engine
+        self.router = router
+        self.route_margin = route_margin
         self.last_stats: dict = {}
 
     def search(self, query: str, k: int, method: str = "hybrid") -> list[Hit]:
@@ -113,11 +144,21 @@ class ShardedRetriever:
         with ThreadPoolExecutor(max_workers=self.max_workers) as ex:
             ranked = list(ex.map(lambda s: _safe_search(s, query, pool, method), self.shards))
         t1 = time.perf_counter()
-        fused = fuse(ranked, k=k, engine=self.engine)
+
+        selected = ranked
+        chosen_idx = list(range(len(ranked)))
+        if self.router == "coverage":
+            # per-shard confidence = best hit's query coverage; keep shards near the top.
+            cov = [max((_coverage(query, h) for h in r), default=0.0) for r in ranked]
+            best = max(cov) if cov else 0.0
+            chosen_idx = [i for i, c in enumerate(cov) if c >= best - self.route_margin and c > 0.0]
+            selected = [ranked[i] for i in chosen_idx] or ranked
+        fused = fuse(selected, k=k, engine=self.engine)
         t2 = time.perf_counter()
         self.last_stats = {
             "shards": len(self.shards),
-            "candidates": sum(len(r) for r in ranked),
+            "routed_to": chosen_idx,
+            "candidates": sum(len(r) for r in selected),
             "fanout_ms": round((t1 - t0) * 1000, 2),
             "fuse_ms": round((t2 - t1) * 1000, 2),
             "engine": "polars" if (self.engine != "python" and polars_available()) else "python",
