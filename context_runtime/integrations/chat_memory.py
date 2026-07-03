@@ -217,5 +217,16 @@ class ChatMemoryTenant:
     def record_outcome(self, query: str, mode: RecallMode, reward: float) -> None:
         self._bandit.update(memory_bucket(query), mode, reward)
 
+    def record_feedback(self, query: str, mode: RecallMode, helpful: bool,
+                        value: float = 3.0) -> None:
+        """LIVE reward from a REAL signal — a thumbs-up / task-success / the user not having
+        to repeat themselves — rather than the offline benchmark's simulated one. reward =
+        value if the recalled memory helped, else 0, minus the mode's read cost (same shape
+        as the benchmark, so a deployment learns the recall policy from actual outcomes).
+
+        Wire it per turn:  mode = tenant.choose(q); hits = store.search(q, mode.k, mode.methods[0])
+        ... answer ... then on the user's reaction: tenant.record_feedback(q, mode, helpful=thumbs_up)."""
+        self.record_outcome(query, mode, (value if helpful else 0.0) - mode.cost_units())
+
     def policy(self) -> dict[str, str]:
         return self._bandit.policy()

@@ -22,11 +22,25 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Protocol
 
-from ..types import Hit, PluginInfo
+from ..types import Constraints, ExecutionGraph, GraphNode, Hit, PluginInfo
 
 
 class _Shard(Protocol):
     def search(self, query: str, k: int, method: str) -> list[Hit]: ...
+
+
+def _plan_fanout(scheduler, n_shards: int, constraints=None) -> tuple[int, list[list[int]]]:
+    """Turn the shard fan-out into an ExecutionGraph and let the SchedulerPlugin plan it.
+    Shards are independent `retrieve` nodes (no edges) → the TopoScheduler returns one
+    wave; a cost/latency-aware scheduler could split waves or cap concurrency by budget.
+    Returns (max_concurrency, waves-as-shard-index-lists)."""
+    nodes = tuple(GraphNode(kind="retrieve", params={"shard": i}, id=f"shard{i}")
+                  for i in range(n_shards))
+    sched = scheduler.schedule(ExecutionGraph(nodes=nodes, edges=()),
+                               constraints or Constraints())
+    idx = {f"shard{i}": i for i in range(n_shards)}
+    waves = [[idx[nid] for nid in wave if nid in idx] for wave in sched.waves]
+    return sched.max_concurrency, [w for w in waves if w]
 
 
 def _key(h: Hit) -> str:
@@ -126,7 +140,8 @@ class ShardedRetriever:
 
     def __init__(self, shards: list[_Shard], *, max_workers: int | None = None,
                  pool_per_shard: int = 3, engine: str = "auto",
-                 router: str = "fuse", route_margin: float = 0.15):
+                 router: str = "fuse", route_margin: float = 0.15,
+                 scheduler=None, constraints=None):
         if not shards:
             raise ValueError("ShardedRetriever needs at least one shard")
         self.shards = shards
@@ -135,14 +150,31 @@ class ShardedRetriever:
         self.engine = engine
         self.router = router
         self.route_margin = route_margin
+        # optional SchedulerPlugin — when given, IT decides the fan-out concurrency/waves
+        # (the runtime's TopoScheduler, or a future cost-aware one). Absent → one wave.
+        self.scheduler = scheduler
+        self.constraints = constraints
         self.last_stats: dict = {}
+
+    def _fanout(self, query: str, pool: int, method: str) -> list[list[Hit]]:
+        n = len(self.shards)
+        ranked: list[list[Hit]] = [[] for _ in range(n)]
+        if self.scheduler is not None:
+            conc, waves = _plan_fanout(self.scheduler, n, self.constraints)
+        else:
+            conc, waves = self.max_workers, [list(range(n))]
+        for wave in waves:
+            with ThreadPoolExecutor(max_workers=max(1, min(conc, len(wave)))) as ex:
+                for i, hits in zip(wave, ex.map(
+                        lambda i: _safe_search(self.shards[i], query, pool, method), wave)):
+                    ranked[i] = hits
+        return ranked
 
     def search(self, query: str, k: int, method: str = "hybrid") -> list[Hit]:
         pool = max(k * self.pool_per_shard, k)
         t0 = time.perf_counter()
-        # fan-out: every shard search runs concurrently (the scheduler).
-        with ThreadPoolExecutor(max_workers=self.max_workers) as ex:
-            ranked = list(ex.map(lambda s: _safe_search(s, query, pool, method), self.shards))
+        # fan-out: shard searches run concurrently, planned by the SchedulerPlugin if set.
+        ranked = self._fanout(query, pool, method)
         t1 = time.perf_counter()
 
         selected = ranked
