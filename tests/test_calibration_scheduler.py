@@ -10,7 +10,11 @@ from context_runtime.integrations.calibration import (
     _isotonic_fit,
     fit_from_log,
 )
-from context_runtime.integrations.librechat import DEFAULT_STRATEGIES, LibreChatTenant
+from context_runtime.integrations.librechat import (
+    DEFAULT_STRATEGIES,
+    LibreChatTenant,
+    reward_from_judgment,
+)
 from context_runtime.integrations.loadmeter import LoadMeter
 from context_runtime.scheduler.load_aware import size_expensive_stage
 from context_runtime.types import Hit
@@ -120,6 +124,37 @@ def test_sizer_budget_guard_trims_to_latency(tmp_path):
     d = size_expensive_stage([0.99, 0.99, 0.99, 0.99], load_band="lo", requested_k=4,
                              requested_rerank=True, cost_profile=prof, max_latency_seconds=1.5)
     assert d.final_k <= 2                       # trimmed to fit the 1.5s ceiling
+
+
+# ──────────────────────────── reward uses served relevance ────────────────────────────
+
+
+def test_reward_legacy_when_no_rel_signal():
+    s = DEFAULT_STRATEGIES[1]
+    assert reward_from_judgment(0.8, s) == reward_from_judgment(0.8, s, rel_signal=None, beta=0.5)
+
+
+def test_reward_blends_calibrated_relevance():
+    s = DEFAULT_STRATEGIES[1]
+    base = reward_from_judgment(0.5, s, rel_signal=None, beta=0.0)
+    # a lukewarm judge (0.5) but highly relevant served hits (0.95) → reward rises with beta
+    hi = reward_from_judgment(0.5, s, rel_signal=0.95, beta=0.5)
+    lo = reward_from_judgment(0.5, s, rel_signal=0.05, beta=0.5)
+    assert hi > base > lo
+
+
+def test_tenant_reward_uses_hit_score():
+    """With calibration + reward_beta, served-hit relevance actually moves the bandit reward."""
+    strong = _StubRetriever([0.9, 0.85, 0.8])
+    t = LibreChatTenant(retriever=strong, calibration=_linear_map(None), reward_beta=0.5)
+    ctx = t.retrieve("q")
+    r_relevant = t.record_judgment("q", 0.5)
+    weak = _StubRetriever([0.1, 0.05, 0.02])
+    t2 = LibreChatTenant(retriever=weak, calibration=_linear_map(None), reward_beta=0.5)
+    t2.retrieve("q2")
+    r_irrelevant = t2.record_judgment("q2", 0.5)
+    assert r_relevant > r_irrelevant   # same judge score, different served relevance → different reward
+    assert ctx.probs                    # sanity: calibration ran
 
 
 # ──────────────────────────── tenant integration ────────────────────────────

@@ -167,11 +167,21 @@ def _tokens(s: str) -> list[str]:
 
 
 def reward_from_judgment(score: float, strategy: RetrievalStrategy,
-                         strategies: tuple[RetrievalStrategy, ...] = DEFAULT_STRATEGIES) -> float:
-    """Judged retrieval quality minus a normalized retrieval-cost penalty."""
+                         strategies: tuple[RetrievalStrategy, ...] = DEFAULT_STRATEGIES,
+                         rel_signal: float | None = None, beta: float = 0.0) -> float:
+    """Judged retrieval quality minus a normalized retrieval-cost penalty.
+
+    The bandit previously learned from the per-query judge ALONE — it never saw how
+    relevant the actually-served passages were (hit.score was thrown away). When a
+    calibration map is active, ``rel_signal`` is the mean calibrated P(relevant) of the
+    served hits and ``beta`` blends it into the quality term, so a strategy that returns
+    genuinely relevant passages is rewarded even when the coarse per-query judge is
+    lukewarm. beta=0 (or rel_signal=None) ⇒ exact legacy reward.
+    """
+    quality = score if (rel_signal is None or beta <= 0.0) else (1.0 - beta) * score + beta * rel_signal
     max_cost = max(s.cost_units() for s in strategies)
     cost_norm = strategy.cost_units() / max_cost if max_cost else 0.0
-    return round(max(0.0, score - COST_LAMBDA * cost_norm), 4)
+    return round(max(0.0, quality - COST_LAMBDA * cost_norm), 4)
 
 
 # ──────────────────────────── the tenant ────────────────────────────
@@ -200,7 +210,7 @@ class LibreChatTenant:
                  query_expander=None, calibration: CalibrationMap | None = None,
                  calib_log: CalibrationLog | None = None, load_meter: LoadMeter | None = None,
                  passage_judge=None, cost_profile=None, load_aware: bool = False,
-                 abstain_threshold: float | None = None):
+                 abstain_threshold: float | None = None, reward_beta: float = 0.0):
         self.runtime = runtime or ContextRuntime.default([])
         self.retriever = retriever or InMemoryStore([])
         # optional query rewrite applied to the RETRIEVAL query only (e.g. cross-language
@@ -219,6 +229,7 @@ class LibreChatTenant:
         self.cost_profile = cost_profile      # measured latency table for the sizer's budget guard
         self.load_aware = load_aware          # size the expensive stage by load (Tier A + B)
         self.abstain_threshold = abstain_threshold  # best P(relevant) below this ⇒ abstain
+        self.reward_beta = reward_beta        # blend served-hit calibrated relevance into reward
         # pending/last hold everything a later reward needs: plan, arm, hits (for calibration
         # logging), and the exact bandit context used at select time (so update matches).
         self._pending: dict[str, tuple[Plan, RetrievalStrategy, tuple[Hit, ...], str]] = {}
@@ -352,13 +363,22 @@ class LibreChatTenant:
 
     def _learn(self, request: str, plan: Plan, strategy: RetrievalStrategy, score: float,
                hits: tuple[Hit, ...] = (), ctx_key: str | None = None) -> float:
-        reward = reward_from_judgment(score, strategy, self.strategies)
+        reward = reward_from_judgment(score, strategy, self.strategies,
+                                      rel_signal=self._served_relevance(hits), beta=self.reward_beta)
         self.bandit.update(ctx_key or plan.intent.bucket, strategy, reward)
         self.runtime.estimator.observe(plan, Trace(
             plan_id=plan.id, goal_text=request, actual_tokens=strategy.final_k * 200,
             verification_passed=score >= 0.6))
         self._log_calibration(plan, strategy, score, hits)
         return reward
+
+    def _served_relevance(self, hits: tuple[Hit, ...]) -> float | None:
+        """Mean calibrated P(relevant) of the served hits — the retrieval-quality signal the
+        reward was missing. None (⇒ legacy reward) unless a calibration map annotated them."""
+        if self.calibration is None or not hits:
+            return None
+        ps = [h.meta["p_rel"] for h in hits if "p_rel" in h.meta]
+        return sum(ps) / len(ps) if ps else None
 
     def _log_calibration(self, plan: Plan, strategy: RetrievalStrategy, score: float,
                          hits: tuple[Hit, ...]) -> None:

@@ -92,3 +92,35 @@ byte-identical).
 
 Polars parallelizes the *fusion*; the concurrent fan-out (optionally planned by the
 `SchedulerPlugin`) is the separate win.
+
+## Calibrated, load-aware retrieval (v1 vs v2) — the DSpark-inspired additions
+
+**`examples/dspark_calibration_bench.py`** — a seeded simulation of the LibreChat
+self-learning loop over a stub corpus with **ground-truth per-passage relevance**, so we
+can score what was actually served. The per-query judge is deliberately noisy (one coarse
+scalar, like the real judge); the per-passage calibrated `P(relevant)` is the cleaner
+signal the reward used to throw away. Because the v2 features are opt-in, *v2 with them off
+is byte-for-byte v1* — the A/B is a flag toggle in one process. Each effect is isolated to
+avoid confounds (precision is measured on answerable, non-abstained queries only).
+
+| effect | v1 baseline | v2 | delta |
+|---|---|---|---|
+| **reward** — served true-precision (abstention off) | 73.8% | 82.2% | **+8.4 pts** |
+| **abstention** — unanswerable queries caught | 0% (can't) | 100% | — |
+| **abstention** — answerable wrongly dropped | — | 0.0% | — |
+| **sizer** — passages to the expensive stage (deep k=8 arm) | 8.00 | 3.00 | **−62%** |
+| **sizer** — precision of that served set | 38% | 100% | pruned the low-relevance tail |
+
+```
+(1) reward       v1 judge-only 73.8%  →  v2 judge + calibrated relevance 82.2%   (+8.4 pts)
+(2) abstention   v2 catches 100% of unanswerable queries, 0% false abstentions   (v1 cannot)
+(3) sizer        deep k=8 arm: 8.00 → 3.00 passages (−62%), precision 38% → 100%
+```
+
+**Why each moves:** (1) the bandit reward finally includes the mean calibrated relevance of
+the *served* passages (`reward_beta`), not just the noisy per-query judge — lower-variance
+signal ⇒ a better learned policy. (2) a calibrated `P(relevant)` floor lets the runtime say
+"not enough context" and skip the upstream call — impossible on v1, whose scores aren't
+probabilities. (3) the sizer admits passages by DSpark's cumulative survival product and
+stops when it decays, so a deep arm's irrelevant tail never reaches synthesis. All default
+off; `v1` and `v2` git branches capture the same toggle for an out-of-process A/B.

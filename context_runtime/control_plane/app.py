@@ -1037,7 +1037,8 @@ librechat = LibreChatTenant(runtime=fleet.runtime,   # shares the fleet cost mod
                             persist_path=str(fleet.home / "librechat_bandit.json"),
                             calibration=_calib_map, calib_log=_calib_log, load_meter=_load_meter,
                             cost_profile=_cost_profile, load_aware=_flag("CR_LOAD_AWARE"),
-                            abstain_threshold=_abstain_threshold)
+                            abstain_threshold=_abstain_threshold,
+                            reward_beta=float(os.getenv("CR_REWARD_BETA", "0.3")))
 _lc_corpus = os.getenv("CR_CORPUS_DIR", "")
 if _lc_corpus and os.path.isdir(_lc_corpus):
     try:
