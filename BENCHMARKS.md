@@ -97,30 +97,41 @@ Polars parallelizes the *fusion*; the concurrent fan-out (optionally planned by 
 
 **`examples/dspark_calibration_bench.py`** — a seeded simulation of the LibreChat
 self-learning loop over a stub corpus with **ground-truth per-passage relevance**, so we
-can score what was actually served. The per-query judge is deliberately noisy (one coarse
-scalar, like the real judge); the per-passage calibrated `P(relevant)` is the cleaner
-signal the reward used to throw away. Because the v2 features are opt-in, *v2 with them off
-is byte-for-byte v1* — the A/B is a flag toggle in one process. Each effect is isolated to
-avoid confounds (precision is measured on answerable, non-abstained queries only).
+can score what was actually served. The per-query judge models the real heuristic judge: it
+scores **term coverage / recall**, so it rewards dumping more passages and is blind to
+precision — the coarse signal the per-passage calibrated `P(relevant)` corrects. Because the
+v2 features are opt-in, *v2 with them off is byte-for-byte v1* — the A/B is a flag toggle in
+one process. Each effect is isolated (precision measured on answerable, non-abstained only).
+
+The reward comparison is **seed-averaged over 40 seeds**: a single run is dominated by
+bandit exploration luck (every high-coverage arm ties on the coverage judge, so which one
+the policy locks onto is random), so a lone run can read anywhere from +0 to +30 pts. The
+systematic effect grows with how much the reward trusts calibrated relevance over the coarse
+judge — the `beta` sweep:
 
 | effect | v1 baseline | v2 | delta |
 |---|---|---|---|
-| **reward** — served true-precision (abstention off) | 73.8% | 82.2% | **+8.4 pts** |
+| **reward** — served true-precision, β=0.5 | 67.6% | 68.9% | **+1.3 pts** |
+| **reward** — served true-precision, β=0.7 | 67.6% | 74.4% | **+6.9 pts** |
+| **reward** — served true-precision, β=0.9 | 67.6% | 82.2% | **+14.6 pts** |
 | **abstention** — unanswerable queries caught | 0% (can't) | 100% | — |
 | **abstention** — answerable wrongly dropped | — | 0.0% | — |
 | **sizer** — passages to the expensive stage (deep k=8 arm) | 8.00 | 3.00 | **−62%** |
 | **sizer** — precision of that served set | 38% | 100% | pruned the low-relevance tail |
 
 ```
-(1) reward       v1 judge-only 73.8%  →  v2 judge + calibrated relevance 82.2%   (+8.4 pts)
-(2) abstention   v2 catches 100% of unanswerable queries, 0% false abstentions   (v1 cannot)
-(3) sizer        deep k=8 arm: 8.00 → 3.00 passages (−62%), precision 38% → 100%
+(1) reward     v1 67.6%  →  v2 68.9% (β0.5) / 74.4% (β0.7) / 82.2% (β0.9)   [40-seed avg]
+(2) abstention v2 catches 100% of unanswerable queries, 0% false abstentions (v1 cannot)
+(3) sizer      deep k=8 arm: 8.00 → 3.00 passages (−62%), precision 38% → 100%
 ```
 
-**Why each moves:** (1) the bandit reward finally includes the mean calibrated relevance of
-the *served* passages (`reward_beta`), not just the noisy per-query judge — lower-variance
-signal ⇒ a better learned policy. (2) a calibrated `P(relevant)` floor lets the runtime say
-"not enough context" and skip the upstream call — impossible on v1, whose scores aren't
-probabilities. (3) the sizer admits passages by DSpark's cumulative survival product and
-stops when it decays, so a deep arm's irrelevant tail never reaches synthesis. All default
-off; `v1` and `v2` git branches capture the same toggle for an out-of-process A/B.
+**Why each moves:** (1) the coarse coverage judge makes judge-only (v1) chase deep,
+low-precision arms; the reward now blends the mean calibrated relevance of the *served*
+passages (`reward_beta`), and the more it trusts that over the judge, the better the learned
+policy — monotone in β (β=0.3 is actually −2 pts, so the live default is 0.5). (2) a
+calibrated `P(relevant)` floor lets the runtime say "not enough context" and skip the
+upstream call — impossible on v1, whose scores aren't probabilities. (3) the sizer admits
+passages by DSpark's cumulative survival product and stops when it decays, so a deep arm's
+irrelevant tail never reaches synthesis. All default off; `v1`/`v2` git branches capture the
+same toggle for an out-of-process A/B. (2) and (3) are deterministic; only (1) needs seed
+averaging.

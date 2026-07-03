@@ -8,9 +8,14 @@ one process runs a faithful A/B by toggling them:
   enhanced (v2): reward = blend(judge, calibrated P(rel))  + abstention + load-aware depth
 
 The setup is a controllable stub retriever with **ground-truth** per-passage relevance, so
-we can score what was actually served. The per-query judge is deliberately NOISY (a single
-coarse scalar, like the real heuristic/LLM judge); the per-passage calibrated relevance is
-the cleaner signal the reward was throwing away. Everything is seeded → reproducible.
+we can score what was actually served. The per-query judge models the REAL heuristic judge:
+it scores term coverage / recall of the whole context, so it rewards dumping more passages
+and is blind to precision — the coarse signal the per-passage calibrated relevance corrects.
+
+The reward comparison is SEED-AVERAGED (§1): a single run is dominated by bandit exploration
+luck (all high-coverage arms tie on the judge, so which one the policy locks onto is random),
+so we average over 40 seeds and sweep beta to show the systematic effect. Everything is
+seeded → reproducible.
 
 Run:  PYTHONPATH=. python examples/dspark_calibration_bench.py
 Exits 0. No external deps.
@@ -85,12 +90,14 @@ class StubRetriever:
         return hits
 
 
-# ── the noisy per-query judge (ground-truth precision + coarse noise) ─────────
-def noisy_judge(hits, noise: float) -> float:
-    if not hits:
-        return 0.0
-    true_prec = sum(h.meta["_true_rel"] for h in hits) / len(hits)
-    return max(0.0, min(1.0, true_prec + noise))
+# ── the coverage-biased per-query judge ──────────────────────────────────────
+# Models the REAL heuristic_judge, which scores term coverage of the retrieved context —
+# a recall-like signal that rewards dumping more passages and is blind to precision. This
+# is the coarse signal the calibrated per-passage relevance in the reward corrects: judge-
+# only chases deep, low-precision arms; the blend pulls the policy back to precise ones.
+def coverage_judge(hits, noise: float) -> float:
+    found = min(3, sum(1 for h in hits if h.meta.get("_true_rel", 0) > 0))
+    return max(0.0, min(1.0, found / 3.0 + noise))  # recall of the 3 relevant chunks
 
 
 def true_precision(hits) -> float:
@@ -128,8 +135,8 @@ def run_world(*, calibration, reward_beta, abstain_threshold=None, load_meter=No
         unanswerable = (i % 6 == 0)                      # ~17% of the stream has no good answer
         query = f"{'UNANSWERABLE ' if unanswerable else ''}user question {i}"
         ctx = tenant.retrieve(query)
-        noise = (noise_rng() - 0.5) * 0.8                # coarse judge = true precision ± noise
-        tenant.record_judgment(query, noisy_judge(ctx.hits, noise))
+        noise = (noise_rng() - 0.5) * 0.4                # coarse coverage/recall judge ± noise
+        tenant.record_judgment(query, coverage_judge(ctx.hits, noise))
         if i < n // 2:
             continue                                     # measure only after the policy has learned
         if unanswerable:
@@ -156,16 +163,28 @@ def main() -> int:
     print("=" * 72)
     print("DSpark v1 vs v2 — self-learning retrieval over ground-truth relevance")
     print("=" * 72)
-    print("eval = 2nd half of a 600-query stream; precision measured on ANSWERABLE,")
-    print("answered queries only (abstention off) so it isolates the policy, not survivorship.\n")
+    print("eval = 2nd half of a 600-query stream; precision on ANSWERABLE, answered queries")
+    print("only (abstention off) so it isolates the policy, not survivorship.\n")
 
-    # ── (1) reward fix, isolated: abstention OFF for both so the answered sets match ──
-    v1 = run_world(calibration=None, reward_beta=0.0)
-    v2 = run_world(calibration=cmap, reward_beta=0.5)
-    print("(1) reward — served true-precision on answerable queries (abstention off)")
-    print(f"      v1  judge-only reward .............. {v1['ans_precision']*100:5.1f}%")
-    print(f"      v2  judge + calibrated relevance ... {v2['ans_precision']*100:5.1f}%")
-    print(f"      lift ............................... {(v2['ans_precision']-v1['ans_precision'])*100:+5.1f} pts\n")
+    # ── (1) reward fix, SEED-AVERAGED. A single run is dominated by bandit exploration
+    #        luck: every high-coverage arm ties on the coverage judge, so WHICH one the
+    #        policy locks onto is random. Averaging over seeds isolates the reward's real,
+    #        systematic effect — and it grows with how much the reward trusts calibrated
+    #        per-passage relevance over the coarse coverage judge (the beta sweep). ──
+    seeds = range(1, 41)
+    n_seeds = len(seeds)
+
+    def avg_prec(cal, beta):
+        return sum(run_world(calibration=cal, reward_beta=beta, seed=s)["ans_precision"]
+                   for s in seeds) / n_seeds
+
+    v1 = avg_prec(None, 0.0)
+    print(f"(1) reward — served true-precision, averaged over {n_seeds} seeds (coverage-biased judge)")
+    print(f"      v1  judge-only reward (beta 0.0) ......... {v1 * 100:5.1f}%")
+    for beta in (0.5, 0.7, 0.9):
+        v2 = avg_prec(cmap, beta)
+        print(f"      v2  judge + calibrated rel (beta {beta}) .... {v2 * 100:5.1f}%   ({(v2 - v1) * 100:+.1f} pts)")
+    print()
 
     # ── (2) abstention, isolated: v2 with the P(relevant) floor on ──
     v2a = run_world(calibration=cmap, reward_beta=0.5, abstain_threshold=0.5)
