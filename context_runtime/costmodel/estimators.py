@@ -27,11 +27,14 @@ METHOD_RECALL = {"bm25": 0.6, "vector": 0.7, "hybrid": 0.85, "code": 0.8, "graph
 class HeuristicEstimator:
     version = "heuristic-0.1"
 
-    def __init__(self, stats_path: str | Path | None = None):
+    def __init__(self, stats_path: str | Path | None = None, profile=None):
         self.stats = StatisticsStore(
             estimator_version=self.version,
             path=Path(stats_path) if stats_path else None,
         )
+        # Optional CostProfile: measured stage latency replacing the TIER_LATENCY prior
+        # when a cell has samples (DSpark's profiled cost table). None ⇒ pure heuristic.
+        self.profile = profile
 
     def estimate(self, candidate: Candidate, goal: Goal) -> PlanScore:
         tier = candidate.model_tier
@@ -56,7 +59,13 @@ class HeuristicEstimator:
 
         # graph retrieval pays for the KG build + Personalized PageRank hop
         cost = TIER_COST.get(tier, 0.1) + (0.01 if reranked else 0.0) + (0.03 if is_graph else 0.0)
-        latency = (TIER_LATENCY.get(tier, 8.0) + (2.0 if reranked else 0.0)
+        # Base model latency: measured (profiled) when available, else the tier prior.
+        base_lat = TIER_LATENCY.get(tier, 8.0)
+        if self.profile is not None:
+            measured = self.profile.latency(f"synthesis:{tier}", 1)
+            if measured is not None:
+                base_lat = measured
+        latency = (base_lat + (2.0 if reranked else 0.0)
                    + (3.0 if verified else 0.0) + (5.0 if is_graph else 0.0))
 
         hallucination = TIER_HALLUCINATION.get(tier, 0.12) * (0.5 if verified else 1.0)

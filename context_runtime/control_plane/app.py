@@ -1014,10 +1014,30 @@ def _query_expander(text: str) -> str:
     return " ".join(parts)
 
 
+def _flag(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+# ── DSpark-inspired opt-in: score calibration + load-aware depth (all default-off) ──
+from ..costmodel.profile import CostProfile  # noqa: E402
+from ..integrations.calibration import CalibrationLog, CalibrationMap  # noqa: E402
+from ..integrations.loadmeter import LoadMeter  # noqa: E402
+
+_calib_path = os.getenv("CR_CALIBRATION_PATH", str(fleet.home / "librechat_calibration.json"))
+_calib_map = CalibrationMap.load(_calib_path)                                    # applied if the artifact exists
+_calib_log = CalibrationLog(str(fleet.home / "librechat_calib_log.jsonl")) if _flag("CR_CALIBRATE") else None
+_load_meter = LoadMeter(mid=int(os.getenv("CR_LOAD_MID", "4")),
+                        hi=int(os.getenv("CR_LOAD_HI", "12"))) if _flag("CR_LOAD_AWARE") else None
+_cost_profile = CostProfile(os.getenv("CR_COST_PROFILE")) if os.getenv("CR_COST_PROFILE") else None
+_abstain_threshold = float(os.environ["CR_ABSTAIN_THRESHOLD"]) if os.getenv("CR_ABSTAIN_THRESHOLD") else None
+
 librechat = LibreChatTenant(runtime=fleet.runtime,   # shares the fleet cost model + persists its policy
                             retriever=_lc_retriever,
                             query_expander=_query_expander if _QUERY_LANGS else None,
-                            persist_path=str(fleet.home / "librechat_bandit.json"))
+                            persist_path=str(fleet.home / "librechat_bandit.json"),
+                            calibration=_calib_map, calib_log=_calib_log, load_meter=_load_meter,
+                            cost_profile=_cost_profile, load_aware=_flag("CR_LOAD_AWARE"),
+                            abstain_threshold=_abstain_threshold)
 _lc_corpus = os.getenv("CR_CORPUS_DIR", "")
 if _lc_corpus and os.path.isdir(_lc_corpus):
     try:
@@ -1120,17 +1140,46 @@ def librechat_policy() -> dict:
 # context), then judges retrieval quality and learns — so the DEPLOYED chat app becomes
 # a self-learning Context Runtime tenant. Config via env:
 #   CR_UPSTREAM_BASE_URL / CR_UPSTREAM_API_KEY / CR_UPSTREAM_MODEL  (OpenAI-compatible upstream)
+import contextlib  # noqa: E402
 import json  # noqa: E402
 import time as _time  # noqa: E402
 
 from fastapi.responses import StreamingResponse  # noqa: E402
 
-from ..integrations.librechat import heuristic_judge as _heuristic_judge  # noqa: E402
+
+def _nullctx():
+    return contextlib.nullcontext()
 
 _UPSTREAM_BASE = os.getenv("CR_UPSTREAM_BASE_URL", "").rstrip("/")
 _UPSTREAM_KEY = os.getenv("CR_UPSTREAM_API_KEY", "")
 _UPSTREAM_MODEL = os.getenv("CR_UPSTREAM_MODEL", "")
 _SHIM_MODEL_ID = os.getenv("CR_SHIM_MODEL_ID", "context-runtime")
+
+
+def _build_judge_model():
+    """A ModelPlugin pointed at the upstream, for the LLM judges — or None if unavailable
+    (→ the heuristic judge stays in place). Guarded so a missing litellm/upstream degrades."""
+    if not _UPSTREAM_BASE:
+        return None
+    try:
+        from ..adapters.model_litellm import LiteLLMModel, Tier
+        model = os.getenv("CR_JUDGE_MODEL") or _UPSTREAM_MODEL or _SHIM_MODEL_ID
+        return LiteLLMModel(tiers=[Tier(name="judge", model=model,
+                                        base_url=_UPSTREAM_BASE, api_key=_UPSTREAM_KEY)],
+                            default_tier="judge")
+    except Exception:
+        return None
+
+
+# Opt-in LLM judges (CR_LLM_JUDGE=1): a per-query judge for the reward + a per-passage
+# judge for calibration labels. Both fall back to the heuristic if the model won't build.
+if _flag("CR_LLM_JUDGE"):
+    _jm = _build_judge_model()
+    if _jm is not None:
+        from ..integrations.librechat import llm_judge as _mk_llm_judge
+        from ..integrations.librechat import llm_passage_judge as _mk_passage_judge
+        librechat.judge = _mk_llm_judge(_jm)
+        librechat.passage_judge = _mk_passage_judge(_jm)
 
 
 class ChatMessage(BaseModel):
@@ -1212,14 +1261,25 @@ def _chat_core(req: ChatCompletionReq) -> dict:
     user_msgs = [m for m in req.messages if m.role == "user"]
     request_text = user_msgs[-1].content if user_msgs else ""
     _infer_feedback(req, request_text)                           # native implicit reward (primary)
-    ctx = librechat.retrieve(request_text)                       # learned retrieval strategy
-    system = ("You are a helpful assistant. Answer using the RETRIEVED CONTEXT below when "
-              "relevant, citing [n]. If it is insufficient, say so.\n\n"
-              f"RETRIEVED CONTEXT:\n{ctx.context[:6000]}")
-    fwd = [{"role": "system", "content": system}] + [m.model_dump() for m in req.messages]
-    answer, usage, model_name = _forward_to_upstream(fwd, req)
-    score = _heuristic_judge(request_text, ctx.context, ctx.hits)  # retrieval-quality reward
-    reward = librechat.record_judgment(request_text, score)
+    # Count this turn as in-flight so the load-aware sizer/bandit see current concurrency.
+    tracker = _load_meter.track() if _load_meter is not None else _nullctx()
+    with tracker:
+        ctx = librechat.retrieve(request_text)                   # learned retrieval strategy
+        librechat.annotate_relevance(request_text, ctx.hits)     # per-passage calibration labels (opt-in)
+        if ctx.abstain:
+            # Best passage's calibrated P(relevant) is below the floor — answering would be
+            # ungrounded. Say so instead of burning an upstream call, and still learn.
+            answer = ("I don't have enough relevant context to answer that reliably. "
+                      "Try rephrasing or adding detail.")
+            usage, model_name = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, _SHIM_MODEL_ID
+        else:
+            system = ("You are a helpful assistant. Answer using the RETRIEVED CONTEXT below when "
+                      "relevant, citing [n]. If it is insufficient, say so.\n\n"
+                      f"RETRIEVED CONTEXT:\n{ctx.context[:6000]}")
+            fwd = [{"role": "system", "content": system}] + [m.model_dump() for m in req.messages]
+            answer, usage, model_name = _forward_to_upstream(fwd, req)
+        score = librechat.judge(request_text, ctx.context, ctx.hits)  # retrieval-quality reward
+        reward = librechat.record_judgment(request_text, score)
     return {
         "id": f"chatcmpl-{ctx.plan.id}", "object": "chat.completion", "created": int(_time.time()),
         "model": model_name,
@@ -1228,6 +1288,7 @@ def _chat_core(req: ChatCompletionReq) -> dict:
         "context_runtime": {
             "strategy": ctx.strategy.key, "retrieval_score": round(score, 4), "reward": reward,
             "citations": [h.chunk_id for h in ctx.hits], "suggestion": librechat.suggest(request_text),
+            "confidence": round(ctx.max_p_rel, 4), "abstained": ctx.abstain,
         },
     }
 

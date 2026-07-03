@@ -22,6 +22,8 @@ from ..adapters.store_inmemory import InMemoryStore
 from ..runtime.runtime import ContextRuntime
 from ..types import Goal, Hit, Plan, Trace
 from .bandit import EpsilonGreedyBandit
+from .calibration import CalibrationLog, CalibrationMap
+from .loadmeter import LoadMeter
 
 # ──────────────────────────── the arms: retrieval strategies ────────────────────────────
 
@@ -116,6 +118,38 @@ def llm_judge(model) -> Judge:
     return _judge
 
 
+def llm_passage_judge(model):
+    """Build a PER-PASSAGE relevance judge from any ModelPlugin — the labels the
+    calibration map needs. One batched call asks the model which retrieved passages are
+    relevant to the request and returns a 0/1 label per passage (mapped to [0,1]).
+
+    Returns a callable ``(request, hits) -> tuple[float, ...]`` aligned with ``hits``.
+    Per-query judges (heuristic_judge/llm_judge) only score the whole context; calibrating
+    score→P(relevant) needs a signal at the granularity of the thing being scored — the
+    passage — so this exists alongside them, not instead of them.
+    """
+    import os
+
+    def _judge(request: str, hits: tuple[Hit, ...]) -> tuple[float, ...]:
+        if not hits:
+            return ()
+        listing = "\n".join(f"[{i+1}] {(h.text or '')[:300]}" for i, h in enumerate(hits))
+        prompt = (
+            "You grade retrieval for a chat assistant. For the USER REQUEST below, decide "
+            "for EACH numbered passage whether it is relevant/useful for answering the "
+            "request. Reply with ONLY the numbers of the relevant passages, comma-separated "
+            "(e.g. '1,3,4'); reply 'none' if none are relevant.\n\n"
+            f"USER REQUEST:\n{request}\n\nPASSAGES:\n{listing}\n\nRELEVANT:")
+        from ..types import ModelRequest
+        budget = int(os.getenv("CR_JUDGE_MAX_TOKENS", "2048"))
+        result = model.complete(ModelRequest(messages=[{"role": "user", "content": prompt}],
+                                             capability="judge", max_tokens=budget))
+        import re as _re
+        idxs = {int(x) for x in _re.findall(r"\d+", result.text or "")}
+        return tuple(1.0 if (i + 1) in idxs else 0.0 for i in range(len(hits)))
+    return _judge
+
+
 def _parse_score(text: str) -> float:
     import re
     m = re.search(r"(\d*\.?\d+)", text or "")
@@ -150,6 +184,9 @@ class ChatContext:
     hits: tuple[Hit, ...]
     context: str
     plan: Plan
+    probs: tuple[float, ...] = ()   # calibrated P(relevant) per hit (() when uncalibrated)
+    max_p_rel: float = 1.0          # confidence of the best hit (1.0 when uncalibrated)
+    abstain: bool = False           # best hit below the abstain threshold → too weak to answer
 
 
 class LibreChatTenant:
@@ -160,7 +197,10 @@ class LibreChatTenant:
                  retriever=None, bandit: EpsilonGreedyBandit | None = None,
                  strategies: tuple[RetrievalStrategy, ...] = DEFAULT_STRATEGIES,
                  judge: Judge | None = None, persist_path: str | None = None,
-                 query_expander=None):
+                 query_expander=None, calibration: CalibrationMap | None = None,
+                 calib_log: CalibrationLog | None = None, load_meter: LoadMeter | None = None,
+                 passage_judge=None, cost_profile=None, load_aware: bool = False,
+                 abstain_threshold: float | None = None):
         self.runtime = runtime or ContextRuntime.default([])
         self.retriever = retriever or InMemoryStore([])
         # optional query rewrite applied to the RETRIEVAL query only (e.g. cross-language
@@ -171,27 +211,74 @@ class LibreChatTenant:
         self.strategies = strategies
         self.bandit = bandit or EpsilonGreedyBandit(strategies, epsilon=0.12, persist_path=persist_path)
         self.judge = judge or heuristic_judge
-        self._pending: dict[str, tuple[Plan, RetrievalStrategy]] = {}
-        self._last: dict[str, tuple[Plan, RetrievalStrategy]] = {}   # for late implicit feedback
+        # ── opt-in machinery (all None/False ⇒ exact legacy behaviour) ──
+        self.calibration = calibration        # score→P(relevant) map, applied at retrieve time
+        self.calib_log = calib_log            # append (score, label) rows to fit the map from
+        self.load_meter = load_meter          # in-flight load signal for load-aware depth
+        self.passage_judge = passage_judge    # per-passage relevance labels for calibration
+        self.cost_profile = cost_profile      # measured latency table for the sizer's budget guard
+        self.load_aware = load_aware          # size the expensive stage by load (Tier A + B)
+        self.abstain_threshold = abstain_threshold  # best P(relevant) below this ⇒ abstain
+        # pending/last hold everything a later reward needs: plan, arm, hits (for calibration
+        # logging), and the exact bandit context used at select time (so update matches).
+        self._pending: dict[str, tuple[Plan, RetrievalStrategy, tuple[Hit, ...], str]] = {}
+        self._last: dict[str, tuple[Plan, RetrievalStrategy, tuple[Hit, ...], str]] = {}
 
     def ingest(self, corpus_dir: str) -> dict:
         """Index (more of) the corpus into the retriever."""
         return self.retriever.index(corpus_dir)
 
+    def _select_ctx(self, plan: Plan) -> str:
+        """The bandit context. Load-aware mode appends a coarse load band so the policy
+        learns load-conditioned depth (shallow arms when busy, deep when idle) — reusing
+        the existing bandit rather than a second selector that would fight it."""
+        bucket = plan.intent.bucket
+        if self.load_aware and self.load_meter is not None:
+            return f"{bucket}:{self.load_meter.band()}"
+        return bucket
+
     def retrieve(self, request: str) -> ChatContext:
         """Plan the request, let the bandit pick a strategy, and retrieve context.
         No judging yet — call record_feedback (native signal) or record_judgment (bootstrap)."""
         plan = self.runtime.plan(Goal(text=request))
-        strategy = self.bandit.select(plan.intent.bucket)
+        ctx_key = self._select_ctx(plan)
+        strategy = self.bandit.select(ctx_key)
         rq = self._expand(request)
         hits = tuple(self.retriever.search(rq, k=strategy.final_k, method=strategy.method))
         if strategy.rerank:
             hits = hits[:strategy.final_k]
+
+        # Calibrate scores → P(relevant); optionally load-size the expensive stage; abstain.
+        probs, max_p, abstain = self._calibrate(strategy, hits)
+        if probs and self.load_aware and self.load_meter is not None:
+            band = self.load_meter.band()
+            from ..scheduler.load_aware import size_expensive_stage
+            decision = size_expensive_stage(
+                list(probs), load_band=band, requested_k=strategy.final_k,
+                requested_rerank=strategy.rerank, cost_profile=self.cost_profile,
+                max_latency_seconds=None)
+            hits = hits[:decision.final_k]
+            probs = probs[:decision.final_k]
+
         context = "\n\n".join(f"[{i+1}] {h.text}" for i, h in enumerate(hits))
         key = self._key(request)
-        self._pending[key] = (plan, strategy)
-        self._last[key] = (plan, strategy)   # persists so implicit feedback can arrive later
-        return ChatContext(request, strategy, hits, context, plan)
+        self._pending[key] = (plan, strategy, hits, ctx_key)
+        self._last[key] = (plan, strategy, hits, ctx_key)   # persists for late implicit feedback
+        return ChatContext(request, strategy, hits, context, plan,
+                           probs=probs, max_p_rel=max_p, abstain=abstain)
+
+    def _calibrate(self, strategy: RetrievalStrategy,
+                            hits: tuple[Hit, ...]) -> tuple[tuple[float, ...], float, bool]:
+        """Map each hit's raw score → calibrated P(relevant) (identity if no map), stash it
+        on the hit for the panel, and decide abstention from the best calibrated score."""
+        if self.calibration is None or not hits:
+            return (), 1.0, False
+        probs = tuple(round(self.calibration.apply(strategy.method, float(h.score)), 4) for h in hits)
+        for h, p in zip(hits, probs):
+            h.meta["p_rel"] = p
+        max_p = max(probs) if probs else 0.0
+        abstain = self.abstain_threshold is not None and max_p < self.abstain_threshold
+        return probs, max_p, abstain
 
     def _expand(self, request: str) -> str:
         """Apply the optional query rewrite (cross-language expansion) for retrieval only."""
@@ -214,13 +301,10 @@ class LibreChatTenant:
                 hits = self.retriever.search(rq, k=k, method=m)
             except Exception:
                 hits = ()
-            per[m] = [{"chunk_id": h.chunk_id, "filename": h.filename,
-                       "score": round(float(h.score), 4), "snippet": (h.text or "")[:240],
-                       "text": (h.text or "")[:1500]}  # full passage for click-to-expand
-                      for h in hits]
+            per[m] = [self._compare_hit(m, h) for h in hits]
         plan = self.runtime.plan(Goal(text=request))
         bucket = plan.intent.bucket
-        key = self.bandit.policy().get(bucket)
+        key = self.bandit.policy().get(self._select_ctx(plan))
         chosen = next((s for s in self.strategies if s.key == key), None) or self.strategies[1]
         hits = self.retriever.search(rq, k=chosen.final_k, method=chosen.method)
         if chosen.rerank:
@@ -234,6 +318,28 @@ class LibreChatTenant:
             "served": {"context": served[:4000], "citations": [h.chunk_id for h in hits]},
         }
 
+    def _compare_hit(self, method: str, h: Hit) -> dict:
+        """One hit for the transparency panel, with calibrated P(relevant) when available —
+        an honest confidence number, not a scale-free raw score."""
+        d = {"chunk_id": h.chunk_id, "filename": h.filename,
+             "score": round(float(h.score), 4), "snippet": (h.text or "")[:240],
+             "text": (h.text or "")[:1500]}
+        if self.calibration is not None and self.calibration.has(method):
+            d["p_rel"] = round(self.calibration.apply(method, float(h.score)), 4)
+        return d
+
+    def annotate_relevance(self, request: str, hits: tuple[Hit, ...]) -> None:
+        """Run the per-passage judge (if configured) and stash labels on hits so the next
+        calibration-log write carries per-passage relevance instead of a weak query label."""
+        if self.passage_judge is None or not hits:
+            return
+        try:
+            labels = self.passage_judge(request, hits)
+            for h, r in zip(hits, labels):
+                h.meta["rel"] = float(r)
+        except Exception:
+            pass
+
     def record_feedback(self, request: str, signal: str) -> float:
         """Learn from an IMPLICIT user action (kept / regenerated / thumbs_up / …) — the
         app's NATIVE success signal. This is the primary online reward (cheaper, truer, and
@@ -241,16 +347,32 @@ class LibreChatTenant:
         entry = self._last.get(self._key(request))
         if entry is None:
             return 0.0
-        plan, strategy = entry
-        return self._learn(request, plan, strategy, SIGNAL_REWARDS.get(signal, 0.5))
+        plan, strategy, hits, ctx_key = entry
+        return self._learn(request, plan, strategy, SIGNAL_REWARDS.get(signal, 0.5), hits, ctx_key)
 
-    def _learn(self, request: str, plan: Plan, strategy: RetrievalStrategy, score: float) -> float:
+    def _learn(self, request: str, plan: Plan, strategy: RetrievalStrategy, score: float,
+               hits: tuple[Hit, ...] = (), ctx_key: str | None = None) -> float:
         reward = reward_from_judgment(score, strategy, self.strategies)
-        self.bandit.update(plan.intent.bucket, strategy, reward)
+        self.bandit.update(ctx_key or plan.intent.bucket, strategy, reward)
         self.runtime.estimator.observe(plan, Trace(
             plan_id=plan.id, goal_text=request, actual_tokens=strategy.final_k * 200,
             verification_passed=score >= 0.6))
+        self._log_calibration(plan, strategy, score, hits)
         return reward
+
+    def _log_calibration(self, plan: Plan, strategy: RetrievalStrategy, score: float,
+                         hits: tuple[Hit, ...]) -> None:
+        """Append the (per-hit raw score, relevance label) row the calibration map is fit
+        from. Per-passage labels are used when a passage judge annotated the hits (h.meta
+        ['rel']); otherwise the per-query judge score is the weak label (fit() falls back)."""
+        if self.calib_log is None or not hits:
+            return
+        rows = [{"chunk_id": h.chunk_id, "score": round(float(h.score), 6),
+                 "rel": h.meta.get("rel")} for h in hits]
+        try:
+            self.calib_log.append(strategy.method, plan.intent.bucket, score, rows)
+        except Exception:
+            pass   # logging must never break a chat turn
 
     def record_judgment(self, request: str, score: float) -> float:
         """Feed a judged retrieval-quality score (0..1) back — used for the offline
@@ -260,12 +382,13 @@ class LibreChatTenant:
         entry = self._pending.pop(key, None) or self._last.get(key)
         if entry is None:
             return 0.0
-        plan, strategy = entry
-        return self._learn(request, plan, strategy, score)
+        plan, strategy, hits, ctx_key = entry
+        return self._learn(request, plan, strategy, score, hits, ctx_key)
 
     def handle(self, request: str, judge: Judge | None = None) -> tuple[ChatContext, float, float]:
         """Retrieve → judge → learn, in one call. Returns (context, judged_score, reward)."""
         ctx = self.retrieve(request)
+        self.annotate_relevance(request, ctx.hits)   # per-passage labels for calibration (opt-in)
         score = (judge or self.judge)(request, ctx.context, ctx.hits)
         reward = self.record_judgment(request, score)
         return ctx, score, reward
