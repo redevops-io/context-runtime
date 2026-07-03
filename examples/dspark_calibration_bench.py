@@ -60,6 +60,13 @@ def _rng(seed: int):
     return nxt
 
 
+def _shash(*parts: str) -> int:
+    """Stable cross-process hash (Python's built-in hash() is salted per process by
+    PYTHONHASHSEED, which would make this benchmark non-reproducible)."""
+    import zlib
+    return zlib.crc32("|".join(parts).encode())
+
+
 class StubRetriever:
     """Deterministic retriever with embedded ground-truth relevance. A method of quality q
     ranks relevant chunks first with prob ~q; scores are relevance-correlated and scaled
@@ -72,7 +79,7 @@ class StubRetriever:
         answerable = not query.startswith("UNANSWERABLE")
         q = METHOD_QUALITY.get(method, 0.6)
         scale = METHOD_SCALE.get(method, 1.0)
-        rnd = _rng(hash((query, method)) & 0xFFFFFFFF)
+        rnd = _rng(_shash(query, method))
         scored = []
         for i in range(N_CHUNKS):
             cid = f"c{i}"

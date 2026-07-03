@@ -112,7 +112,7 @@ judge — the `beta` sweep:
 | effect | v1 baseline | v2 | delta |
 |---|---|---|---|
 | **reward** — served true-precision, β=0.5 | 67.6% | 68.9% | **+1.3 pts** |
-| **reward** — served true-precision, β=0.7 | 67.6% | 74.4% | **+6.9 pts** |
+| **reward** — served true-precision, β=0.7 | 67.6% | 74.3% | **+6.7 pts** |
 | **reward** — served true-precision, β=0.9 | 67.6% | 82.2% | **+14.6 pts** |
 | **abstention** — unanswerable queries caught | 0% (can't) | 100% | — |
 | **abstention** — answerable wrongly dropped | — | 0.0% | — |
@@ -120,7 +120,7 @@ judge — the `beta` sweep:
 | **sizer** — precision of that served set | 38% | 100% | pruned the low-relevance tail |
 
 ```
-(1) reward     v1 67.6%  →  v2 68.9% (β0.5) / 74.4% (β0.7) / 82.2% (β0.9)   [40-seed avg]
+(1) reward     v1 67.6%  →  v2 68.9% (β0.5) / 74.3% (β0.7) / 82.2% (β0.9)   [40-seed avg]
 (2) abstention v2 catches 100% of unanswerable queries, 0% false abstentions (v1 cannot)
 (3) sizer      deep k=8 arm: 8.00 → 3.00 passages (−62%), precision 38% → 100%
 ```
