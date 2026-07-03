@@ -28,6 +28,9 @@ polars = ["polars>=1.0"]
 # Persistent BM25 index backend (DuckDB `fts`, MIT) — one file per shard / per user's local
 # data. The in-memory store is the zero-dep default; this is the real-index backend.
 duckdb = ["duckdb>=1.0"]
+# Postgres full-text store backend (psycopg v3) — the same flat index over tsvector, for
+# data that already lives in Postgres. Optional.
+postgres = ["psycopg[binary]>=3.1"]
 # Quantized ANN vector index for the `vector` method at scale (TurboQuant, MIT). A
 # drop-in for brute-force cosine once the corpus is large (16x memory at 2-bit); quality
 # ≈ semantic, the win is memory+speed. Opt-in; the default path stays brute-force exact.

@@ -27,10 +27,30 @@ import argparse
 import json
 from pathlib import Path
 
+import os
+
 from context_runtime.adapters.store_inmemory import InMemoryStore
 from context_runtime.scheduler.parallel_fusion import ShardedRetriever
 
 FINANCEBENCH_CORPUS = Path(__file__).resolve().parent.parent / ".financebench" / "corpus"
+
+
+def make_store(docs: list[dict], name: str, backend: str):
+    """Build a store on the chosen backend. The flat-mixed-index vs coverage-routed result
+    holds on all three — in-memory (default), DuckDB fts, or Postgres tsvector."""
+    if backend == "memory":
+        return InMemoryStore(docs, source=name)
+    if backend == "duckdb":
+        from context_runtime.adapters.store_duckdb import DuckDBStore
+        return DuckDBStore(docs, path=f"/tmp/cr_{name}.duckdb", source=name)
+    if backend == "postgres":
+        from context_runtime.adapters.store_postgres import PostgresStore
+        dsn = os.environ.get("CR_PG_DSN")
+        if not dsn:
+            raise SystemExit("--backend postgres needs CR_PG_DSN "
+                             "(e.g. postgresql://postgres:pw@127.0.0.1:5432/db)")
+        return PostgresStore(docs, dsn=dsn, table=f"cr_{name}", source=name)
+    raise SystemExit(f"unknown backend {backend!r}")
 
 # ── the minority domain: curated clinical notes that deliberately collide on vocab ──
 # Each note's id is the ground-truth answer for the probe that targets it.
@@ -125,6 +145,8 @@ def main() -> None:
     ap.add_argument("--financial-cap", type=int, default=3000,
                     help="how many FinanceBench pages to load (the majority domain)")
     ap.add_argument("-k", type=int, default=5)
+    ap.add_argument("--backend", choices=["memory", "duckdb", "postgres"], default="memory",
+                    help="store backend for all shards (postgres needs CR_PG_DSN)")
     args = ap.parse_args()
 
     if not FINANCEBENCH_CORPUS.exists():
@@ -137,9 +159,10 @@ def main() -> None:
     print(f"corpus: {len(fin)} financial 10-K pages + {len(med)} medical notes  "
           f"(k={k})\n")
 
-    # three retrieval strategies over the SAME heterogeneous data:
-    mixed = InMemoryStore(fin + med, source="mixed")             # one flat index
-    shards = [InMemoryStore(fin, source="financial"), InMemoryStore(med, source="medical")]
+    # three retrieval strategies over the SAME heterogeneous data (on the chosen backend):
+    print(f"backend: {args.backend}\n")
+    mixed = make_store(fin + med, "mixed", args.backend)          # one flat index
+    shards = [make_store(fin, "financial", args.backend), make_store(med, "medical", args.backend)]
     fused = ShardedRetriever(shards, engine="auto", router="fuse")      # fan-out + RRF
     routed = ShardedRetriever(shards, engine="auto", router="coverage")  # fan-out + route-by-coverage
 

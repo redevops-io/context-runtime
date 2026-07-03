@@ -102,6 +102,14 @@ context-runtime --config context_runtime.yaml explain --analyze "why did deploy 
 | **Observability** | in-process `Trace` + JSON | OpenLLMetry → Langfuse |
 | **Plan Cache** | null/always-miss stub | semantic cache (v0.2) |
 
+## Benchmarks
+
+Runnable results in [BENCHMARKS.md](./BENCHMARKS.md) — retrieval over a **heterogeneous
+financial × medical corpus** (coverage routing cuts cross-domain context pollution 22→0 with
+recall intact), the **3-index chat memory** tenant (+2.93 learned vs read-all-three), and
+**parallel sharded fusion** (5.8× fan-out). Every number is produced by an example in
+[`examples/`](./examples).
+
 ## Architecture
 
 The decision layer is thin; the substrate is reused. See:
