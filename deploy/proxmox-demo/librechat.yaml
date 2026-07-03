@@ -12,8 +12,6 @@ interface:
   agents: false
   endpointsMenu: false
   presets: false
-  marketplace:
-    use: false
 
 modelSpecs:
   enforce: true
