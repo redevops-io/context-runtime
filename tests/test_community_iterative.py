@@ -71,3 +71,19 @@ def test_hop_router_routes_community():
     router = HopRouterRetriever(single_hop=base, graph=base, community=cr)
     hits = router.search("steroid hormone panel", k=2, method="community")
     assert hits and hits[0].chunk_id.startswith("community::")
+
+
+def test_community_search_scales_via_query_conditioned_clustering(monkeypatch):
+    monkeypatch.setenv("CR_COMMUNITY_MAX_NODES", "2")   # below corpus size → global build is skipped
+    docs = [{"chunk_id": c, "filename": c + ".md", "text": t, "created_at": None} for c, t in [
+        ("s1", "steroid hormone testosterone cortisol dhea androstenedione"),
+        ("s2", "testosterone cortisol steroid hormone dhea reference ranges"),
+        ("s3", "cortisol steroid hormone dhea testosterone endocrine panel"),
+        ("l1", "lipid cholesterol ldl hdl triglycerides"),
+    ]]
+    r = CommunityRetriever(docs)
+    assert r._build() == []                             # corpus > cap → no global communities
+    hits = r.search("steroid hormone testosterone", k=2)
+    assert hits and hits[0].chunk_id.startswith("community::")   # query-conditioned community still returned
+    members = hits[0].meta["members"]
+    assert any(m in ("s1", "s2", "s3") for m in members)         # the steroid cluster, not the lipid doc

@@ -116,3 +116,23 @@ def test_feedback_maps_signals_to_rewards(tmp_path):
     assert SIGNAL_REWARDS["thumbs_up"] > SIGNAL_REWARDS["regenerated"]
     # an unknown request (never retrieved) yields no update.
     assert t.record_feedback("never asked", "kept") == 0.0
+
+
+class _LowCal:
+    """Duck-typed CalibrationMap: every hit calibrates to a low P(relevant)."""
+    def apply(self, method, score):
+        return 0.1
+
+    def has(self, method):
+        return True
+
+
+def test_tenant_abstains_when_calibrated_confidence_below_threshold(tmp_path):
+    # abstain only runs when calibration is present; here every hit → P(rel)=0.1.
+    # threshold 0.5 > 0.1 → abstain ("don't answer from weak context").
+    t = LibreChatTenant(corpus_dir=_corpus(tmp_path), calibration=_LowCal(), abstain_threshold=0.5)
+    ctx = t.retrieve("testosterone")
+    assert ctx.abstain is True and ctx.max_p_rel == 0.1
+    # a threshold below the calibrated confidence → answer, don't abstain
+    t2 = LibreChatTenant(corpus_dir=_corpus(tmp_path), calibration=_LowCal(), abstain_threshold=0.05)
+    assert t2.retrieve("testosterone").abstain is False

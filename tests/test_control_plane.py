@@ -95,3 +95,31 @@ def test_approvals_resolve_and_validation():
     assert client.post("/approvals/ap-does-not-exist/approve").status_code == 404  # unknown id
     ok = client.post(f"/approvals/{aid}/approve")
     assert ok.status_code == 200 and ok.json()["id"] == aid
+
+
+def test_v1_chat_abstain_branch_shapes_response(monkeypatch):
+    # the module tenant has no corpus, so drive the abstain branch of _chat_core directly by
+    # returning an abstaining retrieval context — asserts the response shaping, not re-testing
+    # the calibrate/abstain decision (covered in test_librechat).
+    import types
+
+    import context_runtime.control_plane.app as cpapp
+    strat = cpapp.librechat.strategies[0]
+
+    class _AbstainCtx:
+        abstain = True
+        context = ""
+        hits = ()
+        probs = ()
+        max_p_rel = 0.1
+        strategy = strat
+        plan = types.SimpleNamespace(id="plan_test_abstain")
+
+    monkeypatch.setattr(cpapp.librechat, "retrieve", lambda text: _AbstainCtx())
+    r = client.post("/v1/chat/completions",
+                    json={"model": "x", "messages": [{"role": "user", "content": "what is alpha"}]})
+    j = r.json()
+    assert j["context_runtime"]["abstained"] is True
+    assert "enough relevant context" in j["choices"][0]["message"]["content"].lower()
+    assert j["usage"]["total_tokens"] == 0     # abstaining skips the upstream forward entirely
+    assert j["id"] == "chatcmpl-plan_test_abstain"
