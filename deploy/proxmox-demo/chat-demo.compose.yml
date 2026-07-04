@@ -38,6 +38,7 @@ services:
     environment:
       - CR_CORPUS_DIR=/corpus
       - CR_EMBEDDINGS=1
+      - CR_MULTIMODAL=1
       - CR_CORS_ORIGINS=https://${CHAT_HOST:-chat.redevops.io}
       - CR_UPSTREAM_BASE_URL=${KIMI_BASE_URL:-}
       - CR_UPSTREAM_API_KEY=${KIMI_API_KEY:-}
