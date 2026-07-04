@@ -38,3 +38,10 @@ def test_classifier_folds_into_bandit_context():
     # no classifier → context is the bare bucket (byte-for-byte legacy behaviour)
     t2 = LibreChatTenant(retriever=_Stub())
     assert ":" not in t2._select_ctx(plan, "what did revenue do on the chart")
+
+
+def test_classify_query_respects_word_boundaries():
+    # cues must not fire on substrings inside larger words (the (?<!\w)…(?!\w) guards)
+    assert classify_query("the charter school enrollment") == TEXT   # 'chart' inside 'charter'
+    assert classify_query("a columnist wrote about it") != TABLE      # 'column' inside 'columnist'
+    assert classify_query("the diagrammatically inclined team") != DIAGRAM  # 'diagram' inside a longer word

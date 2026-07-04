@@ -37,3 +37,17 @@ def test_langfuse_and_otel_import_without_their_deps():
     # constructing the exporter must not require the optional dep (lazy import on export)
     from context_runtime.observability.exporters import LangfuseExporter, OpenLLMetryExporter
     LangfuseExporter(); OpenLLMetryExporter()
+
+
+def test_jsonl_exporter_appends_across_runs(tmp_path):
+    path = tmp_path / "t.jsonl"
+    exp = JsonlExporter(str(path))
+    rt = ContextRuntime.default([{"chunk_id": "a::0", "filename": "a.md",
+                                  "text": "alpha beta deploy failed", "created_at": None}], exporter=exp)
+    rt.run("why did deploy fail")
+    rt.run("what is alpha")
+    lines = path.read_text().strip().splitlines()
+    assert len(lines) == 2                          # append mode accumulates (training log), not truncates
+    for ln in lines:
+        rec = json.loads(ln)
+        assert rec["plan_id"] and rec["spans"]      # every accumulated line is a complete, valid trace

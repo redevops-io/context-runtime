@@ -54,3 +54,22 @@ def test_down_up_cycle_changes_deployed_state():
 
 def test_unknown_module_404():
     assert client.post("/agent/run", json={"module": "nope", "question": "x"}).status_code == 404
+
+
+def test_mutating_endpoints_require_api_key(monkeypatch):
+    # With an API key configured, protected POSTs demand a matching X-API-Key header (else 401).
+    # The rest of this suite runs with the key UNSET, so auth is disabled there — this is the only
+    # coverage of the 401 branch that guards every money/infra/ingest mutation.
+    monkeypatch.setenv("CONTEXT_RUNTIME_API_KEY", "s3cret")
+    protected = [
+        ("/up", {}),
+        ("/dispatch", {"module": "agentic-billing", "agent": "checkout", "action": "refund", "prompt": "x"}),
+        ("/agent/run", {"module": "control-tower", "question": "q"}),
+    ]
+    for path, body in protected:
+        assert client.post(path, json=body).status_code == 401              # no header → 401
+        assert client.post(path, json=body, headers={"X-API-Key": "nope"}).status_code == 401  # wrong key → 401
+    # correct key → auth passes (handler runs; status is anything but 401)
+    ok = client.post("/agent/run", json={"module": "control-tower", "question": "q"},
+                     headers={"X-API-Key": "s3cret"})
+    assert ok.status_code != 401

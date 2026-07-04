@@ -59,3 +59,13 @@ def test_degrades_without_backend(tmp_path):
     ret = MultiVectorRetriever()                     # no injected embedder, no colpali installed
     assert ret.index(str(tmp_path))["pages"] == 0
     assert ret.search("anything", 3) == []
+
+
+def test_maxsim_empty_and_zero_vectors_are_finite():
+    import numpy as np
+    from context_runtime.adapters.store_multivector import _l2_rows, maxsim
+    assert maxsim([], [[1.0, 0.0]]) == 0.0          # empty query → 0, not a crash
+    assert maxsim([[1.0, 0.0]], []) == 0.0          # empty doc → 0
+    out = _l2_rows(np.array([[0.0, 0.0], [3.0, 4.0]], dtype="float32"))
+    assert np.isfinite(out).all()                   # zero-norm row → 0/1, never NaN (would poison MaxSim)
+    assert abs(out[1][0] - 0.6) < 1e-6 and abs(out[1][1] - 0.8) < 1e-6

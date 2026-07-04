@@ -55,3 +55,16 @@ def test_vibex_planner_persists(tmp_path):
     # reload → suggestion preserved
     v2 = VibexgenPlanner(persist_path=p)
     assert v2.suggest("trailer", scene) == latent
+
+
+def test_bandit_tolerates_corrupt_persist_and_backfills_new_arm(tmp_path):
+    p = tmp_path / "b.json"
+    p.write_text("{ not valid json", encoding="utf-8")
+    b = EpsilonGreedyBandit((_Arm("a"), _Arm("b")), persist_path=str(p))   # corrupt file must not crash load
+    assert b.value("ctx", "a")[0] == 0
+    for _ in range(5):
+        b.update("ctx", _Arm("a"), 1.0)
+    # reload with an EXTRA arm 'c' on the persisted (a,b) context → 'c' backfills, no KeyError
+    b2 = EpsilonGreedyBandit((_Arm("a"), _Arm("b"), _Arm("c")), persist_path=str(p))
+    assert b2.value("ctx", "a")[0] == 5             # existing arm reloaded
+    assert b2.value("ctx", "c")[0] == 0             # new arm optimistically backfilled at count 0

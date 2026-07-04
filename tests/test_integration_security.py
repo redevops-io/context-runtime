@@ -1,6 +1,10 @@
 """edge-sentinel SOC tenant: tools assemble evidence, bandit learns cheap sufficient bundles, blocks are gated."""
 from __future__ import annotations
 
+import inspect
+
+import pytest
+
 from context_runtime.integrations.edge_sentinel import (
     DEFAULT_BUNDLES, SOCTriageTenant, _soc_bandit, reward_triage, soc_bucket,
 )
@@ -51,3 +55,20 @@ def test_tenant_learns_cheap_sufficient_bundle():
     # the learned policy for this bucket must include the decisive source
     chosen = soc.policy()[soc_bucket(q)]
     assert latent in chosen
+
+
+@pytest.mark.skip(reason="Retrieval-level RBAC/data-source scoping is enforced by the ENTERPRISE "
+                         "policy layer (context-runtime-v3: PolicyEngine.feasible / allowed_data_sources "
+                         "/ rows_owned_by_requester), NOT the OSS retrieval core. This placeholder "
+                         "documents that boundary so the 'security' suite name does not imply coverage "
+                         "that lives in a different repo.")
+def test_retrieval_rbac_scope_is_enterprise_layer():
+    # If per-principal data scoping is ever added to the OSS core, move this from skip to a real test.
+    pass
+
+
+def test_soc_handle_has_no_principal_scoping_param():
+    # Corollary that DOES run: the OSS SOC tenant gates side-effects (blocks) via approval, but carries
+    # no per-principal data-scope parameter — confirming the RBAC gap is a real, documented boundary.
+    params = set(inspect.signature(SOCTriageTenant.__init__).parameters)
+    assert not ({"principal", "scope", "acl", "row_owner"} & params)
