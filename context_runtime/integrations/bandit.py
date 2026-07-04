@@ -52,7 +52,12 @@ class EpsilonGreedyBandit:
         return self._rng / 0x100000000
 
     def _ctx(self, ctx: str) -> dict[str, list[float]]:
-        return self.stats.setdefault(ctx, {a.key: [0.0, self.optimistic] for a in self.arms})
+        # backfill any arms added since this context was first seen / persisted, so select,
+        # update, and value() never KeyError on a new arm against an old (persisted) context.
+        d = self.stats.setdefault(ctx, {})
+        for a in self.arms:
+            d.setdefault(a.key, [0.0, self.optimistic])
+        return d
 
     def select(self, ctx: str):
         with self._lock:

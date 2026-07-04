@@ -68,6 +68,22 @@ def test_quality_routing_learns_the_better_arm():
     assert "quality-routed" in chosen["reason"]
 
 
+def test_explain_survives_a_new_arm_on_a_persisted_context():
+    """Regression: a persisted policy predates a newly-added arm (e.g. the image arm turned on by
+    CR_MULTIMODAL). EXPLAIN iterates every arm → bandit.value() must not KeyError on the new one."""
+    t = _tenant()
+    for _ in range(4):
+        ctx = t.retrieve("q"); t.record_judgment("q", 0.7)   # learns contexts under the 3 base arms
+    # add a 4th arm after the fact (simulates enabling a new strategy against a learned policy)
+    new = RetrievalStrategy("graph", 6, False)
+    t.strategies = STRATS + (new,)
+    t.bandit.arms = t.bandit.arms + (new,)
+    exp = t.explain("q")                                     # must not raise
+    keys = {c["key"] for c in exp["decision"]["candidates"]}
+    assert new.key in keys                                   # the new arm shows as un-tried (n=0)
+    assert next(c for c in exp["decision"]["candidates"] if c["key"] == new.key)["bandit"]["n"] == 0
+
+
 def test_explain_is_read_only():
     """EXPLAIN must not mutate the learned policy (no bandit/ledger writes)."""
     t = _tenant()
