@@ -91,3 +91,37 @@ def test_domain_guess_skips_usernames_and_sentences():
     # an HN-username or free-text account should NOT produce a bogus domain → no waterfall email
     sig = AccountSignal("some hn user", "tech_pain", "hn", "griping about reranking")
     assert find_contacts(sig, providers=[lambda *a: Contact("x", "y", email="z@z.com")]) == []
+
+
+# ── network-failure / malformed-response degradation added for the v2 release audit ──
+
+def test_github_maintainers_ratelimited_dict_returns_empty():
+    ratelimited = {"message": "API rate limit exceeded"}      # GitHub returns a DICT, not a list
+    assert github_maintainers("acme/x", fetch=lambda u, h=None: ratelimited) == []
+
+
+def test_github_maintainers_fetch_raises_degrades_to_empty():
+    def boom(u, h=None):
+        raise RuntimeError("network down")
+    assert github_maintainers("acme/x", fetch=boom) == []
+
+
+def test_maintainer_profile_fetch_raises_keeps_login_no_email():
+    contributors = [{"login": "jane", "type": "User", "contributions": 5, "html_url": "https://github.com/jane"}]
+
+    def fetch(u, h=None):
+        if "/contributors" in u:
+            return contributors
+        raise RuntimeError("profile 500")                     # /users/{login} fails per-user
+    cs = github_maintainers("acme/x", fetch=fetch)
+    assert len(cs) == 1 and cs[0].name == "jane" and cs[0].email is None and cs[0].confidence == 0.3
+
+
+def test_waterfall_provider_that_raises_is_skipped():
+    def boom(a, n, d):
+        raise RuntimeError("hunter 500")
+
+    def hit(a, n, d):
+        return Contact(account=a, name=n, email=f"{n}@{d}", source="apollo", confidence=0.8)
+    c = enrich_email("acme", "Jane", "acme.com", providers=[boom, hit])
+    assert c and c.email == "Jane@acme.com" and c.source == "apollo"

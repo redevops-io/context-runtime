@@ -61,3 +61,24 @@ def test_teardown_email_leads_with_signal_and_artifact():
     msg = teardown_email(s)
     assert "acme" in msg["subject"] and "EXPLAIN" in msg["body"]
     assert "github.com/acme/rag" in msg["body"] and msg["cta"] == "pilot scoping call"
+
+
+# ── funding/leadership feed + score-bound + dedup invariants added for the v2 release audit ──
+
+def test_manual_signals_coerces_invalid_signal_and_defaults():
+    out = manual_signals([{"account": "X", "signal": "bogus"}, {}])
+    assert out[0].account == "X" and out[0].signal == "cold"        # invalid bucket → cold
+    assert out[1].account == "unknown" and out[1].signal == "cold"  # missing account → unknown
+
+
+def test_score_signal_clamped_to_one():
+    maxed = AccountSignal("acme", "tech_pain", "github", "RAG", artifact="https://x", meta={"stars": 100000})
+    assert score_signal(maxed) == 1.0                               # additive bonuses never exceed 1.0
+
+
+def test_collect_signals_prefers_artifact_regardless_of_order():
+    incumbent_has_artifact = AccountSignal("acme", "tech_pain", "github", "repo",
+                                           artifact="https://github.com/acme/rag")
+    later_no_artifact = AccountSignal("Acme", "tech_pain", "hn", "chatter", artifact=None)
+    merged = collect_signals([incumbent_has_artifact], [later_no_artifact])
+    assert len(merged) == 1 and merged[0].artifact == "https://github.com/acme/rag"   # not clobbered

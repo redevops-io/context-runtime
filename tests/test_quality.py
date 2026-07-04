@@ -58,3 +58,41 @@ def test_persistence_roundtrip(tmp_path):
     again = QualityLedger(path=str(p))          # reload
     s = again.stat("c", "A")
     assert s is not None and s.n == 2 and abs(s.quality - 0.85) < 1e-6
+
+
+# ── edge cases / invariants added for the v2 release audit ──
+
+def test_observe_clamps_out_of_range():
+    led = QualityLedger()
+    led.observe("c", "A", quality=1.7, cost=-0.5)
+    s = led.stat("c", "A")
+    assert s.quality == 1.0 and s.cost == 0.0          # clamped into [0,1] (EXPLAIN/routing depend on it)
+
+
+def test_route_empty_choices_returns_none():
+    assert QualityLedger().route("ctx", []) is None     # cold-start fallback to the bandit
+
+
+def test_best_respects_min_samples():
+    led = QualityLedger()
+    led.observe("c", "A", 0.9, 0.1)
+    led.observe("c", "A", 0.9, 0.1)
+    assert led.best("c", ["A"], min_samples=5) is None  # under-sampled → not trusted
+    assert led.best("c", ["A"], min_samples=1) == "A"
+
+
+def test_ledger_tolerates_corrupt_persist_file(tmp_path):
+    p = tmp_path / "q.json"
+    p.write_text("{ not valid json", encoding="utf-8")
+    led = QualityLedger(path=p)                          # must not raise on load
+    assert led.stat("c", "A") is None
+    led.observe("c", "A", 0.8, 0.2)                      # still usable
+    assert led.stat("c", "A").n == 1
+
+
+def test_stats_sorted_by_blended_and_cost_weight_override():
+    led = QualityLedger()
+    led.observe("c", "A", 0.9, 0.9)                      # high quality, expensive
+    led.observe("c", "B", 0.8, 0.1)                      # slightly lower quality, cheap
+    assert [s.choice for s in led.stats("c", cost_weight=0.0)] == ["A", "B"]   # pure quality: A first
+    assert led.stats("c", cost_weight=1.0)[0].choice == "B"                    # heavy cost weight: B wins

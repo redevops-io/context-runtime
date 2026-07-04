@@ -259,3 +259,11 @@ def test_tenant_load_aware_bandit_ctx():
         t.record_judgment("q", 0.9)
     keys = list(t.bandit.stats.keys())
     assert any(":" in k for k in keys)             # ctx carries a load band
+
+
+def test_sizer_degenerate_inputs_return_no_candidates():
+    from context_runtime.scheduler.load_aware import size_expensive_stage
+    d1 = size_expensive_stage([], load_band="lo", requested_k=5, requested_rerank=True)
+    assert d1.final_k == 0 and d1.rerank is False and d1.reason == "no-candidates"
+    d2 = size_expensive_stage([0.9], load_band="lo", requested_k=0, requested_rerank=True)
+    assert d2.final_k == 0 and d2.reason == "no-candidates"
