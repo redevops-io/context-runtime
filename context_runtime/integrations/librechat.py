@@ -55,12 +55,17 @@ DEFAULT_STRATEGIES: tuple[RetrievalStrategy, ...] = (
     RetrievalStrategy("community", 4, False),  # global/broad (aggregation questions)
 )
 
-# Cross-modal image arm — added to the tenant's strategy set only when multimodal is wired
-# (CR_MULTIMODAL), so the bandit never picks `image` against a text-only retriever.
+# Cross-modal / visual-document / video arms — added to a tenant's strategy set only when the
+# matching modality store is wired (CR_MULTIMODAL), so the bandit never picks a visual/temporal
+# method against a text-only retriever. colpali (late-interaction pages) and video (timestamped
+# segments) are the more expensive arms, so the cost-based planner only spends them when they win.
 IMAGE_STRATEGY = RetrievalStrategy("image", 5, False)
+COLPALI_STRATEGY = RetrievalStrategy("colpali", 5, False)
+VIDEO_STRATEGY = RetrievalStrategy("video", 5, False)
+MODALITY_METHODS = ("image", "colpali", "video")   # non-text arms, dynamically shown in compare()
 
-# The retrieval methods the transparency view (compare()) runs side-by-side. `image` is
-# appended dynamically in compare() only when the tenant has the image arm.
+# The retrieval methods the transparency view (compare()) runs side-by-side. Modality methods are
+# appended dynamically in compare() only for the arms the tenant actually has.
 COMPARE_METHODS = ("bm25", "vector", "hybrid", "community", "graph")
 
 COST_LAMBDA = 0.15   # how much retrieval cost trades against judged quality
@@ -215,7 +220,8 @@ class LibreChatTenant:
                  query_expander=None, calibration: CalibrationMap | None = None,
                  calib_log: CalibrationLog | None = None, load_meter: LoadMeter | None = None,
                  passage_judge=None, cost_profile=None, load_aware: bool = False,
-                 abstain_threshold: float | None = None, reward_beta: float = 0.0):
+                 abstain_threshold: float | None = None, reward_beta: float = 0.0,
+                 query_classifier=None):
         self.runtime = runtime or ContextRuntime.default([])
         self.retriever = retriever or InMemoryStore([])
         # optional query rewrite applied to the RETRIEVAL query only (e.g. cross-language
@@ -235,6 +241,9 @@ class LibreChatTenant:
         self.load_aware = load_aware          # size the expensive stage by load (Tier A + B)
         self.abstain_threshold = abstain_threshold  # best P(relevant) below this ⇒ abstain
         self.reward_beta = reward_beta        # blend served-hit calibrated relevance into reward
+        # modality-intent classifier: folds a query-type axis into the bandit context so the
+        # policy can learn method-per-(intent, modality) — e.g. chart queries → the image arm.
+        self.query_classifier = query_classifier
         # pending/last hold everything a later reward needs: plan, arm, hits (for calibration
         # logging), and the exact bandit context used at select time (so update matches).
         self._pending: dict[str, tuple[Plan, RetrievalStrategy, tuple[Hit, ...], str]] = {}
@@ -246,20 +255,27 @@ class LibreChatTenant:
         """Index (more of) the corpus into the retriever."""
         return self.retriever.index(corpus_dir)
 
-    def _select_ctx(self, plan: Plan) -> str:
+    def _select_ctx(self, plan: Plan, request: str | None = None) -> str:
         """The bandit context. Load-aware mode appends a coarse load band so the policy
-        learns load-conditioned depth (shallow arms when busy, deep when idle) — reusing
-        the existing bandit rather than a second selector that would fight it."""
-        bucket = plan.intent.bucket
+        learns load-conditioned depth (shallow arms when busy, deep when idle); the
+        multimodal classifier appends a query-type axis so it can learn method-per-modality
+        (chart→image, timestamp→video). Both reuse the existing bandit rather than a second
+        selector that would fight it — they just make the context key richer."""
+        parts = [plan.intent.bucket]
+        if self.query_classifier is not None and request is not None:
+            try:
+                parts.append(self.query_classifier(request))
+            except Exception:
+                pass
         if self.load_aware and self.load_meter is not None:
-            return f"{bucket}:{self.load_meter.band()}"
-        return bucket
+            parts.append(self.load_meter.band())
+        return ":".join(parts)
 
     def retrieve(self, request: str) -> ChatContext:
         """Plan the request, let the bandit pick a strategy, and retrieve context.
         No judging yet — call record_feedback (native signal) or record_judgment (bootstrap)."""
         plan = self.runtime.plan(Goal(text=request))
-        ctx_key = self._select_ctx(plan)
+        ctx_key = self._select_ctx(plan, request)
         strategy = self.bandit.select(ctx_key)
         rq = self._expand(request)
         hits = tuple(self.retriever.search(rq, k=strategy.final_k, method=strategy.method))
@@ -314,10 +330,10 @@ class LibreChatTenant:
         core thesis visible: the runtime evaluates strategies and serves the best one. Read
         only — no bandit exploration, no state mutation, so it never perturbs learning."""
         rq = self._expand(request)
-        # show the image column only when this tenant actually has the cross-modal arm
+        # show a modality column only when this tenant actually has that arm (image/colpali/video)
         methods = list(COMPARE_METHODS)
-        if any(s.method == "image" for s in self.strategies):
-            methods.append("image")
+        arms = {s.method for s in self.strategies}
+        methods += [m for m in MODALITY_METHODS if m in arms]
         per: dict[str, list[dict]] = {}
         for m in methods:
             try:
@@ -327,7 +343,7 @@ class LibreChatTenant:
             per[m] = [self._compare_hit(m, h) for h in hits]
         plan = self.runtime.plan(Goal(text=request))
         bucket = plan.intent.bucket
-        key = self.bandit.policy().get(self._select_ctx(plan))
+        key = self.bandit.policy().get(self._select_ctx(plan, request))
         chosen = next((s for s in self.strategies if s.key == key), None) or self.strategies[1]
         hits = self.retriever.search(rq, k=chosen.final_k, method=chosen.method)
         if chosen.rerank:
@@ -337,7 +353,9 @@ class LibreChatTenant:
             "request": request,
             "methods": per,
             "chosen": {"key": chosen.key, "method": chosen.method, "final_k": chosen.final_k,
-                       "rerank": chosen.rerank, "bucket": bucket, "learned": key is not None},
+                       "rerank": chosen.rerank, "bucket": bucket, "learned": key is not None,
+                       "query_type": (self.query_classifier(request)
+                                      if self.query_classifier is not None else None)},
             "served": {"context": served[:4000], "citations": [h.chunk_id for h in hits]},
         }
 
@@ -350,16 +368,24 @@ class LibreChatTenant:
              "text": (h.text or "")[:1500]}
         if self.calibration is not None and self.calibration.has(method):
             d["p_rel"] = round(self.calibration.apply(method, float(h.score)), 4)
-        if method == "image" and h.meta.get("type") == "image":
+        # image + colpali pages are servable as thumbnails; video hits carry a timestamp deep-link
+        if h.meta.get("type") in ("image", "page_image"):
             from urllib.parse import quote
             d["image_url"] = f"/librechat/image?chunk_id={quote(h.chunk_id)}"
+        if method == "video" and h.meta.get("type") == "video_segment":
+            d["start"] = h.meta.get("start")
+            d["end"] = h.meta.get("end")
+            d["deep_link"] = h.meta.get("deep_link")
         return d
 
     def image_path(self, chunk_id: str) -> str | None:
-        """Resolve an image chunk_id → file path via the multimodal retriever (for serving)."""
-        img = getattr(self.retriever, "image", None)
-        if img is not None and hasattr(img, "path_for"):
-            return img.path_for(chunk_id)
+        """Resolve an image/page chunk_id → file path via any wired modality store (for serving)."""
+        for name in ("image", "colpali", "video"):
+            store = getattr(self.retriever, name, None)
+            if store is not None and hasattr(store, "path_for"):
+                path = store.path_for(chunk_id)
+                if path is not None:
+                    return path
         return None
 
     def annotate_relevance(self, request: str, hits: tuple[Hit, ...]) -> None:

@@ -25,10 +25,17 @@ from pathlib import Path
 from ..types import Hit, PluginInfo
 
 _IMG_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
-# CLIP vision + the MATCHING text tower (same joint space). SigLIP-2 ONNX is a drop-in upgrade
-# once packaged; CLIP-ViT-B-32 ships in fastembed today and proves the primitive.
-_VISION_MODEL = os.getenv("CR_IMAGE_EMBED_MODEL", "Qdrant/clip-ViT-B-32-vision")
-_TEXT_MODEL = os.getenv("CR_IMAGE_TEXT_MODEL", "Qdrant/clip-ViT-B-32-text")
+# CLIP vision + the MATCHING text tower (same joint space). CLIP-ViT-B-32 ships in fastembed
+# today and proves the primitive. SigLIP-2 (Feb 2025) is the drop-in accuracy upgrade — a better
+# joint space at the same interface — selectable at runtime once packaged in fastembed:
+#   export CR_IMAGE_EMBED_MODEL=<siglip2-vision>  CR_IMAGE_TEXT_MODEL=<siglip2-text>
+# Nothing else changes: the vision/text towers stay a paired encode-image / encode-text contract.
+KNOWN_MODELS = {
+    "clip":    ("Qdrant/clip-ViT-B-32-vision", "Qdrant/clip-ViT-B-32-text"),   # default, ships today
+    "siglip2": ("google/siglip2-base-patch16-224", "google/siglip2-base-patch16-224"),  # drop-in upgrade
+}
+_VISION_MODEL = os.getenv("CR_IMAGE_EMBED_MODEL", KNOWN_MODELS["clip"][0])
+_TEXT_MODEL = os.getenv("CR_IMAGE_TEXT_MODEL", KNOWN_MODELS["clip"][1])
 
 _vision = None
 _text = None
