@@ -103,3 +103,56 @@ def test_multimodal_router_dispatch(tmp_path):
     # index fans to both
     rep = mm.index(str(tmp_path))
     assert "text" in rep and rep["image"]["images"] == 1
+
+
+# ── Phase 3 video: channel fusion + transcript windowing (was zero-coverage, P0) ──
+
+def test_video_search_channel_fusion():
+    import numpy as np
+    from context_runtime.adapters.store_video import VideoRetriever
+    qv = np.array([1.0, 0.0], dtype="float32")
+    docs = [
+        {"chunk_id": "v::A", "filename": "v.mp4", "text": "A", "start": 0.0, "end": 1.0,
+         "fvec": np.array([1.0, 0.0], dtype="float32"), "tvec": np.array([0.0, 1.0], dtype="float32"),
+         "meta": {"type": "video_segment"}},                                  # both channels present
+        {"chunk_id": "v::B", "filename": "v.mp4", "text": "B", "start": 1.0, "end": 2.0,
+         "fvec": None, "tvec": np.array([1.0, 0.0], dtype="float32"), "meta": {"type": "video_segment"}},  # spoken only
+        {"chunk_id": "v::C", "filename": "v.mp4", "text": "C", "start": 2.0, "end": 3.0,
+         "fvec": np.array([1.0, 0.0], dtype="float32"), "tvec": None, "meta": {"type": "video_segment"}},  # visual only
+    ]
+    r = VideoRetriever(docs, text_embed=lambda texts: [qv], spoken_weight=0.5)
+    hits = {h.chunk_id: h for h in r.search("q", k=5)}
+    # both present → weighted blend (0.5*vis + 0.5*spo = 0.5), labelled by the stronger channel (visual)
+    assert abs(hits["v::A"].score - 0.5) < 1e-6 and hits["v::A"].meta["channel"] == "visual"
+    # a missing channel (score -1) → the present channel wins via max()
+    assert abs(hits["v::B"].score - 1.0) < 1e-6 and hits["v::B"].meta["channel"] == "spoken"
+    assert abs(hits["v::C"].score - 1.0) < 1e-6 and hits["v::C"].meta["channel"] == "visual"
+
+
+def test_video_transcript_window_overlap_and_empty():
+    from context_runtime.adapters.store_video import VideoRetriever
+    r = VideoRetriever([])
+    segs = [(0.0, 5.0, "hello"), (5.0, 10.0, "world"), (10.0, 15.0, "later")]
+    assert r._transcript_for(segs, 4.0, 6.0) == "hello world"   # overlaps first two (te>start and ts<end)
+    assert r._transcript_for(segs, 20.0, 25.0) == ""            # overlaps none → empty
+
+
+def test_video_index_builds_segments_with_stubs(tmp_path):
+    import numpy as np
+    from context_runtime.adapters.store_video import VideoRetriever
+    vid = tmp_path / "clip.mp4"
+    vid.write_bytes(b"x")
+    scenes = [(0.0, 5.0, "/kf0.jpg"), (5.0, 10.0, "/kf1.jpg")]
+    transcript = [(0.0, 5.0, "spoken words")]                   # only the first scene has speech
+    r = VideoRetriever(
+        scene_extractor=lambda p: scenes,
+        transcriber=lambda p: transcript,
+        frame_embed=lambda paths: [np.array([1.0, 0.0], dtype="float32") for _ in paths],
+        text_embed=lambda texts: [np.array([0.0, 1.0], dtype="float32") for _ in texts],
+    )
+    res = r.index(str(vid))
+    assert res == {"files": 1, "segments": 2}
+    seg0, seg1 = r.docs
+    assert seg0["tvec"] is not None and seg0["text"] == "spoken words"
+    assert seg1["tvec"] is None and seg1["text"].startswith("[clip.mp4")   # empty transcript → placeholder
+    assert seg0["fvec"] is not None and seg1["fvec"] is not None

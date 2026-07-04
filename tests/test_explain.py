@@ -95,3 +95,31 @@ def test_explain_is_read_only():
         "context_runtime.types", fromlist=["Goal"]).Goal(text="q")), "q"), "hybrid:k3:norr")
     t.explain("q"); t.explain("q")
     assert t.quality_ledger.to_dict() == before                    # ledger unchanged
+
+
+def test_render_explain_abstain_flags_and_reward_bits():
+    exp = {
+        "request": "what did revenue do", "intent_bucket": "conceptual", "query_type": None,
+        "context_key": "ctx",
+        "decision": {"candidates": [
+            {"key": "bm25:k5", "chosen": True, "bandit": {"value": 0.5, "n": 3},
+             "quality": {"quality": 0.8, "cost": 0.2}, "cost_units": 0.2, "reason": "best blended quality"},
+            {"key": "vector:k5", "chosen": False, "bandit": {"value": 0.4, "n": 2},
+             "cost_units": 0.30, "reason": "lower reward"},                    # no quality → cost≈ branch
+        ]},
+        "retrieval": {
+            "bm25": [{"filename": "a.md", "score": 2.0, "p_rel": 0.2, "served": True}],  # high score, low p_rel
+            "graph": [],                                                          # (no hits) branch
+        },
+        "served": {"n": 1, "method": "bm25", "max_p_rel": 0.2, "abstain": True,
+                   "abstain_reason": "max P(rel) 0.20 < 0.40", "citations": ["a.md"]},
+        "reward": {"policy": "reward = quality − λ·cost", "calibrated": True, "reward_beta": 0.5,
+                   "quality_routing": True, "note": "learned online"},
+    }
+    text = render_explain(exp)
+    assert "ABSTAIN — max P(rel)" in text                                        # abstain branch
+    assert "high raw score, low calibrated relevance" in text                    # mis-calibration flag
+    assert "graph     (no hits)" in text or "(no hits)" in text                  # empty-method branch
+    assert "calibrated relevance blended" in text and "quality-routing ON" in text  # reward bits
+    assert "bm25:k5" in text and "✓ served" in text
+    assert "cost≈0.30" in text                                                   # no-quality candidate branch

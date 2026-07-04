@@ -46,3 +46,34 @@ def test_compare_is_read_only():
     before = dict(t.policy())
     t.compare("steroid hormone testosterone", k=3)
     assert dict(t.policy()) == before  # transparency view must not perturb learning
+
+
+def test_compare_survives_a_failing_method():
+    base = _tenant().retriever
+
+    class Flaky:                                   # one method's backend is down
+        def __init__(self, inner):
+            self.inner = inner
+
+        def search(self, q, k, method="hybrid"):
+            if method == "graph":
+                raise RuntimeError("graph backend down")
+            return self.inner.search(q, k, method=method)
+    t = LibreChatTenant(retriever=Flaky(base))
+    out = t.compare("steroid hormone testosterone results", k=3)
+    assert out["methods"]["graph"] == []           # failing method → empty, not a 500
+    assert out["methods"]["bm25"]                   # the others still populate
+
+
+def test_compare_hit_carries_p_rel_when_calibrated():
+    class FakeCal:                                  # duck-typed CalibrationMap
+        def has(self, method):
+            return method == "bm25"
+
+        def apply(self, method, score):
+            return min(1.0, max(0.0, float(score) / 10.0))
+    t = LibreChatTenant(retriever=_tenant().retriever, calibration=FakeCal())
+    out = t.compare("steroid hormone testosterone results", k=3)
+    bm25 = out["methods"]["bm25"]
+    assert bm25 and all(0.0 <= h["p_rel"] <= 1.0 for h in bm25)   # calibrated confidence attached
+    assert "p_rel" not in out["methods"]["vector"][0]             # only the calibrated method carries it

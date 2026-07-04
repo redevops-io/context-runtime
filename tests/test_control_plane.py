@@ -73,3 +73,25 @@ def test_mutating_endpoints_require_api_key(monkeypatch):
     ok = client.post("/agent/run", json={"module": "control-tower", "question": "q"},
                      headers={"X-API-Key": "s3cret"})
     assert ok.status_code != 401
+
+
+def test_agent_outcome_closes_learning_loop():
+    r = client.post("/agent/outcome", json={"module": "control-tower",
+                                            "question": "why did revenue fall?", "success": True})
+    j = r.json()
+    assert j["module"] == "control-tower" and "reward" in j and isinstance(j["policy"], dict)
+    # undeployed module → 404
+    assert client.post("/agent/outcome", json={"module": "nope", "question": "q",
+                                               "success": True}).status_code == 404
+
+
+def test_approvals_resolve_and_validation():
+    client.post("/dispatch", json={"module": "agentic-billing", "agent": "checkout",
+                                   "action": "refund", "prompt": "refund a duplicate charge"})
+    pending = client.get("/approvals").json()
+    assert pending, "money action should have created a pending approval"
+    aid = pending[0]["id"]
+    assert client.post(f"/approvals/{aid}/frobnicate").status_code == 400   # bad decision
+    assert client.post("/approvals/ap-does-not-exist/approve").status_code == 404  # unknown id
+    ok = client.post(f"/approvals/{aid}/approve")
+    assert ok.status_code == 200 and ok.json()["id"] == aid
