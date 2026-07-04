@@ -9,7 +9,12 @@ signals from the free GitHub + Hacker News APIs (set GITHUB_TOKEN for a higher r
 
     PYTHONPATH=. python examples/outreach_pipeline.py            # offline demo
     PYTHONPATH=. python examples/outreach_pipeline.py --live     # real signals
+    PYTHONPATH=. python examples/outreach_pipeline.py --live --contacts  # + resolve who to email
     PYTHONPATH=. python examples/outreach_pipeline.py --live --approve   # actually mark as sent
+
+With ``--contacts`` the pipeline resolves the *person* to reach per account: GitHub maintainers
+(free) for repo-backed signals, then the Hunter/Apollo/Clay waterfall (set HUNTER_API_KEY etc.) to
+backfill missing emails. Without any key it still shows the resolved names + profiles.
 """
 from __future__ import annotations
 
@@ -18,6 +23,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
+from context_runtime.integrations.outreach_contacts import find_contacts
 from context_runtime.integrations.outreach_engine import OutreachEngineTenant
 from context_runtime.integrations.outreach_icp import rank_accounts, teardown_email
 from context_runtime.integrations.signals import (
@@ -66,9 +72,22 @@ def _warm(tenant: OutreachEngineTenant) -> None:
         tenant.record_outcome(acct, pilot_value(play, bucket, rng()))
 
 
+def _contacts_line(s: AccountSignal) -> str:
+    """Resolve who to email at this account (free GitHub maintainers, then the waterfall)."""
+    contacts = find_contacts(s, limit=3)
+    if not contacts:
+        return "    contact: — (no repo maintainers / set HUNTER_API_KEY for the waterfall)"
+    parts = []
+    for c in contacts[:3]:
+        who = c.name + (f" <{c.email}>" if c.email else " (no public email)")
+        parts.append(f"{who} [{c.source}·{c.confidence:.2f}]")
+    return "    contact: " + "; ".join(parts)
+
+
 def main() -> int:
     live = "--live" in sys.argv
     approve = "--approve" in sys.argv
+    contacts = "--contacts" in sys.argv
     tenant = OutreachEngineTenant(approver=(lambda action: approve))
     _warm(tenant)   # so the displayed plays reflect what the runtime has learned
 
@@ -84,6 +103,8 @@ def main() -> int:
         gate = "✓ SENT" if send["status"] == "sent" else "⏸ awaiting your approval"
         print(f"\n▶ {s.account:<20} score {score:<5} · signal={s.signal} · play={play.key}")
         print(f"    source: {s.source} · artifact: {s.artifact or '—'}")
+        if contacts:
+            print(_contacts_line(s))
         print(f"    {gate}   subject: {msg['subject']}")
         print("    " + msg["body"].strip().replace("\n", "\n    ")[:520])
     print("\n" + "-" * 74)
