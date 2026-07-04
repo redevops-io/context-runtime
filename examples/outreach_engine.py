@@ -21,11 +21,11 @@ from context_runtime.integrations.outreach_engine import (
 )
 
 # account buckets and the real signal each one should be led with
-BUCKETS = ("funded", "hiring", "tech_pain", "leadership", "cold")
-BUCKET_SIGNAL = {"funded": "funding", "hiring": "hiring", "tech_pain": "tech_pain",
+BUCKETS = ("funding", "hiring", "tech_pain", "leadership", "cold")
+BUCKET_SIGNAL = {"funding": "funding", "hiring": "hiring", "tech_pain": "tech_pain",
                  "leadership": "leadership", "cold": "cold"}
 # how convertible each account bucket is at all (signal beats spray: cold barely converts)
-CEILING = {"cold": 0.5, "leadership": 0.85, "hiring": 0.95, "funded": 1.1, "tech_pain": 1.2}
+CEILING = {"cold": 0.5, "leadership": 0.85, "hiring": 0.95, "funding": 1.1, "tech_pain": 1.2}
 DEPTH_V = {"template": 1.0, "company": 2.6, "artifact": 4.2}
 CHANNEL_V = {"email": 1.0, "linkedin": 1.0, "multi": 1.15, "video": 1.3}
 

@@ -7,7 +7,7 @@ from context_runtime.integrations.outreach_engine import (
 
 
 def test_bucketing_by_strongest_signal():
-    assert outreach_bucket("they just raised a Series B") == "funded"
+    assert outreach_bucket("they just raised a Series B") == "funding"
     assert outreach_bucket("hiring an ML platform engineer") == "hiring"
     assert outreach_bucket("their RAG has reranking + latency pain") == "tech_pain"
     assert outreach_bucket("new Head of AI joins as of March") == "leadership"

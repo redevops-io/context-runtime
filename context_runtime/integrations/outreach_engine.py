@@ -67,7 +67,7 @@ def outreach_bucket(text: str) -> str:
     """The account bucket the play is chosen for — the strongest signal on the account."""
     q = text.lower()
     if any(k in q for k in ("raised", "funding", "series", "seed round")):
-        return "funded"
+        return "funding"
     if any(k in q for k in ("hiring", "job", "req", "opening", "ml infra", "ml platform")):
         return "hiring"
     if any(k in q for k in ("rag", "retrieval", "vector", "reranking", "hallucinat", "latency", "cost")):
