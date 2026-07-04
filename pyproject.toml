@@ -36,6 +36,10 @@ postgres = ["psycopg[binary]>=3.1", "psycopg_pool>=3.2"]
 # Any one of pyarrow / polars / duckdb satisfies it; pyarrow is the light default. The
 # persistent BM25 index stays native .duckdb — parquet is only the corpus/bulk-load format.
 parquet = ["pyarrow>=14.0"]
+# Cross-modal IMAGE retrieval (Phase 2a multimodal): a text query retrieves images/diagrams/
+# frames via a CLIP/SigLIP text↔image joint space, ONNX runtime (no torch — same stack as
+# [embeddings]). `image` becomes a routable method the bandit can pick. Opt-in via CR_MULTIMODAL.
+multimodal = ["fastembed>=0.3", "pillow>=10.0", "numpy>=1.24"]
 # Quantized ANN vector index for the `vector` method at scale (TurboQuant, MIT). A
 # drop-in for brute-force cosine once the corpus is large (16x memory at 2-bit); quality
 # ≈ semantic, the win is memory+speed. Opt-in; the default path stays brute-force exact.

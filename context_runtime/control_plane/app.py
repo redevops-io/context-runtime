@@ -1048,6 +1048,21 @@ def _flag(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
+# ── Multimodal (Phase 2a): opt-in cross-modal IMAGE retrieval as a routable method (CR_MULTIMODAL=1).
+# A text query can retrieve images/diagrams/frames via a CLIP/SigLIP text↔image joint space; the
+# bandit gets an `image` arm and the planner decides when visual retrieval is worth paying for.
+from ..integrations.librechat import DEFAULT_STRATEGIES as _BASE_STRATEGIES  # noqa: E402
+from ..integrations.librechat import IMAGE_STRATEGY as _IMAGE_STRATEGY  # noqa: E402
+
+_lc_strategies = _BASE_STRATEGIES
+if _flag("CR_MULTIMODAL"):
+    from ..adapters.store_image import ImageRetriever
+    from ..adapters.store_inmemory import InMemoryStore as _InMem
+    from ..adapters.store_multimodal import MultimodalRetriever
+    _lc_retriever = MultimodalRetriever(text=_lc_retriever or _InMem([]), image=ImageRetriever())
+    _lc_strategies = _BASE_STRATEGIES + (_IMAGE_STRATEGY,)   # give the bandit the image arm
+
+
 # ── DSpark-inspired opt-in: score calibration + load-aware depth (all default-off) ──
 from ..costmodel.profile import CostProfile  # noqa: E402
 from ..integrations.calibration import CalibrationLog, CalibrationMap  # noqa: E402
@@ -1062,7 +1077,7 @@ _cost_profile = CostProfile(os.getenv("CR_COST_PROFILE")) if os.getenv("CR_COST_
 _abstain_threshold = float(os.environ["CR_ABSTAIN_THRESHOLD"]) if os.getenv("CR_ABSTAIN_THRESHOLD") else None
 
 librechat = LibreChatTenant(runtime=fleet.runtime,   # shares the fleet cost model + persists its policy
-                            retriever=_lc_retriever,
+                            retriever=_lc_retriever, strategies=_lc_strategies,
                             query_expander=_query_expander if _QUERY_LANGS else None,
                             persist_path=str(fleet.home / "librechat_bandit.json"),
                             calibration=_calib_map, calib_log=_calib_log, load_meter=_load_meter,

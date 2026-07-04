@@ -55,7 +55,12 @@ DEFAULT_STRATEGIES: tuple[RetrievalStrategy, ...] = (
     RetrievalStrategy("community", 4, False),  # global/broad (aggregation questions)
 )
 
-# The retrieval methods the transparency view (compare()) runs side-by-side.
+# Cross-modal image arm — added to the tenant's strategy set only when multimodal is wired
+# (CR_MULTIMODAL), so the bandit never picks `image` against a text-only retriever.
+IMAGE_STRATEGY = RetrievalStrategy("image", 5, False)
+
+# The retrieval methods the transparency view (compare()) runs side-by-side. `image` is
+# appended dynamically in compare() only when the tenant has the image arm.
 COMPARE_METHODS = ("bm25", "vector", "hybrid", "community", "graph")
 
 COST_LAMBDA = 0.15   # how much retrieval cost trades against judged quality
@@ -309,8 +314,12 @@ class LibreChatTenant:
         core thesis visible: the runtime evaluates strategies and serves the best one. Read
         only — no bandit exploration, no state mutation, so it never perturbs learning."""
         rq = self._expand(request)
+        # show the image column only when this tenant actually has the cross-modal arm
+        methods = list(COMPARE_METHODS)
+        if any(s.method == "image" for s in self.strategies):
+            methods.append("image")
         per: dict[str, list[dict]] = {}
-        for m in COMPARE_METHODS:
+        for m in methods:
             try:
                 hits = self.retriever.search(rq, k=k, method=m)
             except Exception:
