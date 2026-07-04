@@ -1141,6 +1141,18 @@ def librechat_compare(req: LcCompareReq) -> dict:
     return librechat.compare(req.request, k=max(1, min(req.k, 10)))
 
 
+@app.get("/librechat/image")
+def librechat_image(chunk_id: str):
+    """Serve an indexed image by chunk_id so the LibreQB panel can render a thumbnail for
+    cross-modal `image` hits. Only images the retriever has indexed are servable (no
+    arbitrary file read)."""
+    from fastapi.responses import FileResponse
+    path = librechat.image_path(chunk_id)
+    if not path or not os.path.isfile(path):
+        raise HTTPException(404, "image not found")
+    return FileResponse(path)
+
+
 @app.post("/librechat/judge", dependencies=[Depends(require_api_key)])
 def librechat_judge(req: LcJudgeReq) -> dict:
     """Close the loop: an external LLM judge posts the retrieval-quality score (0..1) for

@@ -62,6 +62,35 @@ class _StubText:
         return {"files": 1}
 
 
+def test_path_for_resolves_only_indexed(tmp_path):
+    _make_images(tmp_path, ["revenue-chart.png"])
+    ret = ImageRetriever(image_embed=_img_embed, text_embed=_txt_embed)
+    ret.index(str(tmp_path))
+    cid = ret.docs[0]["chunk_id"]
+    assert ret.path_for(cid).endswith("revenue-chart.png")
+    assert ret.path_for("not-indexed::img") is None   # no arbitrary file read
+
+
+def test_compare_shows_image_column_with_url(tmp_path):
+    from context_runtime.integrations.librechat import (
+        DEFAULT_STRATEGIES, IMAGE_STRATEGY, LibreChatTenant,
+    )
+    _make_images(tmp_path, ["revenue-chart.png", "system-diagram.png"])
+    img = ImageRetriever(image_embed=_img_embed, text_embed=_txt_embed)
+    mm = MultimodalRetriever(text=_StubText(), image=img)
+    mm.index(str(tmp_path))
+    t = LibreChatTenant(retriever=mm, strategies=DEFAULT_STRATEGIES + (IMAGE_STRATEGY,))
+    out = t.compare("a bar chart", k=3)
+    assert "image" in out["methods"]                       # the image column is shown
+    hits = out["methods"]["image"]
+    assert hits and hits[0]["image_url"].startswith("/librechat/image?chunk_id=")
+    # a text-only tenant must NOT show an image column
+    t2 = LibreChatTenant(retriever=_StubText())
+    assert "image" not in t2.compare("q", k=2)["methods"]
+    # image_path resolves through the tenant → for the serving endpoint
+    assert t.image_path(hits[0]["chunk_id"]).endswith(".png")
+
+
 def test_multimodal_router_dispatch(tmp_path):
     _make_images(tmp_path, ["revenue-chart.png"])
     img = ImageRetriever(image_embed=_img_embed, text_embed=_txt_embed)

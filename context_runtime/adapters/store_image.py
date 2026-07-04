@@ -81,13 +81,35 @@ class ImageRetriever:
     """
 
     def __init__(self, docs: list[dict] | None = None, *, source: str = "image",
-                 image_embed=None, text_embed=None):
+                 image_embed=None, text_embed=None, use_turbovec: bool | None = None,
+                 bit_width: int = 4):
         self.source = source
         self.docs: list[dict] = list(docs or [])   # each: {chunk_id, filename, path, text, meta}
         self._image_embed = image_embed or _default_image_embed
         self._text_embed = text_embed or _default_text_embed
         self._emb = None
         self._emb_n = -1
+        # optional quantized ANN over the image vectors (scale); None → auto (use if installed).
+        self._use_tv = use_turbovec
+        self.bit_width = int(os.getenv("CR_TURBOVEC_BITS", bit_width))
+        self._ann = None
+        self._ann_n = -1
+
+    def _turbovec_ok(self) -> bool:
+        if self._use_tv is False:
+            return False
+        try:
+            import importlib.util
+            return bool(importlib.util.find_spec("turbovec"))
+        except Exception:
+            return False
+
+    def path_for(self, chunk_id: str) -> str | None:
+        """Resolve an image chunk_id to its file path — only indexed images are servable."""
+        for d in self.docs:
+            if d["chunk_id"] == chunk_id:
+                return d.get("path")
+        return None
 
     @property
     def available(self) -> bool:
@@ -124,23 +146,54 @@ class ImageRetriever:
         self._emb_n = len(self.docs)
         return self._emb
 
+    def _ann_index(self):
+        """Build a quantized ANN (TurboVec) over the IMAGE vectors — for scale."""
+        import numpy as np
+        if self._ann is not None and self._ann_n == len(self.docs):
+            return self._ann
+        if not self.docs or not self.available:
+            self._ann, self._ann_n = None, len(self.docs)
+            return None
+        from turbovec import TurboQuantIndex
+        mat = np.vstack(self._image_embed([d["path"] for d in self.docs])).astype("float32")
+        idx = TurboQuantIndex(dim=mat.shape[1], bit_width=self.bit_width)
+        idx.add(mat)
+        self._ann, self._ann_n = idx, len(self.docs)
+        return idx
+
+    def _hit(self, i: int, score: float) -> Hit:
+        d = self.docs[i]
+        return Hit(chunk_id=d["chunk_id"], filename=d["filename"], text=d["text"],
+                   score=float(score), created_at=d.get("created_at"),
+                   source=self.source, meta=dict(d["meta"]))
+
     def search(self, query: str, k: int, method: str = "image") -> list[Hit]:
-        mat = self._matrix()
-        if mat is None or not query.strip():
+        if not self.docs or not query.strip():
             return []
         import numpy as np
         qvs = self._text_embed([query])
         if not len(qvs):
             return []
-        sims = mat @ qvs[0]
+        qv = np.asarray(qvs[0], dtype="float32")
+        # TurboVec quantized ANN over the image vectors when installed (drop-in for scale);
+        # otherwise exact numpy cosine (fine up to ~10^4-10^5 images).
+        if self._turbovec_ok():
+            idx = self._ann_index()
+            if idx is None:
+                return []
+            scores, indices = idx.search(qv.reshape(1, -1), k=max(k, 1))
+            out = []
+            for s, i in zip(np.ravel(scores), np.ravel(indices), strict=False):
+                i = int(i)
+                if 0 <= i < len(self.docs):
+                    out.append(self._hit(i, float(s)))
+            return out
+        mat = self._matrix()
+        if mat is None:
+            return []
+        sims = mat @ qv
         order = np.argsort(-sims)[: max(k, 0) or len(sims)]
-        out: list[Hit] = []
-        for i in order:
-            d = self.docs[int(i)]
-            out.append(Hit(chunk_id=d["chunk_id"], filename=d["filename"], text=d["text"],
-                           score=float(sims[int(i)]), created_at=d.get("created_at"),
-                           source=self.source, meta=dict(d["meta"])))
-        return out
+        return [self._hit(int(i), float(sims[int(i)])) for i in order]
 
     def info(self) -> PluginInfo:
         return PluginInfo(name="image_store", kind="retriever",

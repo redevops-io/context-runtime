@@ -343,13 +343,24 @@ class LibreChatTenant:
 
     def _compare_hit(self, method: str, h: Hit) -> dict:
         """One hit for the transparency panel, with calibrated P(relevant) when available —
-        an honest confidence number, not a scale-free raw score."""
+        an honest confidence number, not a scale-free raw score. Image hits carry an
+        image_url so the panel can render a thumbnail instead of text."""
         d = {"chunk_id": h.chunk_id, "filename": h.filename,
              "score": round(float(h.score), 4), "snippet": (h.text or "")[:240],
              "text": (h.text or "")[:1500]}
         if self.calibration is not None and self.calibration.has(method):
             d["p_rel"] = round(self.calibration.apply(method, float(h.score)), 4)
+        if method == "image" and h.meta.get("type") == "image":
+            from urllib.parse import quote
+            d["image_url"] = f"/librechat/image?chunk_id={quote(h.chunk_id)}"
         return d
+
+    def image_path(self, chunk_id: str) -> str | None:
+        """Resolve an image chunk_id → file path via the multimodal retriever (for serving)."""
+        img = getattr(self.retriever, "image", None)
+        if img is not None and hasattr(img, "path_for"):
+            return img.path_for(chunk_id)
+        return None
 
     def annotate_relevance(self, request: str, hits: tuple[Hit, ...]) -> None:
         """Run the per-passage judge (if configured) and stash labels on hits so the next
