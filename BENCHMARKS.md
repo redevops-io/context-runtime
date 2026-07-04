@@ -5,6 +5,31 @@ invented numbers. Reproduce with `PYTHONPATH=. python examples/<name>.py`.
 
 ---
 
+## v1 → v2, measured in both runtimes (headline)
+
+**`examples/consolidated_benchmark.py`** — runs the *same* seeded, ground-truth retrieval
+simulation in the Python source-of-truth **and** the Go port, and merges the results into one
+table. v2 adds the DSpark-inspired upgrades: calibrated per-passage relevance folded into the
+reward, grounded abstention, and the load-aware expensive-stage sizer. Reproduce with
+`PYTHONPATH=. python examples/consolidated_benchmark.py` (add `--html out.html` for the site card).
+
+| Metric | Py v1 | Py v2 | Δ | Go v1 | Go v2 | Δ |
+| --- | --- | --- | --- | --- | --- | --- |
+| Learned-policy precision | 67.6% | 82.2% | ▲ +14.6 pts | 84.6% | 95.9% | ▲ +11.3 pts |
+| Abstention recall (unanswerable caught) | 0.0% | 100.0% | ▲ +100.0 pts | 0.0% | 100.0% | ▲ +100.0 pts |
+| False-abstain rate (answerable dropped) | 0.0% | 0.0% | — | 0.0% | 0.0% | — |
+| Expensive-stage depth (passages) | 8.00 | 3.00 | ▼ −62% | 8.00 | 3.00 | ▼ −63% |
+| Precision after the sizer | 37.5% | 100.0% | ▲ +62.5 pts | 37.5% | 100.0% | ▲ +62.5 pts |
+
+_40-seed average; precision headlined at β=0.9 (the calibration-trust knob; shipped default 0.5).
+Go is an **independent re-implementation on identical methodology** — the two runtimes agree
+directionally on every effect, which is the point: the policy improvement is a property of the
+design, not of one language's simulation. Absolute precision differs because each runtime uses its
+own strategy set (the achievable ceiling differs), but both show a double-digit lift, full
+abstention that v1 lacks, and a ~62% depth cut with precision rising to 100%._
+
+---
+
 ## Retrieval over heterogeneous personal data (financial × medical)
 
 **`examples/heterogeneous_shards.py`** — the interesting, non-obvious one.

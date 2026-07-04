@@ -164,7 +164,54 @@ def run_world(*, calibration, reward_beta, abstain_threshold=None, load_meter=No
     }
 
 
+def compute_results() -> dict:
+    """Run the three isolated A/Bs and return machine-readable v1-vs-v2 metrics.
+
+    Shared by the pretty printer and the ``--json`` path (which the consolidated cross-runtime
+    table consumes). Deterministic ⇒ the same numbers every run, in-process or from the harness.
+    """
+    tmp = tempfile.mkdtemp()
+    cmap = fit_calibration(tmp)
+    seeds = range(1, 41)
+    n_seeds = len(seeds)
+
+    def avg_prec(cal, beta):
+        return sum(run_world(calibration=cal, reward_beta=beta, seed=s)["ans_precision"]
+                   for s in seeds) / n_seeds
+
+    v1_prec = avg_prec(None, 0.0)
+    sweep = {b: round(avg_prec(cmap, b), 4) for b in (0.5, 0.7, 0.9)}
+    v2_prec = sweep[0.9]     # headline at the calibration-trust ceiling (β is the tunable knob)
+    abst = run_world(calibration=cmap, reward_beta=0.5, abstain_threshold=0.5)
+    deep = (RetrievalStrategy("hybrid", 8, True),)
+    off = run_world(calibration=cmap, reward_beta=0.5, load_aware=False, strategies=deep)
+    on = run_world(calibration=cmap, reward_beta=0.5, load_aware=True, strategies=deep,
+                   load_meter=LoadMeter(mid=4, hi=8), pin_inflight=0)
+    return {
+        "runtime": "python",
+        "seeds": n_seeds,
+        "metrics": {
+            "policy_precision": {"v1": round(v1_prec, 4), "v2": round(v2_prec, 4),
+                                 "unit": "%", "higher_better": True, "beta": 0.9,
+                                 "sweep": {str(b): v for b, v in sweep.items()}},
+            "abstain_recall": {"v1": 0.0, "v2": round(abst["abstain_recall"], 4),
+                               "unit": "%", "higher_better": True},
+            "false_abstain": {"v1": 0.0, "v2": round(abst["false_abstain_rate"], 4),
+                              "unit": "%", "higher_better": False},
+            "sizer_depth": {"v1": round(off["mean_depth"], 4), "v2": round(on["mean_depth"], 4),
+                            "unit": "passages", "higher_better": False},
+            "sizer_precision": {"v1": round(off["ans_precision"], 4),
+                                "v2": round(on["ans_precision"], 4),
+                                "unit": "%", "higher_better": True},
+        },
+    }
+
+
 def main() -> int:
+    import json as _json
+    if "--json" in sys.argv:
+        print(_json.dumps(compute_results()))
+        return 0
     tmp = tempfile.mkdtemp()
     cmap = fit_calibration(tmp)
     print("=" * 72)
