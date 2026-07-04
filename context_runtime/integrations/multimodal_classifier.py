@@ -41,7 +41,7 @@ _CUES: tuple[tuple[str, tuple[str, ...]], ...] = (
                "boxes and arrows", "how it connects", "system design")),
     (TABLE, ("table", "spreadsheet", "row", "column", "cell", "line item", "line-item",
              "balance sheet", "income statement", "cash flow statement")),
-    (TIMESTAMP, ("video", "clip", "footage", "recording", "timestamp", "at minute", "at the",
+    (TIMESTAMP, ("video", "clip", "footage", "recording", "timestamp", "at minute",
                  "scene where", "frame where", "says at", "moment when", "part where he",
                  "part where she", "seconds in", "minute mark")),
     (VISUAL, ("image", "picture", "photo", "photograph", "screenshot", "logo", "icon",
