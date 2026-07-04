@@ -35,3 +35,11 @@ def test_turbovec_ranks_semantically():
     hits = r.search("testosterone hormone results", k=2, method="vector")
     assert hits, "expected quantized ANN hits"
     assert hits[0].chunk_id == "s1"  # steroid passage ranks first
+
+
+def test_turbovec_degrades_to_empty_without_extra():
+    if importlib.util.find_spec("turbovec") and importlib.util.find_spec("fastembed"):
+        pytest.skip("[turbovec] extra installed; the degradation path is not exercised here")
+    r = TurboVecRetriever(_docs())
+    assert r.search("alpha", k=2) == []              # no backend → empty, not a crash (the only default-CI path)
+    r.index("/nonexistent/path")                     # index must not raise either

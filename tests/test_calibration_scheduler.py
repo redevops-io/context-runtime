@@ -267,3 +267,9 @@ def test_sizer_degenerate_inputs_return_no_candidates():
     assert d1.final_k == 0 and d1.rerank is False and d1.reason == "no-candidates"
     d2 = size_expensive_stage([0.9], load_band="lo", requested_k=0, requested_rerank=True)
     assert d2.final_k == 0 and d2.reason == "no-candidates"
+
+
+def test_isotonic_empty_and_calibration_load_missing(tmp_path):
+    from context_runtime.integrations.calibration import _isotonic_fit
+    assert _isotonic_fit([]) == []                                  # identity no-op on empty
+    assert CalibrationMap.load(str(tmp_path / "nope.json")) is None  # missing file → None (opt-in guarantee)

@@ -70,3 +70,17 @@ def test_unknown_tool_is_a_failed_result_not_a_crash():
     reg = ToolRegistry()
     res = reg.run("missing", {})
     assert not res.ok and "unknown tool" in res.error
+
+
+def test_tool_that_raises_becomes_failed_result():
+    def boom(args):
+        raise ValueError("kaboom")
+    reg = ToolRegistry()
+    reg.register(function_tool("boomer", boom, description="raises"))
+    res = reg.run("boomer", {})
+    assert res.ok is False and "kaboom" in (res.error or "")   # a crash is a failed result, not a runtime crash
+
+
+def test_registry_unknown_tool_is_failed_result():
+    res = ToolRegistry().run("does-not-exist", {})
+    assert res.ok is False

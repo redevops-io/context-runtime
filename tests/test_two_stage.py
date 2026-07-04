@@ -53,3 +53,18 @@ def test_degrades_to_fuse_without_reranker():
     assert res.stage1_n >= len(res.hits)            # stage-1 recall ⊇ what was served
     # retriever-shaped entrypoint returns plain hits
     assert all(isinstance(h, Hit) for h in ret.search("q", 3, "hybrid"))
+
+
+def test_two_stage_probs_calibration_vs_minmax():
+    from context_runtime.scheduler.two_stage import TwoStageRetriever
+
+    class FakeCal:
+        def apply(self, method, score):
+            assert method == "hybrid"                 # fused hits calibrate on the fusion channel
+            return 0.9 if score >= 2.0 else 0.1
+    calibrated = TwoStageRetriever(None, calibration=FakeCal())
+    assert calibrated._probs([_h("a", 2.0), _h("b", 0.5)]) == [0.9, 0.1]   # calibrated P(rel) path
+    plain = TwoStageRetriever(None)
+    p = plain._probs([_h("a", 3.0), _h("b", 1.0)])
+    assert p[0] == 1.0 and p[1] == 0.0               # no calibration → min-max monotone proxy
+    assert plain._probs([]) == []

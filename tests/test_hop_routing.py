@@ -76,3 +76,10 @@ def test_end_to_end_multihop_run_uses_bridge():
                         retriever=router)
     res = rt.run(MULTIHOP)
     assert "d2" in res.citations    # the bridge doc made it into the assembled context
+
+
+def test_simgraph_ranks_overlap_and_empty_on_nomatch():
+    g = SimGraphRetriever(list(CORPUS))
+    hits = g.search("ATP production in neurons", k=5)
+    assert hits and hits[0].chunk_id in ("d1", "d2")   # term-overlap docs surface first
+    assert g.search("zzzzz qqqqq wibble", k=5) == []   # no term overlap → empty, no bridge-only noise
