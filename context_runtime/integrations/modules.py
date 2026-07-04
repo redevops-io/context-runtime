@@ -65,6 +65,8 @@ CATALOG: dict[str, ModuleSpec] = {
                                  ("data_map", "requests", "consent"), "dsar_sla", ("fulfill_dsar",)),
     "edge_sentinel":  ModuleSpec("edge_sentinel", "CrowdSec", "network security (SOC)",
                                  ("crowdsec", "threat_intel", "edr"), "correct_verdict", ("block_ip",)),
+    "outreach":       ModuleSpec("outreach", "Twenty CRM", "pilot outreach & pipeline",
+                                 ("signals", "accounts", "artifacts", "sequences"), "reply_to_pilot", ("send_sequence",)),
     # ── net-new tenants from the use-cases doc ──
     "incident":       ModuleSpec("incident", "Kubernetes", "incident response",
                                  ("logs", "git", "metrics", "runbook"), "root_cause_found", ("rollback",)),

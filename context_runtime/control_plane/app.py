@@ -90,7 +90,7 @@ GROUPS: dict[str, list[str]] = {
     "Money": ["agentic-billing", "agentic-books"],
     "Customers": ["agentic-support", "social-autopilot"],
     "Security & Compliance": ["edge-sentinel", "agentic-compliance"],
-    "Growth & Intelligence": ["control-tower", "market-radar", "growth-engine"],
+    "Growth & Intelligence": ["control-tower", "market-radar", "growth-engine", "outreach-engine"],
     "Build & Platform": ["sidekick"],
 }
 
@@ -120,6 +120,7 @@ MODULE_CORES: dict[str, str] = {
     "agentic-billing": "Lago", "agentic-books": "ERPNext", "agentic-compliance": "OpenSCAP",
     "control-tower": "Metabase", "edge-sentinel": "CrowdSec", "market-radar": "changedetection",
     "growth-engine": "Umami", "social-autopilot": "Postiz", "agentic-support": "Chatwoot",
+    "outreach-engine": "Twenty CRM",
 }
 
 
@@ -144,6 +145,7 @@ MODULE_SERVICES: dict[str, str] = {
     "lifecycle": "http://lifecycle:8211",
     "agentic-privacy": "http://agentic-privacy:8212",
     "growth-assistant": "http://growth-assistant:8213",
+    "outreach-engine": "http://outreach-engine:8214",
 }
 
 # Allow overriding the whole map (or single entries) via env, e.g.

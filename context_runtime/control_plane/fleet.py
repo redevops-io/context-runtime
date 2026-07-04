@@ -27,6 +27,7 @@ _ALIAS = {
     "agentic-books": "books", "agentic-compliance": "compliance", "control-tower": "control_tower",
     "market-radar": "market_radar", "growth-engine": "growth_engine", "social-autopilot": "social",
     "agentic-crm": "crm", "lifecycle": "lifecycle", "agentic-privacy": "privacy",
+    "outreach-engine": "outreach",
 }
 
 

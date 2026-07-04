@@ -38,6 +38,13 @@ modules:
     port: 8205
     agents: [attribution, channel_optimizer]
     approval_required: []
+  - name: outreach-engine
+    repo: redevops-io/outreach-engine
+    pain: pilot outreach & pipeline
+    tagline: Context Runtime learns which outreach play lands pilots per account signal.
+    port: 8214
+    agents: [sourcer, personalizer, sequencer]
+    approval_required: [send_sequence]
   - name: social-autopilot
     repo: redevops-io/social-autopilot
     pain: social-media growth
