@@ -1076,6 +1076,13 @@ _load_meter = LoadMeter(mid=int(os.getenv("CR_LOAD_MID", "4")),
 _cost_profile = CostProfile(os.getenv("CR_COST_PROFILE")) if os.getenv("CR_COST_PROFILE") else None
 _abstain_threshold = float(os.environ["CR_ABSTAIN_THRESHOLD"]) if os.getenv("CR_ABSTAIN_THRESHOLD") else None
 
+# Quality ledger: tracks per-(ctx, arm) QUALITY apart from cost — powers EXPLAIN's decision
+# rationale and, with CR_QUALITY_ROUTING=1, routes on learned quality instead of cost-blended reward.
+from ..quality import QualityLedger  # noqa: E402
+_quality_routing = _flag("CR_QUALITY_ROUTING")
+_quality_ledger = (QualityLedger(path=str(fleet.home / "librechat_quality.json"))
+                   if _quality_routing or _flag("CR_QUALITY") else None)
+
 librechat = LibreChatTenant(runtime=fleet.runtime,   # shares the fleet cost model + persists its policy
                             retriever=_lc_retriever, strategies=_lc_strategies,
                             query_expander=_query_expander if _QUERY_LANGS else None,
@@ -1083,7 +1090,8 @@ librechat = LibreChatTenant(runtime=fleet.runtime,   # shares the fleet cost mod
                             calibration=_calib_map, calib_log=_calib_log, load_meter=_load_meter,
                             cost_profile=_cost_profile, load_aware=_flag("CR_LOAD_AWARE"),
                             abstain_threshold=_abstain_threshold,
-                            reward_beta=float(os.getenv("CR_REWARD_BETA", "0.5")))
+                            reward_beta=float(os.getenv("CR_REWARD_BETA", "0.5")),
+                            quality_ledger=_quality_ledger, quality_routing=_quality_routing)
 _lc_corpus = os.getenv("CR_CORPUS_DIR", "")
 if _lc_corpus and os.path.isdir(_lc_corpus) and not _shards_spec:   # shards self-index at build
     try:
@@ -1139,6 +1147,15 @@ def librechat_compare(req: LcCompareReq) -> dict:
     side and report what the learned policy chose + served. Powers the LibreChat comparison
     panel that shows users WHY Context Runtime's answer is better than any single method."""
     return librechat.compare(req.request, k=max(1, min(req.k, 10)))
+
+
+@app.post("/librechat/explain")
+def librechat_explain(req: LcCompareReq) -> dict:
+    """EXPLAIN (the DB EXPLAIN-ANALYZE analogue): why the runtime retrieved what it did — every
+    candidate arm with its learned value + quality/cost decomposition, the per-method retrieval
+    trace with calibrated P(relevant), what was served, the abstention decision, and how the reward
+    is computed. Read-only, so inspecting never perturbs the learned policy."""
+    return librechat.explain(req.request, k=max(1, min(req.k, 10)))
 
 
 @app.get("/librechat/image")

@@ -188,10 +188,22 @@ def reward_from_judgment(score: float, strategy: RetrievalStrategy,
     genuinely relevant passages is rewarded even when the coarse per-query judge is
     lukewarm. beta=0 (or rel_signal=None) ⇒ exact legacy reward.
     """
+    return reward_components(score, strategy, strategies, rel_signal, beta)[2]
+
+
+def reward_components(score: float, strategy: RetrievalStrategy,
+                     strategies: tuple[RetrievalStrategy, ...] = DEFAULT_STRATEGIES,
+                     rel_signal: float | None = None, beta: float = 0.0) -> tuple[float, float, float]:
+    """Decompose the reward into ``(quality, normalized_cost, reward)``.
+
+    The scalar reward blends the two; keeping them apart lets the quality ledger route on
+    error-character (not just $) and lets EXPLAIN show *why* an arm won. quality is the judged/
+    served-relevance term (no cost penalty); cost is the arm's cost normalized to the arm set."""
     quality = score if (rel_signal is None or beta <= 0.0) else (1.0 - beta) * score + beta * rel_signal
     max_cost = max(s.cost_units() for s in strategies)
     cost_norm = strategy.cost_units() / max_cost if max_cost else 0.0
-    return round(max(0.0, quality - COST_LAMBDA * cost_norm), 4)
+    reward = round(max(0.0, quality - COST_LAMBDA * cost_norm), 4)
+    return round(quality, 4), round(cost_norm, 4), reward
 
 
 # ──────────────────────────── the tenant ────────────────────────────
@@ -221,7 +233,8 @@ class LibreChatTenant:
                  calib_log: CalibrationLog | None = None, load_meter: LoadMeter | None = None,
                  passage_judge=None, cost_profile=None, load_aware: bool = False,
                  abstain_threshold: float | None = None, reward_beta: float = 0.0,
-                 query_classifier=None):
+                 query_classifier=None, quality_ledger=None, quality_routing: bool = False,
+                 quality_min_samples: int = 3):
         self.runtime = runtime or ContextRuntime.default([])
         self.retriever = retriever or InMemoryStore([])
         # optional query rewrite applied to the RETRIEVAL query only (e.g. cross-language
@@ -244,6 +257,12 @@ class LibreChatTenant:
         # modality-intent classifier: folds a query-type axis into the bandit context so the
         # policy can learn method-per-(intent, modality) — e.g. chart queries → the image arm.
         self.query_classifier = query_classifier
+        # quality ledger: tracks per-(ctx, arm) QUALITY apart from cost. quality_routing ⇒ route by
+        # learned quality (explore-then-exploit) instead of the bandit's scalar reward; either way
+        # the ledger records and feeds EXPLAIN. Off ⇒ exact legacy bandit selection.
+        self.quality_ledger = quality_ledger
+        self.quality_routing = quality_routing
+        self.quality_min_samples = int(quality_min_samples)
         # pending/last hold everything a later reward needs: plan, arm, hits (for calibration
         # logging), and the exact bandit context used at select time (so update matches).
         self._pending: dict[str, tuple[Plan, RetrievalStrategy, tuple[Hit, ...], str]] = {}
@@ -271,12 +290,24 @@ class LibreChatTenant:
             parts.append(self.load_meter.band())
         return ":".join(parts)
 
+    def _select(self, ctx_key: str) -> RetrievalStrategy:
+        """Pick the arm. Quality routing (opt-in) explores under-sampled arms then exploits the
+        best learned QUALITY (not the cost-blended scalar reward the bandit maximizes), so a
+        genuinely better method/provider isn't locked out by cheapness. Default ⇒ the bandit."""
+        if self.quality_routing and self.quality_ledger is not None:
+            key = self.quality_ledger.route(ctx_key, [s.key for s in self.strategies],
+                                            min_samples=self.quality_min_samples)
+            chosen = next((s for s in self.strategies if s.key == key), None)
+            if chosen is not None:
+                return chosen
+        return self.bandit.select(ctx_key)
+
     def retrieve(self, request: str) -> ChatContext:
         """Plan the request, let the bandit pick a strategy, and retrieve context.
         No judging yet — call record_feedback (native signal) or record_judgment (bootstrap)."""
         plan = self.runtime.plan(Goal(text=request))
         ctx_key = self._select_ctx(plan, request)
-        strategy = self.bandit.select(ctx_key)
+        strategy = self._select(ctx_key)
         rq = self._expand(request)
         hits = tuple(self.retriever.search(rq, k=strategy.final_k, method=strategy.method))
         if strategy.rerank:
@@ -378,6 +409,92 @@ class LibreChatTenant:
             d["deep_link"] = h.meta.get("deep_link")
         return d
 
+    def explain(self, request: str, k: int = 5) -> dict:
+        """EXPLAIN — the runtime's answer to 'why did it retrieve *that*?'. The database analogue of
+        EXPLAIN ANALYZE: it exposes the plan's decision (every candidate arm with its learned value,
+        the quality/cost decomposition, and why it won or lost), the per-method retrieval trace with
+        **calibrated P(relevant)** (so a high-raw-score but low-relevance hit is visible), what the
+        chosen arm actually served, the abstention decision, and how the reward is computed. Read
+        only — no bandit exploration, no learning — so inspecting never perturbs the policy."""
+        rq = self._expand(request)
+        plan = self.runtime.plan(Goal(text=request))
+        bucket = plan.intent.bucket
+        ctx_key = self._select_ctx(plan, request)
+        qtype = self.query_classifier(request) if self.query_classifier is not None else None
+        chosen = self._select(ctx_key)   # what would be served now (respects quality routing)
+
+        # ── decision: every arm, its learned value + quality/cost decomposition + why ──
+        candidates = []
+        for s in self.strategies:
+            n, val = self.bandit.value(ctx_key, s.key)
+            qs = self.quality_ledger.stat(ctx_key, s.key) if self.quality_ledger is not None else None
+            candidates.append({
+                "key": s.key, "method": s.method, "final_k": s.final_k, "rerank": s.rerank,
+                "cost_units": round(s.cost_units(), 3),
+                "bandit": {"n": int(n), "value": round(val, 4)},
+                "quality": ({"n": qs.n, "quality": qs.quality, "cost": qs.cost,
+                             "blended": qs.blended(self.quality_ledger.cost_weight)} if qs else None),
+                "chosen": s.key == chosen.key,
+            })
+        candidates.sort(key=lambda c: (not c["chosen"], -c["bandit"]["value"]))
+        for c in candidates:
+            if c["chosen"]:
+                c["reason"] = ("quality-routed: best learned quality"
+                               if self.quality_routing and self.quality_ledger is not None
+                               else f"highest learned reward ({c['bandit']['value']})")
+            elif c["bandit"]["n"] < self.quality_min_samples:
+                c["reason"] = f"under-explored (n={c['bandit']['n']})"
+            else:
+                c["reason"] = f"lower learned value ({c['bandit']['value']})"
+
+        # ── retrieval trace: every method side by side, calibrated P(rel), served-marked ──
+        served_hits = list(self.retriever.search(rq, k=chosen.final_k, method=chosen.method))
+        if chosen.rerank:
+            served_hits = served_hits[:chosen.final_k]
+        served_ids = {h.chunk_id for h in served_hits}
+        methods = list(COMPARE_METHODS)
+        arms = {s.method for s in self.strategies}
+        methods += [m for m in MODALITY_METHODS if m in arms]
+        retrieval: dict[str, list[dict]] = {}
+        for m in methods:
+            try:
+                hits = self.retriever.search(rq, k=k, method=m)
+            except Exception:
+                hits = ()
+            rows = []
+            for h in hits:
+                d = self._compare_hit(m, h)
+                d["served"] = (m == chosen.method and h.chunk_id in served_ids)
+                rows.append(d)
+            retrieval[m] = rows
+
+        # ── served + abstain ──
+        probs, max_p, abstain = self._calibrate(chosen, tuple(served_hits))
+        served = {
+            "method": chosen.method, "n": len(served_hits),
+            "citations": [h.chunk_id for h in served_hits],
+            "max_p_rel": round(max_p, 4) if probs else None,
+            "abstain": abstain,
+            "abstain_reason": (f"best P(relevant) {max_p:.2f} < threshold {self.abstain_threshold}"
+                               if abstain else None),
+        }
+        reward = {
+            "policy": ("native implicit signal (kept/regenerated/thumbs) is the primary reward; "
+                       "the LLM judge is a cold-start bootstrap only"),
+            "calibrated": self.calibration is not None,
+            "reward_beta": self.reward_beta,
+            "quality_routing": self.quality_routing and self.quality_ledger is not None,
+            "note": ("reward = quality − λ·cost; the quality ledger keeps the two terms apart so "
+                     "routing can prefer a genuinely better arm at equal cost"),
+        }
+        return {
+            "request": request, "intent_bucket": bucket, "query_type": qtype, "context_key": ctx_key,
+            "decision": {"chosen": {"key": chosen.key, "method": chosen.method,
+                                    "final_k": chosen.final_k, "rerank": chosen.rerank},
+                         "candidates": candidates},
+            "retrieval": retrieval, "served": served, "reward": reward,
+        }
+
     def image_path(self, chunk_id: str) -> str | None:
         """Resolve an image/page chunk_id → file path via any wired modality store (for serving)."""
         for name in ("image", "colpali", "video"):
@@ -413,9 +530,12 @@ class LibreChatTenant:
 
     def _learn(self, request: str, plan: Plan, strategy: RetrievalStrategy, score: float,
                hits: tuple[Hit, ...] = (), ctx_key: str | None = None) -> float:
-        reward = reward_from_judgment(score, strategy, self.strategies,
-                                      rel_signal=self._served_relevance(hits), beta=self.reward_beta)
-        self.bandit.update(ctx_key or plan.intent.bucket, strategy, reward)
+        ctx = ctx_key or plan.intent.bucket
+        quality, cost_norm, reward = reward_components(
+            score, strategy, self.strategies, rel_signal=self._served_relevance(hits), beta=self.reward_beta)
+        self.bandit.update(ctx, strategy, reward)
+        if self.quality_ledger is not None:   # keep quality apart from cost, for routing + EXPLAIN
+            self.quality_ledger.observe(ctx, strategy.key, quality, cost_norm)
         self.runtime.estimator.observe(plan, Trace(
             plan_id=plan.id, goal_text=request, actual_tokens=strategy.final_k * 200,
             verification_passed=score >= 0.6))
