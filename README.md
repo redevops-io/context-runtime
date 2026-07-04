@@ -35,10 +35,13 @@ with an approval-gated audit trail) and **trace exporters** (`context_runtime/ob
 exporters.py` — JSONL offline, or Langfuse / OpenLLMetry-OTel when the extras are
 installed).
 
-> Status: **v0.1 vertical slice.** Runs fully offline with stub plugins; the real
-> [redevops-rag](https://github.com/redevops-io/redevops-rag) retrieval and LiteLLM
-> model bindings are wired and lazy-imported. See [SPEC.md](./SPEC.md) §10 for the
-> conformance checklist these tests assert against.
+> Status: **runnable reference implementation — Python and Go at feature parity.** Runs fully
+> offline with stub models; real bindings are wired and lazy-imported: LiteLLM models, and
+> [redevops-rag](https://github.com/redevops-io/redevops-rag) / DuckDB / Postgres retrieval
+> (BM25 · dense · hybrid · graph-PPR · community · sharded routing · cross-modal). Beyond the
+> initial slice it now ships score **calibration**, a **learned quality-aware planner**, and
+> **EXPLAIN** for the retrieval decision (see [Also shipped](#also-shipped)). See
+> [SPEC.md](./SPEC.md) §10 for the conformance checklist these tests assert against.
 
 ## Install
 
@@ -85,9 +88,12 @@ context-runtime --corpus ./docs run "what's our incident process?"
 context-runtime --config context_runtime.yaml explain --analyze "why did deploy X fail?"
 ```
 
-## What's implemented (v0.1)
+## Core seams (SPEC) & bindings
 
-| Seam (SPEC) | v0.1 implementation | Real binding (lazy) |
+The six plugin seams and their initial slice; several "real bindings" below are now shipped (see
+[Also shipped](#also-shipped)).
+
+| Seam (SPEC) | initial slice | Real binding |
 |---|---|---|
 | **Planner trio** (intent/candidate/optimizer) | rule-table intent → candidate gen → heuristic cost model | — *(the genuinely new core)* |
 | **Cost model + statistics** | `PlanScore` weighted utility + `pg_statistic`-style calibration | learned/neural (v0.3+) |
@@ -102,13 +108,33 @@ context-runtime --config context_runtime.yaml explain --analyze "why did deploy 
 | **Observability** | in-process `Trace` + JSON | OpenLLMetry → Langfuse |
 | **Plan Cache** | null/always-miss stub | semantic cache (v0.2) |
 
+## Also shipped
+
+Beyond the initial slice, in both the Python source-of-truth and the Go port (feature parity):
+
+- **Retrieval as a routable capability** — BM25 · dense (fastembed ONNX) · hybrid (RRF) · graph
+  (Personalized-PageRank multi-hop) · community · **sharded coverage routing** for heterogeneous
+  corpora · **cross-modal** (CLIP image, ColPali multi-vector, video segments — Python) ·
+  quantized ANN (TurboVec) · two-stage cost-gated fusion.
+- **DSpark-inspired planning** — score **calibration** (isotonic → `P(relevant)`), grounded
+  **abstention**, and a **load-aware sizer** that prunes the expensive stage. Measured v1→v2 lift
+  in [BENCHMARKS.md](./BENCHMARKS.md).
+- **Quality-aware routing** — a quality ledger that tracks learned quality **apart from cost** per
+  intent, so a genuinely better arm (or provider) wins at equal cost. Opt-in.
+- **EXPLAIN** (`context_runtime/explain.py`, `POST /librechat/explain`, `examples/explain.py`) —
+  the DB EXPLAIN-ANALYZE analogue for the retrieval decision: every candidate arm ranked with its
+  quality/cost decomposition, the per-method trace with calibrated `P(relevant)`, served/abstain,
+  and reward provenance. Read-only. Visualized at [redevops.io/planner](https://redevops.io/planner).
+- **LiteLLM model binding** + native cost-tiered routing; **DuckDB** and **Postgres** stores.
+
 ## Benchmarks
 
-Runnable results in [BENCHMARKS.md](./BENCHMARKS.md) — retrieval over a **heterogeneous
-financial × medical corpus** (coverage routing cuts cross-domain context pollution 22→0 with
-recall intact), the **3-index chat memory** tenant (+2.93 learned vs read-all-three), and
-**parallel sharded fusion** (5.8× fan-out). Every number is produced by an example in
-[`examples/`](./examples).
+Runnable results in [BENCHMARKS.md](./BENCHMARKS.md). Headline: the **v1 → v2 table measured in
+both runtimes** (Python + Go) — learned-policy precision **+14.6 / +11.3 pts**, abstention
+**0 → 100%**, expensive-stage depth **−62%**. Plus retrieval over a **heterogeneous financial ×
+medical corpus** (coverage routing cuts cross-domain pollution 22→0 with recall intact), the
+**3-index chat memory** tenant (+2.93 learned vs read-all-three), and **parallel sharded fusion**
+(5.8× fan-out). Every number is produced by an example in [`examples/`](./examples).
 
 ## Architecture
 
