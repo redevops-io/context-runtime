@@ -38,14 +38,24 @@ class OpenAICompatibleModel:
         base_envs: tuple[str, ...] = ("AGENT_LLM_BASE_URL", "OPENAI_BASE_URL"),
         cost_per_1k: float = 0.0,
     ) -> "OpenAICompatibleModel | None":
-        """Build from environment, or ``None`` when no API key is present (offline)."""
+        """Build from environment, or ``None`` when nothing is configured (offline → StubModel).
+
+        Priority: an explicit OpenAI/agent key, else the self-hosted OpenAI-compatible endpoint
+        the agentic-os apps already point at (``REDEVOPS_LLM_BASE_URL`` / ``REDEVOPS_LLM_MODEL`` —
+        typically a keyless on-prem DeepSeek). That keeps the agent on our own model plane without
+        spreading a provider key across every container.
+        """
         key = next((os.environ[k] for k in key_envs if os.environ.get(k)), None)
-        if not key:
-            return None
-        base = next((os.environ[b] for b in base_envs if os.environ.get(b)), "https://api.openai.com/v1")
-        model = os.environ.get(model_env, default_model)
-        tier = Tier(name="chat", model=model, base_url=base.rstrip("/"), api_key=key, cost_per_1k=cost_per_1k)
-        return cls([tier])
+        if key:
+            base = next((os.environ[b] for b in base_envs if os.environ.get(b)), "https://api.openai.com/v1")
+            model = os.environ.get(model_env, default_model)
+            return cls([Tier(name="chat", model=model, base_url=base.rstrip("/"), api_key=key, cost_per_1k=cost_per_1k)])
+        rbase = os.environ.get("REDEVOPS_LLM_BASE_URL")
+        if rbase:
+            rmodel = os.environ.get("REDEVOPS_LLM_MODEL", "DeepSeek-V4-Flash")
+            rkey = os.environ.get("REDEVOPS_LLM_KEY") or "sk-noauth"  # vLLM ignores it; header must exist
+            return cls([Tier(name="chat", model=rmodel, base_url=rbase.rstrip("/"), api_key=rkey, cost_per_1k=cost_per_1k)])
+        return None
 
     def _tier_for(self, capability: str) -> Tier:
         return self.tiers.get(self.default_tier) or next(iter(self.tiers.values()))
@@ -56,8 +66,9 @@ class OpenAICompatibleModel:
         if req.system:
             messages.append({"role": "system", "content": req.system})
         messages.extend(dict(m) for m in req.messages)
-        # gpt-5.x uses max_completion_tokens and rejects a non-default temperature; keep it minimal.
-        payload: dict = {"model": tier.model, "messages": messages, "max_completion_tokens": req.max_tokens}
+        # gpt-5.x wants max_completion_tokens; self-hosted vLLM/DeepSeek want max_tokens. Branch on host.
+        tok_key = "max_completion_tokens" if "openai.com" in (tier.base_url or "") else "max_tokens"
+        payload: dict = {"model": tier.model, "messages": messages, tok_key: req.max_tokens}
         if req.tools:
             payload["tools"] = list(req.tools)
         request = urllib.request.Request(

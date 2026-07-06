@@ -229,16 +229,15 @@ class AgentConsole:
             "concrete steps. If the passages don't cover it, say so plainly."
         )
         prompt = f"Guide:\n{context}\n\nQuestion: {message}"
-        res = self.model.complete(
-            ModelRequest(messages=({"role": "user", "content": prompt},), system=system, max_tokens=600)
-        )
-        return {
-            "intent": "help",
-            "text": res.text or hits[0].text,
-            "evidence": evidence,
-            "model": res.model,
-            "cost_usd": res.est_cost_usd,
-        }
+        try:
+            res = self.model.complete(
+                ModelRequest(messages=({"role": "user", "content": prompt},), system=system, max_tokens=600)
+            )
+            return {"intent": "help", "text": res.text or hits[0].text, "evidence": evidence,
+                    "model": res.model, "cost_usd": res.est_cost_usd}
+        except Exception:  # noqa: BLE001 — model outage → fall back to the top grounded passage
+            return {"intent": "help", "text": f"{hits[0].text}\n\n(Grounded in the {self.tenant} guide [1].)",
+                    "evidence": evidence, "model": self.model.info().name}
 
     def _answer_tool(self, name: str, args: dict) -> dict:
         result = self.registry.run(name, args)
@@ -254,11 +253,15 @@ class AgentConsole:
                 "below. Answer them directly and concisely from that data. Do not invent numbers."
             )
             prompt = f"Tool `{name}` returned:\n{summary}\n\nAnswer the user."
-            res = self.model.complete(
-                ModelRequest(messages=({"role": "user", "content": prompt},), system=system, max_tokens=500)
-            )
-            body = res.text or summary
-            model_name = res.model
+            try:
+                res = self.model.complete(
+                    ModelRequest(messages=({"role": "user", "content": prompt},), system=system, max_tokens=500)
+                )
+                body = res.text or summary
+                model_name = res.model
+            except Exception:  # noqa: BLE001 — model outage → return the raw tool summary
+                body = summary
+                model_name = self.model.info().name
         else:
             body = summary or "Done."
             model_name = self.model.info().name
