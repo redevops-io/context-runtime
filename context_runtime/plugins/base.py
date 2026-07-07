@@ -55,7 +55,10 @@ class CandidateGenerator(Protocol):
 @runtime_checkable
 class CostOptimizer(Protocol):
     def score(self, candidate: Candidate, goal: Goal) -> PlanScore: ...
-    def select(self, scored: list[tuple[Candidate, PlanScore]], goal: Goal) -> Plan: ...
+    # ``context`` (the intent bucket) is optional: static optimizers ignore it; an online
+    # (Gen-4) optimizer uses it as the contextual-bandit key. Kept keyword-defaulted for
+    # backward compatibility with callers that pass only (scored, goal).
+    def select(self, scored: list[tuple[Candidate, PlanScore]], goal: Goal, context: str = "") -> Plan: ...
 
 
 # ──────────────────────────── governance seam (enterprise open-core) ────────────────────────────

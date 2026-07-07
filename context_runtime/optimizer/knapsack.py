@@ -53,7 +53,9 @@ class KnapsackOptimizer:
             return (sc.total, t)
         return key
 
-    def select(self, scored: list[tuple[Candidate, PlanScore]], goal: Goal) -> Plan:
+    def select(self, scored: list[tuple[Candidate, PlanScore]], goal: Goal, context: str = "") -> Plan:
+        # ``context`` is accepted for interface parity with the online optimizer; the static
+        # cost optimizer does not use it (selection is a pure function of score + feasibility).
         rejected: list[tuple[Candidate, str]] = []
         feasible_set: list[tuple[Candidate, PlanScore]] = []
         for cand, sc in scored:

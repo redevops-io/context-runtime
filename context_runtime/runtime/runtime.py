@@ -109,7 +109,9 @@ class ContextRuntime:
         intent = self.intent.analyze(goal)
         cands = self.candidates.prune(self.candidates.generate(intent, goal), goal)
         scored: list[tuple[Candidate, PlanScore]] = [(c, self.optimizer.score(c, goal)) for c in cands]
-        plan = self.optimizer.select(scored, goal)
+        # pass the intent bucket as the selection context — an online (Gen-4) optimizer keys its
+        # contextual bandit on it; the static optimizer ignores it.
+        plan = self.optimizer.select(scored, goal, context=intent.bucket)
         plan = replace(plan, intent=intent)   # attach the real intent
         return plan, scored, intent
 
