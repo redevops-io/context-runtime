@@ -31,6 +31,7 @@ class Finding:
     severity: str
     title: str
     target: str = ""
+    cls: str = ""    # "os" (base-image system package) | "lang" (this app's own dependency)
 
 
 @dataclass
@@ -85,8 +86,10 @@ class SupplyChainScanner:
             return ScanResult(False, target, "trivy", note="unparseable trivy output")
         findings: list[Finding] = []
         secrets = misconfigs = 0
+        _cls = {"os-pkgs": "os", "lang-pkgs": "lang"}
         for res in d.get("Results", []) or []:
             tgt = res.get("Target", target)
+            fcls = _cls.get(res.get("Class", ""), "")
             for v in res.get("Vulnerabilities", []) or []:
                 findings.append(Finding(
                     id=v.get("VulnerabilityID", ""),
@@ -96,6 +99,7 @@ class SupplyChainScanner:
                     severity=(v.get("Severity") or "UNKNOWN").upper(),
                     title=(v.get("Title") or v.get("Description") or "")[:200],
                     target=tgt,
+                    cls=fcls,
                 ))
             secrets += len(res.get("Secrets", []) or [])
             misconfigs += len(res.get("Misconfigurations", []) or [])
@@ -210,3 +214,33 @@ class SupplyChainScanner:
         summary = f"{len(result.findings)} vulns ({crit} critical, {high} high); {fixable} fixable"
         note = "" if fixable else result.note or "no fixable findings"
         return {"summary": summary, "fixes": fixes, "note": note}
+
+    def advise(self, result: ScanResult) -> dict:
+        """Turn the OS-vs-dependency split into an actionable recommendation. Most container CVEs
+        live in the base OS image, not the app's own code — so the highest-leverage fix is usually
+        hardening the base image (once, fleet-wide) rather than chasing individual CVEs."""
+        if not result.ok:
+            return {"os": 0, "lang": 0, "recommendation": result.note}
+        fs = result.findings
+        os_n = sum(1 for f in fs if f.cls == "os")
+        lang_n = sum(1 for f in fs if f.cls == "lang")
+        fix_os = sum(1 for f in fs if f.cls == "os" and f.fixed)
+        fix_lang = sum(1 for f in fs if f.cls == "lang" and f.fixed)
+        os_pkgs = sorted({f.pkg for f in fs if f.cls == "os" and f.fixed and f.severity in ("CRITICAL", "HIGH")})[:4]
+        if not fs:
+            rec = "No known vulnerabilities — nothing to do."
+        elif os_n and os_n >= max(1, lang_n):
+            eg = (" (e.g. " + ", ".join(os_pkgs) + ")") if os_pkgs else ""
+            rec = (f"{os_n} of {len(fs)} findings are in the OS BASE IMAGE, not this app's own dependencies. "
+                   f"The high-leverage fix is to HARDEN THE BASE, not chase individual CVEs: rebase onto a "
+                   f"patched python:3.12-slim digest, or add `apt-get update && apt-get upgrade -y` for the "
+                   f"flagged system packages{eg} in the Dockerfile — clearing ~{fix_os} of them, and fleet-wide "
+                   f"since every agent shares the base image.")
+            if fix_lang:
+                rec += f" Separately, {fix_lang} of this app's own dependency CVE(s) are fixable by upgrading the pins."
+        elif lang_n:
+            rec = (f"The exposure is in this app's OWN dependencies ({lang_n} finding(s), {fix_lang} fixable) rather "
+                   f"than the base image — upgrade the pinned versions listed above.")
+        else:
+            rec = "Findings have no fixed version yet — monitor upstream and re-scan after updates."
+        return {"os": os_n, "lang": lang_n, "fixable_os": fix_os, "fixable_lang": fix_lang, "recommendation": rec}

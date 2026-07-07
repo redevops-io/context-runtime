@@ -69,3 +69,22 @@ def test_triage_orders_fixable_and_caps_and_handles_bad_result():
     nofix = ScanResult(ok=True, target="t", scanner="trivy", findings=[findings[1]])
     out2 = sc.triage(nofix)
     assert out2["note"] == "no fixable findings"
+
+def test_advise_recommends_base_hardening_when_os_dominates():
+    from context_runtime.integrations.supply_chain import SupplyChainScanner as S
+    raw = ('{"Results":[{"Class":"os-pkgs","Vulnerabilities":['
+           '{"VulnerabilityID":"CVE-1","PkgName":"openssl","InstalledVersion":"3.5.5","FixedVersion":"3.5.6","Severity":"HIGH"},'
+           '{"VulnerabilityID":"CVE-2","PkgName":"libcap2","InstalledVersion":"1","FixedVersion":"2","Severity":"HIGH"}]},'
+           '{"Class":"lang-pkgs","Vulnerabilities":['
+           '{"VulnerabilityID":"CVE-3","PkgName":"pip","InstalledVersion":"25.0","FixedVersion":"25.3","Severity":"MEDIUM"}]}]}')
+    a = S().advise(S._parse_trivy(raw))
+    assert a["os"] == 2 and a["lang"] == 1
+    assert "BASE IMAGE" in a["recommendation"] and "python:3.12-slim" in a["recommendation"]
+
+
+def test_advise_flags_app_deps_when_lang_dominates():
+    from context_runtime.integrations.supply_chain import SupplyChainScanner as S
+    raw = ('{"Results":[{"Class":"lang-pkgs","Vulnerabilities":['
+           '{"VulnerabilityID":"CVE-9","PkgName":"jinja2","InstalledVersion":"2.1","FixedVersion":"3.1.4","Severity":"HIGH"}]}]}')
+    a = S().advise(S._parse_trivy(raw))
+    assert a["lang"] == 1 and a["os"] == 0 and "OWN dependencies" in a["recommendation"]
