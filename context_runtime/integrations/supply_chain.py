@@ -112,6 +112,17 @@ class SupplyChainScanner:
             return ScanResult(False, path, "trivy", note=f"trivy fs failed (rc={rc}): {err[:140]}")
         return self._parse_trivy(out, path)
 
+    def scan_rootfs(self, path: str = "/") -> ScanResult:
+        """Scan an entire root filesystem — OS packages + installed language deps. Run from inside a
+        container this inspects the container's FULL supply chain (the base image + everything we
+        installed), surfacing CVEs that a lockfile scan of the app dir misses."""
+        if not shutil.which("trivy"):
+            return ScanResult(False, path, "trivy", note="trivy not installed")
+        rc, out, err = self._run(["trivy", "rootfs", "--quiet", "--format", "json", "--scanners", "vuln", path])
+        if not out:
+            return ScanResult(False, path, "trivy", note=f"trivy rootfs failed (rc={rc}): {err[:140]}")
+        return self._parse_trivy(out, path)
+
     def scan_image(self, ref: str) -> ScanResult:
         """Scan a container image reference for known CVEs."""
         if not shutil.which("trivy"):
