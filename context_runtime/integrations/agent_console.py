@@ -170,6 +170,23 @@ class AgentConsole:
             self.registry.register(t)
             self._tools[t.spec().name] = t
 
+    def mount_mcp(self, client, *, prefix: str | None = None, allow: list[str] | None = None) -> list[str]:
+        """Mount an external MCP tool server's tools into this console.
+
+        Registers each tool in the agent-harness registry AND the classify/dispatch catalog, so
+        the assistant can pick and run them like any native tool. Read-only MCP tools
+        (``readOnlyHint``) run ungated; side-effecting ones stay gated unless named in ``allow``.
+        Returns the mounted tool names.
+        """
+        from ..tools.mcp import mount_mcp as _mount_mcp
+
+        names = _mount_mcp(self.registry, client, prefix=prefix)
+        for n in names:
+            self._tools[n] = self.registry.get(n)  # classify() sees it, respond() dispatches it
+        if allow:
+            self.registry.policy.allow.update(allow)
+        return names
+
     # ---- helpers -------------------------------------------------------------
 
     @property
