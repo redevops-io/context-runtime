@@ -58,6 +58,33 @@ class CostOptimizer(Protocol):
     def select(self, scored: list[tuple[Candidate, PlanScore]], goal: Goal) -> Plan: ...
 
 
+# ──────────────────────────── governance seam (enterprise open-core) ────────────────────────────
+# The optimizer optionally consults two injected providers. Both are OPTIONAL and default to None,
+# so the OSS engine runs standalone; the commercial layer (context-runtime-v3) supplies concrete
+# implementations that adapt its PolicyEngine / TrustLedger to these Protocols. The engine never
+# imports the enterprise types — it depends only on the interface, exactly like every other plugin.
+
+
+@runtime_checkable
+class PolicyProvider(Protocol):
+    """Policy-Constrained Planning (Whitepaper v3): filter the feasible execution space BEFORE cost
+    ranking. Return ``None`` if the candidate is policy-feasible, else a short human-readable reason
+    (surfaced in ``Plan.rejected`` → EXPLAIN's "rejected alternatives + why"). The score is provided
+    so cost/budget policies can bind to the real estimate. A policy-violating plan is infeasible
+    regardless of its estimated quality or cost — authorization is a first-class planning constraint."""
+
+    def feasible(self, candidate: Candidate, goal: Goal, score: PlanScore) -> str | None: ...
+
+
+@runtime_checkable
+class TrustProvider(Protocol):
+    """Trust-Aware Execution (Whitepaper v3, Generation 5): a [0, 1] trust score for a candidate in
+    the context of this goal. The optimizer uses it to break ties between equally cost-ranked feasible
+    plans (and, in the full Gen-5 build, folds it into the objective). Unobserved ⇒ a neutral prior."""
+
+    def score(self, candidate: Candidate, goal: Goal) -> float: ...
+
+
 # ──────────────────────────── §3.1 cost estimator ────────────────────────────
 
 
