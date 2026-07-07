@@ -154,3 +154,59 @@ class SupplyChainScanner:
                 except Exception:  # noqa: BLE001
                     pass
         return {"ok": False, "note": "no SBOM tool available (install syft or trivy)"}
+
+    def resolve_image(self, container: str) -> str:
+        rc, out, _ = self._run(["docker", "inspect", "-f", "{{.Config.Image}}", container])
+        if rc == 0:
+            return out.strip()
+        return ""
+
+    def scan_container(self, container: str) -> ScanResult:
+        image = self.resolve_image(container)
+        if not image:
+            return ScanResult(False, container, "trivy", note=f"could not resolve image for {container}")
+        res = self.scan_image(image)
+        res.target = f"{container} ({image})"
+        return res
+
+    def list_scannable_containers(self, name_filter: str = "") -> list[dict]:
+        rc, out, _ = self._run(["docker", "ps", "--format", "{{.Names}}\t{{.Image}}"])
+        if rc != 0:
+            return []
+        rows = []
+        for line in out.strip().splitlines():
+            if not line:
+                continue
+            parts = line.split("\t", 1)
+            if len(parts) != 2:
+                continue
+            name, image = parts
+            if name_filter and name_filter not in name:
+                continue
+            rows.append({"name": name, "image": image})
+        return rows
+
+    def triage(self, result: ScanResult, top: int = 6) -> dict:
+        if not result.ok:
+            return {"summary": result.note, "fixes": [], "note": result.note}
+        ordered = sorted(
+            (f for f in result.findings if f.fixed),
+            key=lambda f: (_SEV_ORDER.get(f.severity, 99), f.id),
+        )[:top]
+        fixes = [
+            {
+                "id": f.id,
+                "pkg": f.pkg,
+                "installed": f.installed,
+                "fixed": f.fixed,
+                "severity": f.severity,
+                "action": f"upgrade {f.pkg} {f.installed} → {f.fixed}",
+            }
+            for f in ordered
+        ]
+        crit = sum(1 for f in result.findings if f.severity == "CRITICAL")
+        high = sum(1 for f in result.findings if f.severity == "HIGH")
+        fixable = sum(1 for f in result.findings if f.fixed)
+        summary = f"{len(result.findings)} vulns ({crit} critical, {high} high); {fixable} fixable"
+        note = "" if fixable else result.note or "no fixable findings"
+        return {"summary": summary, "fixes": fixes, "note": note}
