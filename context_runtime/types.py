@@ -141,7 +141,7 @@ class Plan:
 
 Retrieval = Literal[
     "vector", "bm25", "hybrid", "graph", "community", "image", "colpali", "video",
-    "sql", "api", "logs", "file", "code",
+    "sql", "api", "logs", "file", "code", "temporal",
 ]
 
 
