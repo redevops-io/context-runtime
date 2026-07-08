@@ -54,6 +54,8 @@ class BanditOptimizer:
         epsilon: float = 0.15,
         policy: PolicyProvider | None = None,
         trust: TrustProvider | None = None,
+        trust_weight: float = 0.0,
+        abstain_gate=None,
         context_of=None,
         seed: int = 0x1234567,
     ):
@@ -61,6 +63,10 @@ class BanditOptimizer:
         self.bandit = bandit or EpsilonGreedyBandit(arms=(), epsilon=epsilon)
         self.policy = policy
         self.trust = trust
+        # Gen-5: when > 0, trust is a weighted OBJECTIVE term in ranking, not just a tie-breaker.
+        self.trust_weight = trust_weight
+        # Gen-5: an optional AbstentionGate — records serve/escalate/abstain in Plan.extra.
+        self.abstain_gate = abstain_gate
         self.context_of = context_of          # goal -> context str; else the caller passes context=
         self._rng = seed & 0xFFFFFFFF
         self._known: set[str] = {a.key for a in self.bandit.arms}
@@ -97,14 +103,17 @@ class BanditOptimizer:
             ok = False
         return replace(s, feasible=ok)
 
-    def _arm_value(self, ctx: str, cand: Candidate, sc: PlanScore) -> tuple[float, float]:
+    def _arm_value(self, ctx: str, cand: Candidate, sc: PlanScore, goal: Goal) -> tuple[float, float]:
         """Value to rank by: the learned mean once observed, else the cost-model total as an optimistic
-        prior. Trust (if present) is the secondary tie-breaker — same shape as the Phase-0 seam."""
+        prior. With ``trust_weight`` (Gen 5) trust is folded into the objective; it is also the secondary
+        tie-breaker (the Phase-0 seam shape)."""
         key = plan_key(cand)
         self._ensure_arm(key)
         n, mean = self.bandit.value(ctx, key)
         base = mean if n > 0 else sc.total
         t = self.trust.score(cand, goal) if self.trust is not None else 0.0
+        if self.trust_weight > 0.0 and self.trust is not None:
+            base = (1.0 - self.trust_weight) * base + self.trust_weight * t
         return (base, t)
 
     def select(self, scored, goal: Goal, context: str = "", *, shadow: bool = False) -> Plan:
@@ -124,7 +133,7 @@ class BanditOptimizer:
         m = len(eff_pool)
 
         # greedy (exploit) reference — argmax learned/estimated value
-        greedy_i = max(range(m), key=lambda i: self._arm_value(ctx, *eff_pool[i]))
+        greedy_i = max(range(m), key=lambda i: self._arm_value(ctx, eff_pool[i][0], eff_pool[i][1], goal))
 
         explore = m > 1 and self._rand() < self.bandit.epsilon
         if explore:
@@ -145,13 +154,19 @@ class BanditOptimizer:
             if i != chosen_i:
                 rejected.append((cand, f"not selected (value rank; mode={mode})"))
 
+        extra = {"bandit": {"context": ctx, "arm": plan_key(chosen), "mode": mode,
+                            "p": round(p, 6), "epsilon": eps}}
+        # Gen-5 honest abstention: is the chosen plan confident enough to serve?
+        if self.abstain_gate is not None:
+            v = self.abstain_gate.evaluate(chosen_sc, goal)
+            extra["abstention"] = {"action": v.action, "confidence": round(v.confidence, 6), "reason": v.reason}
+
         return Plan(
             intent=Intent(bucket="unknown"),   # runtime attaches the real intent
             chosen=chosen,
             score=chosen_sc,
             rejected=tuple(rejected),
-            extra={"bandit": {"context": ctx, "arm": plan_key(chosen), "mode": mode,
-                              "p": round(p, 6), "epsilon": eps}},
+            extra=extra,
         )
 
     # ── learning ──
