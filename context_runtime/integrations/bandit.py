@@ -27,11 +27,15 @@ class EpsilonGreedyBandit:
     """
 
     def __init__(self, arms: tuple, epsilon: float = 0.15, optimistic: float = 1.0,
-                 seed: int = 0x9E3779B9, persist_path: str | None = None):
+                 seed: int = 0x9E3779B9, persist_path: str | None = None, discount: float = 0.0):
         import threading
         self.arms = arms
         self.epsilon = epsilon
         self.optimistic = optimistic
+        # discount ∈ (0,1] = constant step size (exponential recency weighting) so stale evidence
+        # fades and the policy tracks a drifting best arm — the Whitepaper-v3 non-stationarity property.
+        # 0 (default) = sample-average (1/n), the stationary estimator; behavior is unchanged.
+        self.discount = discount
         self.stats: dict[str, dict[str, list[float]]] = {}   # ctx → arm.key → [n, mean]
         self._rng = seed & 0xFFFFFFFF
         self.persist_path = persist_path   # learned policy survives restarts if set
@@ -73,7 +77,8 @@ class EpsilonGreedyBandit:
             arms = self._ctx(ctx)
             n, mean = arms[arm.key]
             n += 1
-            arms[arm.key] = [n, mean + (reward - mean) / n]
+            alpha = self.discount if self.discount > 0.0 else 1.0 / n
+            arms[arm.key] = [n, mean + alpha * (reward - mean)]
             # serialize a consistent snapshot under the lock; write it to disk outside so
             # the fsync/rename never blocks concurrent select/update.
             snapshot = json.dumps(self.stats) if self.persist_path else None

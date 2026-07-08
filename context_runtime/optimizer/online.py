@@ -52,6 +52,7 @@ class BanditOptimizer:
         *,
         bandit: EpsilonGreedyBandit | None = None,
         epsilon: float = 0.15,
+        discount: float = 0.0,
         policy: PolicyProvider | None = None,
         trust: TrustProvider | None = None,
         trust_weight: float = 0.0,
@@ -60,7 +61,8 @@ class BanditOptimizer:
         seed: int = 0x1234567,
     ):
         self.estimator = estimator
-        self.bandit = bandit or EpsilonGreedyBandit(arms=(), epsilon=epsilon)
+        # discount > 0 → recency-weighted learning (tracks a drifting best arm); see EpsilonGreedyBandit.
+        self.bandit = bandit or EpsilonGreedyBandit(arms=(), epsilon=epsilon, discount=discount)
         self.policy = policy
         self.trust = trust
         # Gen-5: when > 0, trust is a weighted OBJECTIVE term in ranking, not just a tie-breaker.
