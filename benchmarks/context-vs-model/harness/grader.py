@@ -75,10 +75,14 @@ _JUDGE_SYS = (
 
 
 def judge_grade(judge_chat, question: str, gold: str, cand: str) -> bool:
-    """``judge_chat(system, user) -> str`` (a frontier model). Returns True iff CORRECT."""
-    user = f"QUESTION:\n{question}\n\nGOLD:\n{gold}\n\nMODEL:\n{cand}\n\nVerdict:"
-    verdict = (judge_chat(_JUDGE_SYS, user) or "").strip().upper()
-    return verdict.startswith("CORRECT")
+    """``judge_chat(system, user) -> str`` (a frontier model). Returns True iff CORRECT.
+    Any judge error (rate limit, token-limit 400) → False, so one bad row can't crash a run."""
+    user = f"QUESTION:\n{question}\n\nGOLD:\n{gold}\n\nMODEL:\n{cand}\n\nVerdict (CORRECT or INCORRECT):"
+    try:
+        verdict = (judge_chat(_JUDGE_SYS, user) or "").strip().upper()
+    except Exception:  # noqa: BLE001
+        return False
+    return "CORRECT" in verdict and "INCORRECT" not in verdict
 
 
 def grade(question, cand: str, *, judge_chat=None, prefer_judge: bool = False) -> dict:

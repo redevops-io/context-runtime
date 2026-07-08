@@ -76,7 +76,8 @@ def main(argv=None):
     judge_chat = None
     if args.judge_base_url and args.judge_model:
         jc = modelmod.make_client(args.judge_base_url, args.judge_model, api_key=args.judge_key)
-        judge_chat = modelmod.make_chat(jc, max_tokens=6)
+        # reasoning judges (gpt-5.5) spend ~25-30 tokens thinking before the verdict; 6 → empty
+        judge_chat = modelmod.make_chat(jc, max_tokens=256)
 
     arms = [a for a in args.arms.split(",") if a in ARMS]
     levels = [int(x) for x in args.pollution.split(",")]
