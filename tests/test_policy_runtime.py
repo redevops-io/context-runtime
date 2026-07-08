@@ -80,6 +80,21 @@ def test_parse_args_flags_and_lists():
     assert a["exclude"] == "consulting" and a["regex"] is True
 
 
+def test_policy_command_factory_add_show_remove(tmp_path):
+    from context_runtime.policy import RuleStore, CommandRegistry, global_policy_commands
+    store = RuleStore(dir=str(tmp_path))
+    reg = CommandRegistry(can=lambda p, req: req == "" or "admin" in getattr(p, "roles", ()))
+    reg.register_all(global_policy_commands(store))
+    admin = SimpleNamespace(user="root", app="x", roles=frozenset({"admin"}))
+
+    r = reg.dispatch("/addpolicy no internal pricing --phase output", admin)
+    assert r["ok"] and store.list(scope="global", kind="guardrail")[0].text == "no internal pricing"
+    assert "no internal pricing" in reg.dispatch("/showpolicy", _who("bob"))["text"]     # read is open
+    assert reg.dispatch(f"/removepolicy {r['data']['id']}", admin)["ok"] and store.list(scope="global") == []
+    assert not reg.dispatch("/addpolicy x", _who("bob"))["ok"]                            # non-admin blocked
+    assert reg.dispatch("/addguardrail block this", admin)["ok"]                          # alias works
+
+
 def test_command_dispatch_permission_and_help():
     calls = []
     reg = CommandRegistry(can=lambda p, req: req == "self" or (req == "policy-admin" and "admin" in getattr(p, "roles", ())))

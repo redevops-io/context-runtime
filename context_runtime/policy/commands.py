@@ -48,6 +48,25 @@ def parse_args(argstr: str) -> dict:
     return args
 
 
+def role_gate(*, admin_roles=frozenset({"admin", "security", "policy-admin"})):
+    """A simple role-based ``can(principal, requires)`` for deployments without the enterprise plane:
+    ``""`` = anyone · ``self`` = any authenticated user · ``policy-admin`` = an admin role ·
+    ``role:X`` / ``X`` = the principal carries role X."""
+    def can(principal, requires: str) -> bool:
+        roles = getattr(principal, "roles", frozenset()) or frozenset()
+        user = getattr(principal, "user", "") or ""
+        if not requires:
+            return True
+        if requires == "self":
+            return bool(user)
+        if requires == "policy-admin":
+            return bool(admin_roles & set(roles))
+        if requires.startswith("role:"):
+            return requires.split(":", 1)[1] in roles
+        return requires in roles
+    return can
+
+
 class CommandRegistry:
     def __init__(self, *, can: Callable[[object, str], bool] | None = None):
         self._cmds: dict[str, Command] = {}
