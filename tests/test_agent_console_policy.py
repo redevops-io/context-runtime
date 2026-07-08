@@ -19,6 +19,18 @@ def test_slash_command_is_dispatched_without_the_model():
     assert c.respond("/ping there")["text"] == "pong there"
 
 
+def test_keyword_fallback_routes_howto_to_help_not_a_tool():
+    """A how-to question must not be keyword-matched into a side-effecting tool just because it
+    shares an incidental word ('...part of a page?' vs the add_watch 'monitor a page' description)."""
+    c = AgentConsole("Market Radar", "radar", tools=[
+        function_tool("add_watch", lambda a: ToolResult(ok=True, text="ok"),
+                      description="start monitoring a new page (non-destructive)")])
+    howto = c._keyword_route("How do I track just part of a page?")
+    assert howto["mode"] == "help" and howto["reason"] == "how-to → help"
+    # explicit actions still keyword-match to the tool
+    assert c._keyword_route("add a watch on this page")["mode"] == "tool"
+
+
 def test_input_guardrail_blocks_and_reports(tmp_path):
     store = RuleStore(dir=str(tmp_path))
     store.add("global", "guardrail", "forbidden phrase", action="deny", match={"phase": "input"})

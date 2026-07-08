@@ -145,6 +145,13 @@ _CLASSIFY_SYS = (
     "for how-to / explain / what-is questions. Never invent a tool name."
 )
 
+# Interrogative/how-to leads that the deterministic fallback routes to help (not a tool). Kept as
+# explicit phrases so action queries like "what changed this week?" / "how's my traffic?" still route.
+_HELP_MARKERS = (
+    "how do i", "how do you", "how can i", "how to ", "how does ", "how would i",
+    "what is ", "what are ", "what does ", "what's a ", "explain", "tell me about", "why ",
+)
+
 
 def _policy_items(decisions) -> list[dict]:
     """Compact policy list for the panel (§10.1): only non-allow decisions become chips; allows fold."""
@@ -222,6 +229,12 @@ class AgentConsole:
 
     def _keyword_route(self, message: str) -> dict:
         """Deterministic fallback when the model can't return JSON (offline / parse fail)."""
+        # How-to / explain questions are help, not actions — mirror the LLM classify rule so a
+        # single incidental word ("...part of a page?" vs a "monitor a page" tool) can't misroute
+        # an interrogative into a side-effecting tool call.
+        low = (message or "").strip().lower()
+        if any(low.startswith(mk) or (" " + mk) in low for mk in _HELP_MARKERS):
+            return {"mode": "help", "tool": None, "args": {}, "reason": "how-to → help"}
         toks = set(_tokens(message))
         best, best_score = None, 0
         for name, t in self._tools.items():
