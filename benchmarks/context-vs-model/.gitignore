@@ -1,0 +1,4 @@
+.financebench/
+results/*.jsonl
+results/*.png
+__pycache__/
