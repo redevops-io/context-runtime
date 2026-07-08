@@ -35,6 +35,9 @@ services:
     # socket.socketpair(). Load the profile first: see apparmor-docker-contextos.profile.
     security_opt:
       - apparmor=docker-contextos
+    # reach the host-network model shim (Qwen primary + Kimi fallback) at host.docker.internal:8000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - CR_CORPUS_DIR=/corpus
       - CR_EMBEDDINGS=1
@@ -42,9 +45,11 @@ services:
       - CR_QUALITY_ROUTING=1
       # the redevops.io EXPLAIN page fetches /librechat/explain cross-origin, so allow it too
       - CR_CORS_ORIGINS=https://${CHAT_HOST:-chat.redevops.io},https://redevops.io,https://www.redevops.io
-      - CR_UPSTREAM_BASE_URL=${KIMI_BASE_URL:-}
-      - CR_UPSTREAM_API_KEY=${KIMI_API_KEY:-}
-      - CR_UPSTREAM_MODEL=${KIMI_MODEL:-}
+      # Model plane: the shared Qwen3.6-35B-A3B via the host shim (Kimi fallback lives in the shim).
+      # Override CR_MODEL_* to point elsewhere for A/B testing.
+      - CR_UPSTREAM_BASE_URL=${CR_MODEL_URL:-http://host.docker.internal:8000/v1}
+      - CR_UPSTREAM_API_KEY=${CR_MODEL_KEY:-sk-noauth}
+      - CR_UPSTREAM_MODEL=${CR_MODEL_NAME:-Qwen3.6-35B-A3B}
       - CR_UPSTREAM_MAX_TOKENS=4096
       - CR_UPSTREAM_TEMPERATURE=1
       - CONTEXT_RUNTIME_HOME=/data
