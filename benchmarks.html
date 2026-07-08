@@ -1,0 +1,21 @@
+<!doctype html><meta charset="utf-8"><title>Context Runtime — v1 vs v2 benchmarks</title>
+<style>
+ body{font:15px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;background:#f8fafc;margin:0;padding:2rem}
+ .wrap{max-width:960px;margin:0 auto}
+ h1{font-size:1.5rem;margin:0 0 .25rem} .sub{color:#64748b;margin:0 0 1.5rem}
+ table{border-collapse:collapse;width:100%;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+ th,td{padding:.7rem .9rem;text-align:right;border-bottom:1px solid #eef2f7}
+ th{background:#0f172a;color:#fff;font-weight:600;font-size:.85rem}
+ td.metric{text-align:left} td.metric .d{display:block;color:#94a3b8;font-size:.78rem;font-weight:400;margin-top:.15rem}
+ td.num{font-variant-numeric:tabular-nums;color:#334155}
+ td.delta{font-variant-numeric:tabular-nums;font-weight:600;color:#059669}
+ tr:last-child td{border-bottom:0}
+ .foot{color:#94a3b8;font-size:.8rem;margin-top:1rem}
+ .grp{background:#f1f5f9;color:#475569;font-size:.75rem;text-align:center;letter-spacing:.04em}
+</style>
+<div class="wrap">
+<h1>Context Runtime — v1 → v2, measured in both runtimes</h1>
+<p class="sub">The same seeded, ground-truth retrieval simulation, run in the Python source-of-truth and the Go port. v2 = calibrated relevance-in-reward + abstention + the DSpark load-aware sizer.</p>
+<table><thead><tr><th>Metric</th><th>Py v1</th><th>Py v2</th><th>Δ</th><th>Go v1</th><th>Go v2</th><th>Δ</th></tr></thead><tbody><tr><td class="metric"><b>Learned-policy precision</b><span class="d">The served passages that are actually relevant, after the policy converges. v2's reward finally sees calibrated relevance.</span></td><td class="num">67.6%</td><td class="num">82.2%</td><td class="delta">▲ +14.6 pts</td><td class="num">84.6%</td><td class="num">95.9%</td><td class="delta">▲ +11.3 pts</td></tr><tr><td class="metric"><b>Abstention recall (unanswerable caught)</b><span class="d">Share of truly-unanswerable queries v2 declines to answer. v1 has no abstention at all.</span></td><td class="num">0.0%</td><td class="num">100.0%</td><td class="delta">▲ +100.0 pts</td><td class="num">0.0%</td><td class="num">100.0%</td><td class="delta">▲ +100.0 pts</td></tr><tr><td class="metric"><b>False-abstain rate (answerable dropped)</b><span class="d">Answerable queries v2 wrongly declined — the cost of abstention. Lower is better.</span></td><td class="num">0.0%</td><td class="num">0.0%</td><td class="num">—</td><td class="num">0.0%</td><td class="num">0.0%</td><td class="num">—</td></tr><tr><td class="metric"><b>Expensive-stage depth (passages)</b><span class="d">Passages sent to the costly rerank/synthesis stage from a deep k=8 arm. The sizer prunes the low-relevance tail.</span></td><td class="num">8.00</td><td class="num">3.00</td><td class="delta">▼ −62%</td><td class="num">8.00</td><td class="num">3.00</td><td class="delta">▼ −63%</td></tr><tr><td class="metric"><b>Precision after the sizer</b><span class="d">Precision of what survives the sizer's gate — pruning the tail raises it.</span></td><td class="num">37.5%</td><td class="num">100.0%</td><td class="delta">▲ +62.5 pts</td><td class="num">37.5%</td><td class="num">100.0%</td><td class="delta">▲ +62.5 pts</td></tr></tbody></table>
+<p class="foot">40-seed average · precision headlined at β=0.9 (the calibration-trust knob; shipped default 0.5) · Go is an independent re-implementation on identical methodology — directional parity across languages.</p>
+</div>
