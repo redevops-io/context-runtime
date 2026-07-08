@@ -83,7 +83,122 @@ def classify(listing: JobListing) -> Classification:
     return Classification(True, "internal", reason, score)
 
 
-# ── editable pitch template (agent-editable, shared by all users) ──────────────────────────────────
+# ── per-user lead profiles (each user targets their own roles, with their own template) ────────────
+# The default excludes apply to everyone (consultancies build AI *for* clients — no internal pain).
+_DEFAULT_EXCLUDE = ["consult", "advisory", "forward deployed", "forward-deployed", "agency", "staffing",
+                    "system integrator", "professional services", "outsourc", "managed services",
+                    "for our clients", "on behalf of clients", "body shop"]
+# The owner's targets (AI-infrastructure roles) — seeded for LEAD_OWNER_USER only.
+_OWNER_INCLUDE = ["AI Data Engineer", "AI Engineer", "AI Developer", "ML Engineer",
+                  "Machine Learning Engineer", "Applied AI", "AI Platform", "LLM", "RAG", "GenAI", "MLOps"]
+
+
+@dataclass
+class LeadProfile:
+    """One user's outreach config: which role categories to target, what to exclude, and their template."""
+    user: str
+    include: list[str] = field(default_factory=list)     # role phrases to TARGET (empty ⇒ user must set)
+    exclude: list[str] = field(default_factory=lambda: list(_DEFAULT_EXCLUDE))
+    template: str = ""
+    resume_path: str = ""
+
+    def to_dict(self) -> dict:
+        return {"user": self.user, "include": self.include, "exclude": self.exclude,
+                "template": self.template, "resume_path": self.resume_path}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "LeadProfile":
+        return cls(user=d.get("user", ""), include=list(d.get("include", [])),
+                   exclude=list(d.get("exclude", _DEFAULT_EXCLUDE)), template=d.get("template", ""),
+                   resume_path=d.get("resume_path", ""))
+
+
+class ProfileStore:
+    """Per-user profiles persisted as ``<dir>/<user>.json``. A user with no saved profile gets a default:
+    the owner (``LEAD_OWNER_USER``) is seeded with the AI-infrastructure targets + the Context Runtime
+    template; everyone else gets a blank-target profile they configure via chat."""
+
+    def __init__(self, dir: str | None = None, owner: str | None = None):
+        self.dir = dir or os.getenv("LEAD_PROFILE_DIR", "/data/market-radar/profiles")
+        self.owner = (owner or os.getenv("LEAD_OWNER_USER", "alex")).strip()
+
+    def _path(self, user: str):
+        safe = re.sub(r"[^a-z0-9_-]+", "_", (user or "default").lower())
+        return Path(self.dir) / f"{safe}.json"
+
+    def default_for(self, user: str) -> LeadProfile:
+        if user and user == self.owner:
+            return LeadProfile(user, list(_OWNER_INCLUDE), list(_DEFAULT_EXCLUDE),
+                               DEFAULT_TEMPLATE, os.getenv("RESUME_PATH", ""))
+        return LeadProfile(user or "default", [], list(_DEFAULT_EXCLUDE), GENERIC_TEMPLATE, "")
+
+    def load(self, user: str) -> LeadProfile:
+        p = self._path(user)
+        if p.exists():
+            try:
+                return LeadProfile.from_dict(json.loads(p.read_text(encoding="utf-8")))
+            except Exception:  # noqa: BLE001
+                pass
+        return self.default_for(user)
+
+    def save(self, profile: LeadProfile) -> None:
+        p = self._path(profile.user)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = str(p) + ".tmp"
+        Path(tmp).write_text(json.dumps(profile.to_dict(), indent=2), encoding="utf-8")
+        os.replace(tmp, p)
+
+
+def classify_for(listing: JobListing, profile: LeadProfile) -> Classification:
+    """Classify against ONE user's targets: skip on any exclude match, lead on any include match."""
+    text = listing._text().lower()
+    for kw in profile.exclude:
+        if kw and kw.lower() in text:
+            return Classification(False, "excluded", f"matched exclusion {kw!r}", 0.0)
+    if not profile.include:
+        return Classification(False, "unset", "no target roles set — tell the agent what to look for", 0.0)
+    hits = [kw for kw in profile.include if kw and kw.lower() in text]
+    if not hits:
+        return Classification(False, "other", "no targeted role matched", 0.0)
+    internal = bool(_INTERNAL.search(text))
+    score = min(1.0, 0.6 + 0.1 * len(hits) + (0.1 if internal else 0.0))
+    return Classification(True, "match", "matched: " + ", ".join(hits[:3]), round(score, 2))
+
+
+def find_leads_for(source, ledger, profile: LeadProfile, *, queries=None, limit: int = 50,
+                   min_score: float = 0.6) -> list[dict]:
+    """Search (queries default to the profile's target roles) → classify against the profile → dedupe."""
+    queries = queries or (tuple(f'"{c}" hiring' for c in profile.include[:4]) or DEFAULT_QUERIES)
+    seen: set[str] = set()
+    leads: list[dict] = []
+    for q in queries:
+        for listing in source.search(q, limit):
+            k = listing.key()
+            if k in seen:
+                continue
+            seen.add(k)
+            c = classify_for(listing, profile)
+            if not c.is_lead or c.score < min_score:
+                continue
+            if ledger is not None and ledger.already_pitched(listing):
+                continue
+            leads.append({"listing": listing, "classification": c})
+    leads.sort(key=lambda d: d["classification"].score, reverse=True)
+    return leads[:limit]
+
+
+# ── pitch templates ────────────────────────────────────────────────────────────────────────────────
+GENERIC_TEMPLATE = """Hi,
+
+I came across your {title} opening at {company}.
+
+{match}
+
+I'd welcome a short conversation about how I could help.
+
+Best,"""
+
+# The owner's template (agent-editable per user). Placeholders: {title} {company} {match}.
 DEFAULT_TEMPLATE = """Hi,
 
 I came across your {title} opening.

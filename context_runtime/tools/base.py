@@ -96,6 +96,17 @@ def set_default_authorizer(fn) -> None:
     _default_authorizer = fn
 
 
+import contextvars as _contextvars
+
+_principal_ctx = _contextvars.ContextVar("cr_current_principal", default=None)
+
+
+def current_principal():
+    """The principal for the in-flight tool call (set by ``ToolRegistry.run``), or None. Lets a tool
+    scope its behavior to the caller — e.g. per-user config — without changing the ToolPlugin interface."""
+    return _principal_ctx.get()
+
+
 class ToolRegistry:
     """Register tools; run them through the approval gate; describe them to a model."""
 
@@ -128,23 +139,27 @@ class ToolRegistry:
             return ToolResult(ok=False, error=str(e), text=f"[error] {e}")
         spec = tool.spec()
         args = args or {}
-        # data-access authorization (enterprise): gate the tool by who is asking, before side-effect
-        # approval. None principal + no authorizer ⇒ unchanged behavior.
-        authorizer = self.authorizer or _default_authorizer
-        if authorizer is not None:
-            deny = authorizer(principal, spec, args)
-            if deny:
-                self.audit.append({"tool": name, "args": args, "allowed": False, "reason": deny})
-                return ToolResult(ok=False, error=f"denied: {deny}", text=f"[blocked] {name}: {deny}")
-        ok, reason = self.policy.decide(spec, args)
-        if spec.side_effecting or spec.approval_required:
-            self.audit.append({"tool": name, "args": args, "allowed": ok, "reason": reason})
-        if not ok:
-            return ToolResult(ok=False, error=f"denied: {reason}", text=f"[blocked] {name}: {reason}")
+        # expose the caller to the tool for the duration of the call (per-user scoping), reset after.
+        _token = _principal_ctx.set(principal)
         try:
+            # data-access authorization (enterprise): gate the tool by who is asking, before side-effect
+            # approval. None principal + no authorizer ⇒ unchanged behavior.
+            authorizer = self.authorizer or _default_authorizer
+            if authorizer is not None:
+                deny = authorizer(principal, spec, args)
+                if deny:
+                    self.audit.append({"tool": name, "args": args, "allowed": False, "reason": deny})
+                    return ToolResult(ok=False, error=f"denied: {deny}", text=f"[blocked] {name}: {deny}")
+            ok, reason = self.policy.decide(spec, args)
+            if spec.side_effecting or spec.approval_required:
+                self.audit.append({"tool": name, "args": args, "allowed": ok, "reason": reason})
+            if not ok:
+                return ToolResult(ok=False, error=f"denied: {reason}", text=f"[blocked] {name}: {reason}")
             return tool.run(args)
         except Exception as e:  # a tool crash is a failed result, not a runtime crash
             return ToolResult(ok=False, error=f"{type(e).__name__}: {e}", text=f"[error] {name}: {e}")
+        finally:
+            _principal_ctx.reset(_token)
 
 
 def function_tool(name: str, fn: Callable[[dict], ToolResult], description: str = "",

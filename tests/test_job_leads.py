@@ -82,6 +82,42 @@ def test_adzuna_source_parses_and_degrades():
     assert classify(got[0]).is_lead
 
 
+def test_profile_store_owner_vs_generic_and_isolated(tmp_path):
+    from context_runtime.integrations.job_leads import DEFAULT_TEMPLATE, GENERIC_TEMPLATE, ProfileStore
+
+    store = ProfileStore(dir=str(tmp_path), owner="alex")
+    owner = store.load("alex")
+    assert "AI Data Engineer" in owner.include and owner.template == DEFAULT_TEMPLATE   # seeded owner config
+    other = store.load("bob")
+    assert other.include == [] and other.template == GENERIC_TEMPLATE                    # blank for others
+
+    other.include = ["DevOps Engineer"]
+    other.template = "Hi {company}, about {title}. {match}"
+    store.save(other)
+    assert store.load("bob").include == ["DevOps Engineer"]                              # persisted per user
+    assert store.load("alex").include != store.load("bob").include                       # isolated
+
+
+def test_classify_for_uses_profile_targets():
+    from context_runtime.integrations.job_leads import LeadProfile, classify_for
+
+    bob = LeadProfile("bob", include=["DevOps"], exclude=["consult"])
+    assert classify_for(_l("Acme", "Senior DevOps Engineer", "Run our k8s."), bob).is_lead
+    assert not classify_for(_l("Acme", "AI Data Engineer", "Build AI."), bob).is_lead    # not bob's target
+    assert classify_for(_l("BigCo", "DevOps consultant", "for our clients"), bob).kind == "excluded"
+    assert classify_for(_l("x", "AI Engineer", ""), LeadProfile("new")).kind == "unset"  # no targets set
+
+
+def test_find_leads_for_scopes_to_profile(tmp_path):
+    from context_runtime.integrations.job_leads import LeadProfile, OutreachLedger, StaticJobSource, find_leads_for
+
+    src = StaticJobSource([_l("A", "DevOps Engineer", "run our infra", url="u1"),
+                           _l("B", "AI Data Engineer", "build our AI", url="u2")])
+    leads = find_leads_for(src, OutreachLedger(path=str(tmp_path / "l.jsonl")),
+                           LeadProfile("bob", include=["DevOps"]), queries=("x",))
+    assert [d["listing"].company for d in leads] == ["A"]   # only bob's targeted role
+
+
 def test_pitch_template_is_shared_and_editable(tmp_path):
     tpl = PitchTemplate(path=str(tmp_path / "tpl.txt"))
     assert tpl.load() == DEFAULT_TEMPLATE                           # default until edited
