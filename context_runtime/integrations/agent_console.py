@@ -278,9 +278,11 @@ class AgentConsole:
             body = f"{hits[0].text}\n\n(Grounded in the {self.tenant} guide [1].)"
             return {"intent": "help", "text": body, "evidence": evidence, "model": self.model.info().name}
         system = (
-            f"You are the assistant for {self.tenant}. Answer the user's how-to / explain question using "
-            "ONLY the numbered guide passages. Cite them inline like [1]. Be concise and practical — give the "
-            "concrete steps. If the passages don't cover it, say so plainly."
+            f"You are the assistant for {self.tenant}. Answer the user's question using ONLY the numbered "
+            "guide passages, citing them inline like [1]. For a 'what is' / explain question, define the term "
+            "AND explain how it fits this system from the passage context — keep the relevant specifics, don't "
+            "collapse it to a bare one-line definition. For a how-to question, give the concrete steps. Keep it "
+            "tight but complete; if the passages don't cover it, say so plainly."
         )
         prompt = f"Guide:\n{context}\n\nQuestion: {message}"
         try:
