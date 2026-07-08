@@ -146,6 +146,17 @@ _CLASSIFY_SYS = (
 )
 
 
+def _policy_items(decisions) -> list[dict]:
+    """Compact policy list for the panel (§10.1): only non-allow decisions become chips; allows fold."""
+    out = []
+    for d, phase in decisions:
+        if d.action == "allow":
+            continue
+        out.append({"decision": d.action, "phase": phase, "reason": d.reason, "rule_id": d.rule_id,
+                    "scope": d.scope, "provider": d.provider, "summary": f"{d.action} · {phase}"})
+    return out
+
+
 class AgentConsole:
     def __init__(
         self,
@@ -158,6 +169,9 @@ class AgentConsole:
         model: Any = None,
         allow_side_effects: list[str] | None = None,
         authorizer=None,
+        commands=None,
+        policy=None,
+        app: str = "",
     ):
         self.tenant = tenant
         self.subtitle = subtitle or f"Ask about {tenant} — how things work, or get something done."
@@ -169,6 +183,12 @@ class AgentConsole:
         # the process-wide default (set_default_authorizer), so one install() call governs all consoles.
         self.registry = ToolRegistry(ApprovalPolicy(mode="allowlist", allow=list(allow_side_effects or [])),
                                      authorizer=authorizer)
+        # Policy Runtime: /commands are dispatched here (dual-path); `policy` enforces input/output/tool
+        # phases and emits PolicyDecisions. Both optional and fall back to the process default → one
+        # install governs the fleet. app = the policy scope slug (e.g. "market-radar").
+        self.commands = commands
+        self._policy = policy
+        self.app = app
         self._tools: dict[str, _Tool] = {}
         for t in tools:
             self.registry.register(t)
@@ -260,7 +280,21 @@ class AgentConsole:
             return {"intent": "help", "text": f"{hits[0].text}\n\n(Grounded in the {self.tenant} guide [1].)",
                     "evidence": evidence, "model": self.model.info().name}
 
+    def _effective_policy(self):
+        from ..policy import current_policy
+        return self._policy or current_policy()
+
     def _answer_tool(self, name: str, args: dict, principal=None) -> dict:
+        # tool-phase policy: an approval rule pauses an irreversible action; a deny rule blocks it.
+        policy = self._effective_policy()
+        if policy is not None:
+            td = policy.check(principal, "tool", (name, args), app=getattr(principal, "app", "") or self.app)
+            if td.action in ("require_approval", "deny"):
+                verb = "needs approval before it runs" if td.action == "require_approval" else "is blocked"
+                return {"intent": "action", "tool": name, "text": f"This action {verb}: {td.reason}",
+                        "evidence": [{"tool": name, "gate": td.action, "ok": False}], "data": None, "approved": False,
+                        "policy": [{"decision": td.action, "phase": "tool", "reason": td.reason, "rule_id": td.rule_id,
+                                    "scope": td.scope, "provider": td.provider, "summary": f"{name} → {td.action}"}]}
         result = self.registry.run(name, args, principal=principal)
         gate = self.registry.audit[-1] if self.registry.audit else {"decision": "read-only"}
         evidence = [{"tool": name, "args": args, "gate": gate.get("reason") or gate.get("decision", ""), "ok": result.ok}]
@@ -290,14 +324,45 @@ class AgentConsole:
 
     def respond(self, message: str, principal=None) -> dict:
         message = (message or "").strip()
+        # 1) command path — deterministic, no LLM, permission-gated (dual-path dispatch)
+        if self.commands is not None and self.commands.is_command(message):
+            return self.commands.dispatch(message, principal)
         if not message:
             return {"intent": "help", "text": "Ask me anything about " + self.tenant + ".", "evidence": []}
+        policy = self._effective_policy()
+        app = getattr(principal, "app", "") or self.app
+        decisions: list[tuple] = []
+        # 2) input policy (guardrails)
+        if policy is not None:
+            di = policy.check(principal, "input", message, app=app)
+            decisions.append((di, "input"))
+            if di.action == "deny":
+                return {"intent": "blocked", "text": f"Blocked by policy: {di.reason}", "evidence": [],
+                        "policy": _policy_items(decisions)}
+            if di.action == "redact":
+                message = policy.redact(message, di)
+        # 3) route (help / tool). tool-phase policy is enforced inside _answer_tool.
         route = self.classify(message)
         if route["mode"] == "tool" and route["tool"] in self._tools:
             out = self._answer_tool(route["tool"], route.get("args") or {}, principal=principal)
         else:
             out = self._answer_help(message)
         out["route"] = route.get("reason", "")
+        # 4) output policy (guardrails)
+        if policy is not None:
+            do = policy.check(principal, "output", out.get("text", ""), app=app)
+            decisions.append((do, "output"))
+            if do.action == "deny":
+                return {"intent": "blocked", "text": f"Blocked by policy: {do.reason}", "evidence": [],
+                        "policy": _policy_items(decisions)}
+            if do.action == "redact":
+                out["text"] = policy.redact(out["text"], do)
+        # 5) attach compact policy summary (progressive disclosure — §10.1). Merge any tool-phase items.
+        #    Only when a policy is active, so consoles without policy are byte-for-byte unchanged.
+        if policy is not None:
+            items = _policy_items(decisions) + [p for p in (out.get("policy") or []) if p.get("decision") != "allow"]
+            out["policy"] = items
+            out["policy_checks"] = len(decisions) + (1 if out.get("tool") else 0)
         return out
 
     # ---- the panel -----------------------------------------------------------
