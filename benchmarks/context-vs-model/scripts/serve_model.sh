@@ -17,14 +17,15 @@ NAME="${2:?served-model-name}"
 PORT="${3:-8080}"
 CTX="${4:-8192}"
 THREADS="${5:-96}"
+REASONING="${6:-off}"                                # off (default) | on
 BIN="${LLAMA_SERVER:-/cache/llama.cpp/build/bin/llama-server}"
 LOG="${LOG:-/cache/logs/llama_${NAME}.log}"
 
-pkill -f "bin/llama-server" 2>/dev/null || true      # specific pattern — won't match this shell
+pkill -f "bin/llama-server" 2>/dev/null || true      # safe: this script's cmdline has no literal path
 sleep 2
 mkdir -p "$(dirname "$LOG")"
 setsid nohup "$BIN" -m "$GGUF" --host 0.0.0.0 --port "$PORT" \
-  --ctx-size "$CTX" --threads "$THREADS" --jinja --reasoning off \
+  --ctx-size "$CTX" --threads "$THREADS" --jinja --reasoning "$REASONING" \
   -a "$NAME" > "$LOG" 2>&1 < /dev/null &
 echo "launched $NAME on :$PORT (log $LOG)"
 

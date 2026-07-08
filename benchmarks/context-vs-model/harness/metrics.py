@@ -11,7 +11,11 @@ from __future__ import annotations
 import re
 
 _TOKEN = re.compile(r"[a-z0-9]+")
-_REL_THRESH = 0.55          # fraction of a chunk's tokens that must appear in gold evidence
+# Fraction of a chunk's tokens that must appear in a gold evidence passage. A 1200-char
+# chunk that contains the gold table shares only a modest fraction of ITS tokens with the
+# shorter gold snippet, so 0.35 (probe-calibrated: gold ranks 1-4 at this level) is the
+# right operating point; 0.55 undercounted true hits.
+_REL_THRESH = 0.35
 
 
 def _toks(s: str) -> set:
