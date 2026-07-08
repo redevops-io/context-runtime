@@ -141,17 +141,72 @@ def to_html(py: dict, go: dict | None) -> str:
 </div>"""
 
 
+def v3_results(seeds: int = 24) -> dict:
+    """v3 (preliminary) — online optimization under drift (Generation 4). The best plan drifts mid-run
+    (a model upgrade / corpus shift). A static v1/v2 planner is pinned to the now-stale plan; the v3 online
+    planner re-explores, and recency-weighted (discounted) learning lets it track the shift. We report the
+    post-drift average served-plan reward, seed-averaged."""
+    from context_runtime.optimizer.online import BanditOptimizer
+    from context_runtime.types import Candidate, Goal, PlanScore, StepSpec
+
+    STEPS, DRIFT = 400, 200
+    PRIOR = {"A": 0.80, "C": 0.20}
+    PRE = {"A": 0.80, "C": 0.20}
+    POST = {"A": 0.20, "C": 0.80}          # best plan flips A→C at t=DRIFT
+
+    def cand(a):
+        return Candidate(steps=(StepSpec(type="retrieve", params={"method": a}),), model_tier="cheap")
+
+    def scored():
+        return [(cand(a), PlanScore(total=PRIOR[a], feasible=True)) for a in PRIOR]
+
+    def run(discount, seed):
+        opt = BanditOptimizer(None, epsilon=0.2, discount=discount, seed=seed)
+        post = []
+        for t in range(STEPS):
+            plan = opt.select(scored(), Goal(text="q"), context="c")
+            arm = next(s.params["method"] for s in plan.chosen.steps if s.type == "retrieve")
+            r = (PRE if t < DRIFT else POST)[arm]
+            opt.learn_from_plan(plan, r)
+            if t >= DRIFT:
+                post.append(r)
+        return sum(post) / len(post)
+
+    static = POST["A"]                      # v1/v2 never adapt → pinned to the stale best (A)
+    plain = sum(run(0.0, 0x1000 + s) for s in range(seeds)) / seeds
+    disc = sum(run(0.2, 0x1000 + s) for s in range(seeds)) / seeds
+    return {"seeds": seeds, "static": static, "online_plain": plain, "online_discount": disc,
+            "oracle": max(POST.values())}
+
+
+def v3_markdown(v3: dict) -> str:
+    r = v3
+    return ("\n\n### v3 (preliminary) — online optimization under drift\n\n"
+            "A different axis from the v1→v2 calibration gains above. The best plan drifts mid-run; a static "
+            "v1/v2 planner is pinned to the now-stale plan, while the v3 online planner re-explores and "
+            "recency-weighted learning tracks the shift.\n\n"
+            "| Metric | v2 (static) | v3 (online) | Δ |\n| --- | --- | --- | --- |\n"
+            f"| Post-drift served-plan reward | {r['static']:.2f} | {r['online_discount']:.2f} | "
+            f"▲ +{r['online_discount'] - r['static']:.2f} |\n"
+            f"| Post-drift reward, online w/o discounting | {r['static']:.2f} | {r['online_plain']:.2f} | "
+            f"+{r['online_plain'] - r['static']:.2f} |\n"
+            f"\n_Seeded drift simulation, {r['seeds']}-seed average; post-drift oracle = {r['oracle']:.2f}. "
+            "v3's online-optimization axis is orthogonal to (and preserves) the v2 calibration gains — preliminary._")
+
+
 def main() -> int:
     py = python_results()
     go = go_results()
+    v3 = v3_results()
     md = to_markdown(py, go)
     print(md)
+    print(v3_markdown(v3))
     if "--html" in sys.argv:
         path = sys.argv[sys.argv.index("--html") + 1]
         pathlib.Path(path).write_text(to_html(py, go), encoding="utf-8")
         print(f"\n[wrote HTML → {path}]", file=sys.stderr)
     if "--json" in sys.argv:
-        print(json.dumps({"python": py, "go": go}, indent=2), file=sys.stderr)
+        print(json.dumps({"python": py, "go": go, "v3": v3}, indent=2), file=sys.stderr)
     return 0
 
 
