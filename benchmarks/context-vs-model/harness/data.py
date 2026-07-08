@@ -45,7 +45,9 @@ class Question:
     qtype: str                       # metrics-generated | domain-relevant | novel-generated
     question: str
     answer: str
-    gold_pages: frozenset            # {(doc_name, page), ...} from evidence[]
+    gold_pages: frozenset            # {(doc_name, page), ...} from evidence[] (page = PDF page)
+    gold_evidences: tuple            # the gold evidence_text strings — used for chunk-robust
+                                     # retrieval scoring (text overlap, not chunk-index match)
     is_numeric: bool
 
 
@@ -74,10 +76,14 @@ def load_questions(root: str) -> list:
                 for e in r.get("evidence", [])
                 if e.get("evidence_page_num") is not None
             )
+            evidences = tuple(
+                e["evidence_text"] for e in r.get("evidence", []) if e.get("evidence_text")
+            )
             out.append(Question(
                 id=r["financebench_id"], company=r["company"], doc_name=r["doc_name"],
                 qtype=r.get("question_type", "?"), question=r["question"],
-                answer=str(r["answer"]), gold_pages=gold, is_numeric=_num_in(r["answer"]),
+                answer=str(r["answer"]), gold_pages=gold, gold_evidences=evidences,
+                is_numeric=_num_in(r["answer"]),
             ))
     return out
 
@@ -121,10 +127,15 @@ def load_corpus(root: str, *, limit_docs: set | None = None) -> Corpus:
 
 @lru_cache(maxsize=1)
 def default_root() -> str:
-    """Locate ``.financebench`` relative to the harness (symlinked in the repo)."""
+    """Locate the FinanceBench data dir. ``FINANCEBENCH_ROOT`` wins; else search up from
+    the harness for a ``.financebench`` (symlinked in the repo)."""
+    env = os.environ.get("FINANCEBENCH_ROOT")
+    if env and os.path.isdir(env):
+        return os.path.abspath(env)
     here = os.path.dirname(os.path.abspath(__file__))
-    for up in (2, 3, 4):
+    for up in (1, 2, 3, 4):
         cand = os.path.join(here, *([".."] * up), ".financebench")
         if os.path.isdir(cand):
             return os.path.abspath(cand)
-    raise FileNotFoundError("could not locate .financebench — run deploy/financebench/download.sh")
+    raise FileNotFoundError("could not locate .financebench — set FINANCEBENCH_ROOT or "
+                            "run scripts/download_data.sh")

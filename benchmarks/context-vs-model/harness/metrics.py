@@ -1,37 +1,70 @@
-"""Retrieval-quality + context-pollution metrics, scored against FinanceBench gold
-evidence pages."""
+"""Retrieval-quality + context-pollution metrics.
+
+Scored against FinanceBench's gold ``evidence_text`` by TEXT OVERLAP, not chunk index —
+because the corpus is chunked (1200 chars) and the gold is a PDF-page/table, the two
+numbering schemes don't align. A retrieved chunk counts as relevant when it is from the
+target filing AND most of its tokens appear in a gold evidence passage (containment) —
+robust to how the corpus was chunked.
+"""
 from __future__ import annotations
 
+import re
 
-def _page_keys(passages) -> list:
-    return [(p.doc_name, p.page) for p in passages]
+_TOKEN = re.compile(r"[a-z0-9]+")
+_REL_THRESH = 0.55          # fraction of a chunk's tokens that must appear in gold evidence
 
 
-def retrieval_metrics(retrieved, gold_pages) -> dict:
-    """Precision/recall/hit/MRR of ``retrieved`` passages vs the gold (doc, page) set."""
-    keys = _page_keys(retrieved)
-    goldset = set(gold_pages)
-    if not goldset:
-        return {"precision": None, "recall": None, "hit": None, "mrr": None, "n_ret": len(keys)}
-    inter = [k for k in keys if k in goldset]
+def _toks(s: str) -> set:
+    return set(_TOKEN.findall(s.lower()))
+
+
+def _relevant(chunk, question) -> bool:
+    if chunk.doc_name != question.doc_name:
+        return False
+    ct = _toks(chunk.text)
+    if not ct:
+        return False
+    for g in question.gold_evidences:
+        gt = _toks(g)
+        if gt and len(ct & gt) / len(ct) >= _REL_THRESH:
+            return True
+    return False
+
+
+def retrieval_metrics(retrieved, question) -> dict:
+    """Precision/recall/hit/MRR of ``retrieved`` chunks vs the gold evidence passages."""
+    if not question.gold_evidences:
+        return {"precision": None, "recall": None, "hit": None, "mrr": None, "n_ret": len(retrieved)}
+    flags = [_relevant(c, question) for c in retrieved]
+    n = len(retrieved)
     rr = 0.0
-    for rank, k in enumerate(keys, 1):
-        if k in goldset:
+    for rank, f in enumerate(flags, 1):
+        if f:
             rr = 1.0 / rank
             break
+    # recall: gold evidence passages covered by ≥1 retrieved chunk
+    covered = 0
+    for g in question.gold_evidences:
+        gt = _toks(g)
+        if not gt:
+            continue
+        if any(c.doc_name == question.doc_name and _toks(c.text)
+               and len(_toks(c.text) & gt) / len(_toks(c.text)) >= _REL_THRESH
+               for c in retrieved):
+            covered += 1
     return {
-        "precision": (len(set(inter)) / len(keys)) if keys else 0.0,
-        "recall": len(set(inter) & goldset) / len(goldset),
-        "hit": 1.0 if inter else 0.0,
+        "precision": (sum(flags) / n) if n else 0.0,
+        "recall": covered / len(question.gold_evidences),
+        "hit": 1.0 if any(flags) else 0.0,
         "mrr": rr,
-        "n_ret": len(keys),
+        "n_ret": n,
     }
 
 
 def pollution_fraction(retrieved, question) -> float:
-    """Share of retrieved passages NOT from the target filing (off-company/off-doc noise
+    """Share of retrieved chunks NOT from the target filing (off-company/off-doc noise
     that actually reached the model)."""
     if not retrieved:
         return 0.0
-    off = sum(1 for p in retrieved if p.doc_name != question.doc_name)
+    off = sum(1 for c in retrieved if c.doc_name != question.doc_name)
     return off / len(retrieved)

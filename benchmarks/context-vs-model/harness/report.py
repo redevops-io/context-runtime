@@ -33,10 +33,10 @@ def _mean(xs):
 
 
 def aggregate(rows) -> dict:
-    """(model_name, arm, pollution) → aggregated metrics."""
+    """(model_name, reasoning, arm, pollution) → aggregated metrics."""
     groups = defaultdict(list)
     for r in rows:
-        groups[(r["model_name"], r["arm"], r["pollution"])].append(r)
+        groups[(r["model_name"], r.get("reasoning", "?"), r["arm"], r["pollution"])].append(r)
     agg = {}
     for key, rs in groups.items():
         agg[key] = {
@@ -55,12 +55,13 @@ def aggregate(rows) -> dict:
 def to_markdown(agg) -> str:
     def pct(x): return f"{x:.0%}" if isinstance(x, (int, float)) else "—"
     def num(x, d=0): return (f"{x:.{d}f}" if isinstance(x, (int, float)) else "—")
-    lines = ["| model | arm | pollution | acc | retr hit | pollution% | tok(in) | lat s | n |",
-             "|---|---|--:|--:|--:|--:|--:|--:|--:|"]
-    for (m, arm, pol) in sorted(agg):
-        a = agg[(m, arm, pol)]
-        lines.append(f"| {m} | {arm} | {pol} | {pct(a['accuracy'])} | {pct(a['retr_hit'])} "
-                     f"| {pct(a['pollution_frac'])} | {num(a['prompt_tokens'])} "
+    lines = ["| model | think | arm | pollution | acc | retr hit | retr rec | pollution% | tok(in) | lat s | n |",
+             "|---|---|---|--:|--:|--:|--:|--:|--:|--:|--:|"]
+    for key in sorted(agg):
+        m, think, arm, pol = key
+        a = agg[key]
+        lines.append(f"| {m} | {think} | {arm} | {pol} | {pct(a['accuracy'])} | {pct(a['retr_hit'])} "
+                     f"| {pct(a['retr_recall'])} | {pct(a['pollution_frac'])} | {num(a['prompt_tokens'])} "
                      f"| {num(a['latency_s'],1)} | {a['n']} |")
     return "\n".join(lines)
 
@@ -73,16 +74,16 @@ def plot(agg, out_png: str):
     except Exception as e:  # noqa: BLE001
         print(f"(matplotlib unavailable: {e}) — skipping plot")
         return
-    series = defaultdict(list)   # (model, arm) -> [(pollution, acc)]
-    for (m, arm, pol), a in agg.items():
+    series = defaultdict(list)   # (model, reasoning, arm) -> [(pollution, acc)]
+    for (m, think, arm, pol), a in agg.items():
         if a["accuracy"] is not None:
-            series[(m, arm)].append((pol, a["accuracy"]))
+            series[(m, think, arm)].append((pol, a["accuracy"]))
     fig, ax = plt.subplots(figsize=(8, 5))
     styles = {"full_dump": ":", "naive_rag": "--", "context_runtime": "-"}
-    for (m, arm), pts in sorted(series.items()):
+    for (m, think, arm), pts in sorted(series.items()):
         pts.sort()
         xs, ys = zip(*pts)
-        ax.plot(xs, ys, styles.get(arm, "-"), marker="o", label=f"{m} · {arm}")
+        ax.plot(xs, ys, styles.get(arm, "-"), marker="o", label=f"{m}·{arm}·think={think}")
     ax.set_xlabel("context pollution (distractor filings mixed in)")
     ax.set_ylabel("answer accuracy")
     ax.set_title("Can better context management beat a better model?")

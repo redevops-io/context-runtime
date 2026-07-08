@@ -44,7 +44,7 @@ echo "▸ building the passage corpus (pdfplumber)"
 BUILDER="$HERE/scripts/build_corpus.py"
 [ -f "$BUILDER" ] || BUILDER="$(cd "$HERE/../.." && pwd)/deploy/financebench/build_corpus.py"
 uv run --with pdfplumber python3 "$BUILDER" "$DEST" 2>/dev/null \
-  || python3 "$BUILDER" "$DEST"
+  || python3 "$BUILDER" "$DEST" "$DEST"
 
 echo "done → $DEST"
 python3 -c "
