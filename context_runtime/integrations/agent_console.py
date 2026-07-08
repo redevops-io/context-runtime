@@ -157,6 +157,7 @@ class AgentConsole:
         subtitle: str = "",
         model: Any = None,
         allow_side_effects: list[str] | None = None,
+        authorizer=None,
     ):
         self.tenant = tenant
         self.subtitle = subtitle or f"Ask about {tenant} — how things work, or get something done."
@@ -164,7 +165,10 @@ class AgentConsole:
         self.index = PrimerIndex(self.primer)
         self.suggestions = list(suggestions)
         self.model = model if model is not None else (OpenAICompatibleModel.from_env() or StubModel())
-        self.registry = ToolRegistry(ApprovalPolicy(mode="allowlist", allow=list(allow_side_effects or [])))
+        # authorizer (optional, enterprise): gates every tool by the request principal — falls back to
+        # the process-wide default (set_default_authorizer), so one install() call governs all consoles.
+        self.registry = ToolRegistry(ApprovalPolicy(mode="allowlist", allow=list(allow_side_effects or [])),
+                                     authorizer=authorizer)
         self._tools: dict[str, _Tool] = {}
         for t in tools:
             self.registry.register(t)
@@ -256,8 +260,8 @@ class AgentConsole:
             return {"intent": "help", "text": f"{hits[0].text}\n\n(Grounded in the {self.tenant} guide [1].)",
                     "evidence": evidence, "model": self.model.info().name}
 
-    def _answer_tool(self, name: str, args: dict) -> dict:
-        result = self.registry.run(name, args)
+    def _answer_tool(self, name: str, args: dict, principal=None) -> dict:
+        result = self.registry.run(name, args, principal=principal)
         gate = self.registry.audit[-1] if self.registry.audit else {"decision": "read-only"}
         evidence = [{"tool": name, "args": args, "gate": gate.get("reason") or gate.get("decision", ""), "ok": result.ok}]
         summary = result.text or (json.dumps(result.data)[:800] if result.data is not None else "")
@@ -284,13 +288,13 @@ class AgentConsole:
             model_name = self.model.info().name
         return {"intent": "action", "tool": name, "text": body, "evidence": evidence, "data": result.data, "approved": True, "model": model_name}
 
-    def respond(self, message: str) -> dict:
+    def respond(self, message: str, principal=None) -> dict:
         message = (message or "").strip()
         if not message:
             return {"intent": "help", "text": "Ask me anything about " + self.tenant + ".", "evidence": []}
         route = self.classify(message)
         if route["mode"] == "tool" and route["tool"] in self._tools:
-            out = self._answer_tool(route["tool"], route.get("args") or {})
+            out = self._answer_tool(route["tool"], route.get("args") or {}, principal=principal)
         else:
             out = self._answer_help(message)
         out["route"] = route.get("reason", "")
