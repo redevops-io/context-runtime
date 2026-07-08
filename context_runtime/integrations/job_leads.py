@@ -258,6 +258,42 @@ class CallableJobSource:
         return out
 
 
+class AdzunaSource:
+    """Live listings from the Adzuna jobs API (free tier: ``ADZUNA_APP_ID`` / ``ADZUNA_APP_KEY``; set
+    ``ADZUNA_COUNTRY`` e.g. us/gb). Search-based (good for "AI Data Engineer") and ToS-friendly, unlike
+    scraping LinkedIn. Degrades to no results when unconfigured or unreachable; inject ``client`` for tests."""
+
+    def __init__(self, app_id: str | None = None, app_key: str | None = None,
+                 country: str | None = None, client=None):
+        self.app_id = app_id or os.getenv("ADZUNA_APP_ID", "")
+        self.app_key = app_key or os.getenv("ADZUNA_APP_KEY", "")
+        self.country = (country or os.getenv("ADZUNA_COUNTRY", "us")).lower()
+        self._client = client
+
+    def search(self, query: str, limit: int = 50) -> list[JobListing]:
+        if not (self.app_id and self.app_key):
+            return []
+        params = {"app_id": self.app_id, "app_key": self.app_key, "what": query,
+                  "results_per_page": min(limit, 50), "content-type": "application/json"}
+        try:
+            client = self._client
+            if client is None:
+                import httpx
+                client = httpx.Client(timeout=10.0)
+            r = client.get(f"https://api.adzuna.com/v1/api/jobs/{self.country}/search/1", params=params)
+            data = r.json()
+        except Exception:  # noqa: BLE001
+            return []
+        out: list[JobListing] = []
+        for j in (data.get("results") or [])[:limit]:
+            out.append(JobListing(
+                company=(j.get("company") or {}).get("display_name", ""), title=j.get("title", ""),
+                url=j.get("redirect_url", ""), description=j.get("description", ""),
+                location=(j.get("location") or {}).get("display_name", ""),
+                posted=j.get("created", ""), source="adzuna"))
+        return out
+
+
 DEFAULT_QUERIES = (
     '"AI Data Engineer" hiring', '"AI Engineer" (in-house OR platform) hiring',
     '"AI Developer" build production AI', '"Machine Learning Engineer" our platform hiring',

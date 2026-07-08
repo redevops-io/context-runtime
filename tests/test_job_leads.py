@@ -62,6 +62,26 @@ def test_find_leads_filters_dedupes_and_ranks(tmp_path):
     assert [d["listing"].company for d in find_leads(source, ledger, queries=("x",))] == ["Startup"]
 
 
+def test_adzuna_source_parses_and_degrades():
+    from context_runtime.integrations.job_leads import AdzunaSource
+
+    assert AdzunaSource(app_id="", app_key="").search("ai") == []      # unconfigured → empty, no crash
+
+    class _Resp:
+        def json(self):
+            return {"results": [{"title": "AI Data Engineer", "company": {"display_name": "Acme"},
+                                 "redirect_url": "https://x/1", "description": "Build our in-house AI platform.",
+                                 "location": {"display_name": "NYC"}, "created": "2026-07-01"}]}
+
+    class _Client:
+        def get(self, url, params=None):
+            return _Resp()
+
+    got = AdzunaSource(app_id="a", app_key="k", client=_Client()).search("AI Data Engineer", 10)
+    assert len(got) == 1 and got[0].company == "Acme" and got[0].source == "adzuna"
+    assert classify(got[0]).is_lead
+
+
 def test_pitch_template_is_shared_and_editable(tmp_path):
     tpl = PitchTemplate(path=str(tmp_path / "tpl.txt"))
     assert tpl.load() == DEFAULT_TEMPLATE                           # default until edited
