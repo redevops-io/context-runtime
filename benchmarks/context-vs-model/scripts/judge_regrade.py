@@ -20,14 +20,18 @@ from harness import data, grader, model as modelmod
 
 ap = argparse.ArgumentParser()
 ap.add_argument("infile")
-ap.add_argument("--model", default="gpt-5.5")
-ap.add_argument("--base-url", default="https://api.openai.com/v1")
+# grok-4.5 (x.ai) is the default judge — ~5x cheaper than gpt-5.5 and answers the verdict
+# in ~1 token (no reasoning burn). Override for a different judge.
+ap.add_argument("--model", default="grok-4.5")
+ap.add_argument("--base-url", default="https://api.x.ai/v1")
 ap.add_argument("--out", default=None)
 args = ap.parse_args()
 
-key = os.environ.get("OPENAI_API_KEY")
+# key by host: XAI_API_KEY for x.ai, else OPENAI_API_KEY
+_is_xai = "x.ai" in args.base_url
+key = os.environ.get("XAI_API_KEY") if _is_xai else os.environ.get("OPENAI_API_KEY")
 if not key:
-    sys.exit("OPENAI_API_KEY not in env")
+    sys.exit(f"{'XAI_API_KEY' if _is_xai else 'OPENAI_API_KEY'} not in env")
 rows = [json.loads(l) for l in open(args.infile)]
 # self-contained rows (question/gold_answer stored) need no dataset; else fall back to it
 need_ds = not all(("question" in r and "gold_answer" in r) for r in rows)
