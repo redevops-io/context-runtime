@@ -17,7 +17,11 @@ import json
 import os
 import sys
 
-from . import data, grader, metrics, model as modelmod
+from . import grader, metrics, model as modelmod
+if os.environ.get("DATASET") == "nutri":
+    from . import data_nutri as data      # private Russian nutrients corpus
+else:
+    from . import data                    # LiveRAG (default)
 from .arms import run_arm
 from .rag_store import FinanceBenchStore
 from .tuner import ContextRuntimeTuner

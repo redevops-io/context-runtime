@@ -9,10 +9,14 @@ subset of filings for the pollution axis. GPU-accelerated if the embedder finds 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 
-from harness import data
+if os.environ.get("DATASET") == "nutri":
+    from harness import data_nutri as data
+else:
+    from harness import data
 from harness.rag_store import build_store
 
 
