@@ -23,6 +23,7 @@ PROBES = {
     "crm": ("which deals are most likely to close?", "deals"),
     "market_radar": ("did a competitor change pricing?", "pricing"),
     "growth_engine": ("which channel drove signups?", "attribution"),
+    "outreach": ("which prospects should we reach out to first?", "leads"),
     "social": ("what content is trending for us?", "trends"),
     "lifecycle": ("why did deliverability drop?", "segments"),
     "privacy": ("can we fulfill this DSAR in time?", "requests"),
