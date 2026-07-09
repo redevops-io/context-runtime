@@ -30,19 +30,19 @@ def _seeded_order(seed_key: str, items: list) -> list:
 
 
 def scope_docs(corpus, question, level: int) -> tuple:
-    """(scoped_doc_names, distractor_doc_names): the target filing + `level` distractor
-    filings from OTHER companies, chosen deterministically per question."""
-    others = [d for d in corpus.by_doc
-              if corpus.docs.get(d, {}).get("company") != question.company]
+    """(scoped_doc_ids, distractor_doc_ids): the question's gold docs + `level` distractor
+    docs from OTHER questions (the rest of the corpus), chosen deterministically."""
+    gold = list(question.gold_docs)
+    others = [d for d in corpus.all_docs if d not in question.gold_docs]
     picked = _seeded_order(question.id, others)[:level]
-    return [question.doc_name] + picked, picked
+    return gold + picked, picked
 
 
 def _chunks_to_context(chunks, *, max_tokens: int) -> str:
     budget = max_tokens * _CHARS_PER_TOK
     parts, used = [], 0
     for c in chunks:
-        block = f"[{c.company} — {c.doc_name}]\n{c.text}\n"
+        block = f"[doc {c.doc_id}]\n{c.text}\n"
         if used + len(block) > budget:
             break
         parts.append(block)

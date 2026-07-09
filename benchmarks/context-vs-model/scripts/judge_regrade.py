@@ -28,20 +28,23 @@ args = ap.parse_args()
 key = os.environ.get("OPENAI_API_KEY")
 if not key:
     sys.exit("OPENAI_API_KEY not in env")
-qmap = {q.id: q for q in data.load_questions(data.default_root())}
+rows = [json.loads(l) for l in open(args.infile)]
+# self-contained rows (question/gold_answer stored) need no dataset; else fall back to it
+need_ds = not all(("question" in r and "gold_answer" in r) for r in rows)
+qmap = {q.id: q for q in data.load_questions()} if need_ds else {}
 jc = modelmod.make_client(args.base_url, args.model, api_key=key)
 judge = modelmod.make_chat(jc, max_tokens=256)
 
-rows = [json.loads(l) for l in open(args.infile)]
 n_judged = 0
 for r in rows:
-    q = qmap.get(r["qid"])
     ans = r.get("answer") or r.get("answer_preview", "")
+    q = qmap.get(r["qid"])
+    question = r.get("question") or (q.question if q else "")
+    gold = r.get("gold_answer") or (q.answer if q else "")
     if r["correct"]:
         r["correct_judged"] = True
         continue
-    # numeric said wrong (or prose) → ask the judge
-    r["correct_judged"] = bool(q) and grader.judge_grade(judge, q.question, q.answer, ans)
+    r["correct_judged"] = bool(question) and grader.judge_grade(judge, question, gold, ans)
     n_judged += 1
 
 out = args.out or args.infile.replace(".jsonl", ".judged.jsonl")

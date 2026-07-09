@@ -1,14 +1,14 @@
-"""FinanceBench loader — real gold answers + gold evidence pages over a 361-doc,
-32-company 10-K corpus.
+"""LiveRAG loader — anti-parametric RAG QA (SIGIR'25).
 
-Three record streams (all under ``.financebench/``):
-  - ``qa.jsonl``           : 150 questions; gold ``answer`` + ``evidence[].evidence_page_num``
-  - ``docs.jsonl``         : 361 filings; company / sector / period per ``doc_name``
-  - ``corpus.manifest.jsonl``: 5028 passages; each id → source pdf + page; text in ``corpus/<id>.txt``
+895 questions machine-synthesized (DataMorgana) grounded in niche FineWeb-10BT web pages,
+so answers REQUIRE the retrieved context — a model can't answer from parametric memory
+(unlike famous-entity sets such as FinanceBench). Each question ships its gold
+`Supporting_Documents` (doc_id + content); the union of all gold docs (~970) IS the
+corpus, so every OTHER question's docs are natural distractors — a self-contained,
+reproducible pollution pool with no 15M-doc FineWeb download.
 
-The multi-company corpus is the pollution axis: a question targets ONE filing, but the
-corpus holds 360 others whose financial vocabulary collides (same line-items, different
-numbers) — adversarial distractors by construction.
+Retrieval is scored at DOC-ID level (clean), answers via the gpt-5.5 judge against
+`Answer` / `Answer_Claims.direct`.
 """
 from __future__ import annotations
 
@@ -18,124 +18,109 @@ import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 
-
-def _doc_from_source(source: str) -> str:
-    """``3M_2022_10K.pdf`` → ``3M_2022_10K`` (matches qa.jsonl ``doc_name``)."""
-    return re.sub(r"\.pdf$", "", source, flags=re.IGNORECASE)
+_HF_DATASET = "LiveRAG/Benchmark"
 
 
 @dataclass(frozen=True)
 class Passage:
-    id: str            # e.g. 0001_3m_2022_10k-pdf_p00
-    doc_name: str      # 3M_2022_10K
-    company: str       # 3M
-    page: int          # 0-indexed passage/page number
+    id: str            # <doc_id>#<chunk_index>
+    doc_id: str
+    page: int          # chunk index within the doc
     text: str
 
     @property
     def key(self) -> str:
-        return f"{self.doc_name}#p{self.page}"
+        return self.id
 
 
 @dataclass(frozen=True)
 class Question:
     id: str
-    company: str
-    doc_name: str
-    qtype: str                       # metrics-generated | domain-relevant | novel-generated
     question: str
     answer: str
-    gold_pages: frozenset            # {(doc_name, page), ...} from evidence[] (page = PDF page)
-    gold_evidences: tuple            # the gold evidence_text strings — used for chunk-robust
-                                     # retrieval scoring (text overlap, not chunk-index match)
+    gold_docs: frozenset        # {doc_id, ...} — the Supporting_Documents
+    gold_claims: tuple          # Answer_Claims.direct (gradeable atomic claims)
+    qtype: str                  # DataMorgana answer-type (factoid, ...)
+    difficulty: float           # IRT-diff (-6..6)
     is_numeric: bool
 
 
 @dataclass
 class Corpus:
-    passages: list                   # list[Passage]
-    by_doc: dict = field(default_factory=dict)     # doc_name -> list[Passage]
-    docs: dict = field(default_factory=dict)       # doc_name -> {company, sector, period}
-    companies: dict = field(default_factory=dict)  # company -> [doc_name, ...]
+    passages: list
+    by_doc: dict = field(default_factory=dict)     # doc_id -> [Passage]
+    all_docs: list = field(default_factory=list)   # every doc_id (distractor pool)
+    docs: dict = field(default_factory=dict)       # doc_id -> {} (compat shim)
+    companies: dict = field(default_factory=dict)  # unused (compat shim)
 
-    def pages_for(self, doc_name: str) -> list:
-        return self.by_doc.get(doc_name, [])
+    def pages_for(self, doc_id: str) -> list:
+        return self.by_doc.get(doc_id, [])
 
 
 def _num_in(s: str) -> bool:
-    return bool(re.search(r"[-+]?\$?\d", str(s)))
+    return bool(re.search(r"\d", str(s)))
 
 
-def load_questions(root: str) -> list:
-    out = []
-    with open(os.path.join(root, "qa.jsonl")) as f:
-        for line in f:
-            r = json.loads(line)
-            gold = frozenset(
-                (e.get("doc_name") or r["doc_name"], int(e["evidence_page_num"]))
-                for e in r.get("evidence", [])
-                if e.get("evidence_page_num") is not None
-            )
-            evidences = tuple(
-                e["evidence_text"] for e in r.get("evidence", []) if e.get("evidence_text")
-            )
-            out.append(Question(
-                id=r["financebench_id"], company=r["company"], doc_name=r["doc_name"],
-                qtype=r.get("question_type", "?"), question=r["question"],
-                answer=str(r["answer"]), gold_pages=gold, gold_evidences=evidences,
-                is_numeric=_num_in(r["answer"]),
-            ))
+def _chunk(text: str, size: int = 1200, overlap: int = 150) -> list:
+    text = text or ""
+    if len(text) <= size:
+        return [text] if text.strip() else []
+    out, i = [], 0
+    while i < len(text):
+        out.append(text[i:i + size])
+        i += size - overlap
     return out
 
 
-def load_corpus(root: str, *, limit_docs: set | None = None) -> Corpus:
-    """Load the passage corpus. ``limit_docs`` (a set of doc_names) restricts the
-    load for fast smoke runs; None loads all 5028 passages."""
-    docs: dict = {}
-    with open(os.path.join(root, "docs.jsonl")) as f:
-        for line in f:
-            d = json.loads(line)
-            docs[d["doc_name"]] = {"company": d["company"], "sector": d.get("gics_sector"),
-                                   "period": d.get("doc_period")}
+@lru_cache(maxsize=1)
+def _load_raw():
+    """Load the 895 LiveRAG rows (HF cache, or a local parquet mirror)."""
+    from datasets import load_dataset
+    path = os.environ.get("LIVERAG_PARQUET")
+    if path and os.path.isfile(path):
+        return load_dataset("parquet", data_files=path, split="train")
+    return load_dataset(_HF_DATASET, split="train")
 
-    corpus_dir = os.path.join(root, "corpus")
-    passages: list = []
-    by_doc: dict = {}
-    with open(os.path.join(root, "corpus.manifest.jsonl")) as f:
-        for line in f:
-            m = json.loads(line)
-            doc_name = _doc_from_source(m["source"])
-            if limit_docs is not None and doc_name not in limit_docs:
-                continue
-            company = docs.get(doc_name, {}).get("company", doc_name.split("_")[0])
-            txt_path = os.path.join(corpus_dir, m["id"] + ".txt")
-            try:
-                with open(txt_path, encoding="utf-8", errors="ignore") as tf:
-                    text = tf.read()
-            except FileNotFoundError:
-                continue
-            p = Passage(id=m["id"], doc_name=doc_name, company=company,
-                        page=int(m.get("passage", 0)), text=text)
+
+def load_questions(root: str | None = None) -> list:
+    ds = _load_raw()
+    out = []
+    for r in ds:
+        cfg = r.get("DataMorgana_Config") or {}
+        claims = (r.get("Answer_Claims") or {}).get("direct") or []
+        gold = frozenset(d["doc_id"] for d in (r.get("Supporting_Documents") or []) if d.get("doc_id"))
+        out.append(Question(
+            id=str(r["Index"]), question=r["Question"], answer=str(r["Answer"]),
+            gold_docs=gold, gold_claims=tuple(claims),
+            qtype=cfg.get("answer-type-categorization", "?"),
+            difficulty=float(r.get("IRT-diff [-6 : 6]") or 0.0),
+            is_numeric=_num_in(r["Answer"]),
+        ))
+    return out
+
+
+def load_corpus(root: str | None = None, *, limit_docs: set | None = None,
+                chunk_size: int = 1200) -> Corpus:
+    """Build the passage corpus from the union of all questions' Supporting_Documents."""
+    ds = _load_raw()
+    contents: dict = {}          # doc_id -> content (first seen)
+    for r in ds:
+        for d in (r.get("Supporting_Documents") or []):
+            did = d.get("doc_id")
+            if did and did not in contents and d.get("content"):
+                if limit_docs is None or did in limit_docs:
+                    contents[did] = d["content"]
+
+    passages, by_doc = [], {}
+    for did, content in contents.items():
+        for ci, chunk in enumerate(_chunk(content, size=chunk_size)):
+            p = Passage(id=f"{did}#{ci}", doc_id=did, page=ci, text=chunk)
             passages.append(p)
-            by_doc.setdefault(doc_name, []).append(p)
-
-    companies: dict = {}
-    for dn in by_doc:
-        companies.setdefault(docs.get(dn, {}).get("company", dn.split("_")[0]), []).append(dn)
-    return Corpus(passages=passages, by_doc=by_doc, docs=docs, companies=companies)
+            by_doc.setdefault(did, []).append(p)
+    return Corpus(passages=passages, by_doc=by_doc, all_docs=list(by_doc.keys()),
+                  docs={d: {} for d in by_doc})
 
 
 @lru_cache(maxsize=1)
 def default_root() -> str:
-    """Locate the FinanceBench data dir. ``FINANCEBENCH_ROOT`` wins; else search up from
-    the harness for a ``.financebench`` (symlinked in the repo)."""
-    env = os.environ.get("FINANCEBENCH_ROOT")
-    if env and os.path.isdir(env):
-        return os.path.abspath(env)
-    here = os.path.dirname(os.path.abspath(__file__))
-    for up in (1, 2, 3, 4):
-        cand = os.path.join(here, *([".."] * up), ".financebench")
-        if os.path.isdir(cand):
-            return os.path.abspath(cand)
-    raise FileNotFoundError("could not locate .financebench — set FINANCEBENCH_ROOT or "
-                            "run scripts/download_data.sh")
+    return os.environ.get("LIVERAG_PARQUET", _HF_DATASET)

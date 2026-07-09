@@ -18,16 +18,14 @@ from redevops_rag.retrieve import hybrid_search
 
 @dataclass
 class Chunk:
-    doc_name: str
-    company: str
+    doc_id: str
     page: int
     text: str
     score: float = 0.0
 
 
 def _hit_to_chunk(h: dict) -> Chunk:
-    md = h.get("metadata") or {}
-    return Chunk(doc_name=h.get("document_id") or "", company=md.get("company", ""),
+    return Chunk(doc_id=h.get("document_id") or "",
                  page=int(h.get("chunk_index") or 0), text=h.get("text") or "",
                  score=float(h.get("score") or h.get("similarity") or h.get("bm25_score") or 0.0))
 
@@ -70,9 +68,8 @@ def build_store(corpus, db_path: str, *, use_reranker: bool = True, batch: int =
         part = passages[i:i + batch]
         vecs = emb.encode([p.text for p in part])
         store.add_chunks([
-            {"document_id": p.doc_name, "filename": p.id, "chunk_index": p.page,
-             "text": p.text, "embedding": v,
-             "metadata": {"page": p.page, "company": p.company}}
+            {"document_id": p.doc_id, "filename": p.id, "chunk_index": p.page,
+             "text": p.text, "embedding": v, "metadata": {"page": p.page}}
             for p, v in zip(part, vecs)
         ])
         if progress:

@@ -65,7 +65,8 @@ def main(argv=None):
     questions = data.load_questions(root)
     print("▸ loading corpus + store …", file=sys.stderr)
     corpus = data.load_corpus(root)
-    questions = [q for q in questions if q.doc_name in corpus.by_doc]
+    doc_set = set(corpus.by_doc)
+    questions = [q for q in questions if q.gold_docs & doc_set]   # gold docs present in corpus
     if args.limit:
         questions = questions[: args.limit]
     store = FinanceBenchStore(args.store)
@@ -108,11 +109,13 @@ def main(argv=None):
                     out.write(json.dumps({
                         "model_name": args.model_name, "model": args.model, "reasoning": args.reasoning,
                         "arm": arm_name, "pollution": level, "qid": q.id, "qtype": q.qtype,
-                        "company": q.company, "correct": g["correct"], "grade_method": g["method"],
+                        "difficulty": q.difficulty, "correct": g["correct"], "grade_method": g["method"],
                         "is_numeric": q.is_numeric, "retrieval": rm, "pollution_frac": poll,
                         "prompt_tokens": resp["prompt_tokens"], "completion_tokens": resp["completion_tokens"],
                         "latency_s": round(resp["latency_s"], 3), "decision": ar.decision,
-                        "answer_preview": resp["text"][:160],
+                        # self-contained for an off-box judge pass (no dataset access needed there)
+                        "question": q.question, "gold_answer": q.answer,
+                        "answer": resp["text"], "answer_preview": resp["text"][:160],
                     }) + "\n")
                     out.flush()
                     n_new += 1
