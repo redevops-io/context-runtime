@@ -1,12 +1,22 @@
-# Public LibreQB × FinanceBench demo — LibreChat (no-login guest mode) + the Context
+# Public LibreQB × Context Runtime demo — LibreChat (no-login guest mode) + the Context
 # Runtime control plane, fronted by one Caddy so the browser talks to a single origin
 # (chat.redevops.io). cloudflared routes chat.redevops.io → caddy:80.
 #
 #   caddy  :80   /librechat/* /v1/*  → contextruntime:8092   (Query Board + chat shim)
 #                everything else      → librechat:3080        (the SPA)
 #
-# Deploy: rsync this dir + ../../.financebench/corpus + the contextos repo to the host,
-# render .env (secrets), then `docker compose -f chat-demo.compose.yml up -d --build`.
+# THREE corpus-scoped models from ONE control plane (multi-tenant, CR_TENANTS):
+#   • Context Runtime · FinanceBench  — real SEC 10-K pages           (/corpus)
+#   • Context Runtime · MedicalBench  — PubMedQA biomedical abstracts (/medical)
+#   • Context Runtime · Mixed         — a heterogeneous shard mix of both, coverage-routed
+#                                       (the whitepaper's cross-domain-noise-22→0 win)
+# Each model is its own tenant with its own learned policy + Query Board; the panel and the
+# chat shim both route by the selected model id, so the transparency view reflects the corpus
+# the visitor picked.
+#
+# Deploy: rsync this dir + ../../.financebench/corpus + ../../.medical/corpus + the contextos
+# repo to the host, render .env (secrets + corpus paths + CR_TENANTS), then
+# `docker compose -f chat-demo.compose.yml up -d`. The ansible `caddy` role does all of this.
 # See README.md for the full runbook (incl. the manual cross-account CNAME).
 services:
   caddy:
@@ -24,11 +34,12 @@ services:
     depends_on: [librechat, contextruntime]
 
   contextruntime:
-    # Context Runtime control plane over the FinanceBench corpus — all 5 methods
-    # (bm25/vector/hybrid/graph/community) + /librechat/compare + the /v1 shim.
-    build:
-      context: ${CONTEXTOS_DIR:-../..}
-      dockerfile: deploy/proxmox-demo/Dockerfile.contextruntime
+    # Context Runtime control plane — all 5 methods (bm25/vector/hybrid/graph/community) +
+    # /librechat/compare + the /v1 shim, serving THREE corpus tenants (finance/medical/mixed)
+    # from one process via CR_TENANTS. Registry deploy: built on the control node
+    # (build-push.yml, chat-contextruntime) and PULLED here. IMAGE_TAG defaults to :stable;
+    # pin a sha for rollback (-e image_tag=<sha>).
+    image: localhost:5000/chat-contextruntime:${IMAGE_TAG:-stable}
     restart: unless-stopped
     # Confined under docker-contextos (docker-default + abi/3.0 pin) — the host's
     # apparmor 4.1 breaks AF_UNIX create under docker-default, killing uvicorn's
@@ -39,7 +50,17 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      - CR_CORPUS_DIR=/corpus
+      # Multi-tenant: one model per corpus. Bare path = single-corpus tenant; shards(...) =
+      # coverage-routed heterogeneous mix. CR_CORPUS_DIR is left EMPTY so the legacy single
+      # tenant is skipped and the finance tenant below is the default.
+      - CR_CORPUS_DIR=
+      - CR_TENANTS=context-runtime-finance=/corpus | context-runtime-medical=/medical | context-runtime-mixed=shards(finance:/corpus,medical:/medical)
+      # Per-tenant cross-language retrieval (opt-in). Lists the CORPUS language(s) to translate an
+      # incoming query INTO before retrieval — these corpora are English, so `=en` lets a non-English
+      # (e.g. Spanish, Miami) speaker query them. Empty ⇒ off (no per-query translation latency).
+      # e.g. CR_TENANT_LANGS="context-runtime-finance=en | context-runtime-medical=en | context-runtime-mixed=en"
+      - CR_TENANT_LANGS=${CR_TENANT_LANGS:-}
+      - CR_SHARD_ROUTER=coverage
       - CR_EMBEDDINGS=1
       - CR_MULTIMODAL=1
       - CR_QUALITY_ROUTING=1
@@ -52,15 +73,25 @@ services:
       - CR_UPSTREAM_MODEL=${CR_MODEL_NAME:-Qwen3.6-35B-A3B}
       - CR_UPSTREAM_MAX_TOKENS=4096
       - CR_UPSTREAM_TEMPERATURE=1
+      # LLM-as-judge for the self-learning RAG reward (shared across all three corpus tenants). A
+      # DEDICATED judge = Grok 4.5 (xAI, OpenAI-compatible) — cheap and kept separate from the chat
+      # model so it doesn't grade its own retrieval. Needs XAI_API_KEY (from Vault); absent →
+      # degrades to the heuristic judge.
+      - CR_LLM_JUDGE=${CR_LLM_JUDGE:-1}
+      - CR_JUDGE_BASE_URL=${CR_JUDGE_URL:-https://api.x.ai/v1}
+      - CR_JUDGE_MODEL=${CR_JUDGE_MODEL:-grok-4.5}
+      - CR_JUDGE_API_KEY=${XAI_API_KEY:-}
       - CONTEXT_RUNTIME_HOME=/data
     volumes:
       - ${CORPUS_DIR:-../../.financebench/corpus}:/corpus:ro
+      - ${MEDICAL_CORPUS_DIR:-../../.medical/corpus}:/medical:ro
       - cr_data:/data
     networks: [chatdemo]
 
   librechat:
     # The LibreQB fork. DEMO_MODE=true → per-visitor guest, no login/registration.
-    image: ${LIBRECHAT_IMAGE:-librechat-api:latest}
+    # Registry deploy: built on the control node (build-push.yml, chat-librechat) and pulled here.
+    image: localhost:5000/chat-librechat:${IMAGE_TAG:-stable}
     restart: unless-stopped
     depends_on: [chat-mongo]
     # Confined under docker-contextos (see contextruntime + the .profile file).

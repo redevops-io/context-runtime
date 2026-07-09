@@ -32,6 +32,12 @@ abstention that v1 lacks, and a ~62% depth cut with precision rising to 100%._
 
 ## Retrieval over heterogeneous personal data (financial × medical)
 
+> **Now live** as the **"Context Runtime · Mixed"** model on chat.redevops.io — the same
+> coverage-routed sharding, served from `CR_TENANTS=…mixed=shards(finance:/corpus,medical:/medical)`.
+> The live demo's medical shard is the public **PubMedQA** corpus (`deploy/medical/`, ~3.3k
+> passages); the measurement below used the smaller **16-note curated collision set** from
+> `examples/heterogeneous_shards.py` (built to maximize the vocabulary overlap the result turns on).
+
 **`examples/heterogeneous_shards.py`** — the interesting, non-obvious one.
 
 A real user's local files are a mix of very different data. This runs against **real
