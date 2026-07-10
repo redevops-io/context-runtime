@@ -28,6 +28,8 @@ PROBES = {
     "lifecycle": ("why did deliverability drop?", "segments"),
     "privacy": ("can we fulfill this DSAR in time?", "requests"),
     "edge_sentinel": ("is this IP malicious?", "threat_intel"),
+    "guide": ("how do I set up permissions for my app?", "docs"),
+    "growth_assistant": ("which channel should a first-time founder try first?", "playbooks"),
     "incident": ("why did the deploy fail?", "logs"),
     "research": ("how does mitochondrial dysfunction relate to Parkinson?", "citations"),
     "finance": ("should we invest given the latest filing?", "filings"),
