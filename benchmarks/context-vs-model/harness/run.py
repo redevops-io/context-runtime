@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
-"""Driver — run one served model through the 3 arms across a pollution sweep on
-FinanceBench, over the REAL redevops-rag store, scoring all six axes. Resumable.
+"""Driver — run one served model through the 3 arms across a pollution sweep, over the REAL
+redevops-rag store, scoring all six axes. Resumable.
+
+The ``context_runtime`` arm now drives the FULL ``ContextRuntime.run()`` pipeline (plan →
+retrieve → compress → reason → verify) via ``cr_full.run_cr`` — NOT the retrieval-config
+bandit. full_dump / naive_rag are unchanged (build context → single model call).
 
 Reasoning is a benchmark axis: pass --reasoning on|off (the model must be *served* to
 match — llama.cpp `--reasoning off` vs on). Each row is tagged so on/off are comparable.
@@ -23,8 +27,8 @@ if os.environ.get("DATASET") == "nutri":
 else:
     from . import data                    # LiveRAG (default)
 from .arms import run_arm
+from .cr_full import run_cr
 from .rag_store import FinanceBenchStore
-from .tuner import ContextRuntimeTuner
 
 ARMS = ("full_dump", "naive_rag", "context_runtime")
 
@@ -43,7 +47,7 @@ def _done_keys(path: str) -> set:
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Context-vs-model FinanceBench driver (real redevops-rag)")
+    ap = argparse.ArgumentParser(description="Context-vs-model driver (real redevops-rag + full CR)")
     ap.add_argument("--model-name", required=True)
     ap.add_argument("--base-url", required=True)
     ap.add_argument("--model", required=True)
@@ -86,7 +90,6 @@ def main(argv=None):
 
     arms = [a for a in args.arms.split(",") if a in ARMS]
     levels = [int(x) for x in args.pollution.split(",")]
-    tuner = ContextRuntimeTuner()
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     done = _done_keys(args.out)
@@ -97,26 +100,29 @@ def main(argv=None):
                 for arm_name in arms:
                     if (args.model_name, args.reasoning, arm_name, level, q.id) in done:
                         continue
-                    ar = run_arm(arm_name, store, corpus, q, level,
-                                 max_tokens=args.max_context_tokens, tuner=tuner)
-                    try:
-                        resp = modelmod.answer(client, q, ar.context, max_tokens=max_ans)
-                    except Exception as e:  # noqa: BLE001
-                        resp = {"text": f"__ERROR__ {type(e).__name__}: {e}", "prompt_tokens": 0,
-                                "completion_tokens": 0, "latency_s": 0.0}
+                    if arm_name == "context_runtime":
+                        # FULL pipeline: plan → retrieve → compress → reason → verify.
+                        # run_cr calls the model itself and returns the answer.
+                        resp, retrieved, decision = run_cr(client, store, corpus, q, level)
+                    else:
+                        ar = run_arm(arm_name, store, corpus, q, level,
+                                     max_tokens=args.max_context_tokens, tuner=None)
+                        try:
+                            resp = modelmod.answer(client, q, ar.context, max_tokens=max_ans)
+                        except Exception as e:  # noqa: BLE001
+                            resp = {"text": f"__ERROR__ {type(e).__name__}: {e}", "prompt_tokens": 0,
+                                    "completion_tokens": 0, "latency_s": 0.0}
+                        retrieved, decision = ar.retrieved, ar.decision
                     g = grader.grade(q, resp["text"], judge_chat=judge_chat)
-                    rm = metrics.retrieval_metrics(ar.retrieved, q)
-                    poll = metrics.pollution_fraction(ar.retrieved, q)
-                    if arm_name == "context_runtime" and ar.config is not None:
-                        quality = 1.0 if g["correct"] else 0.5 * (rm["hit"] or 0.0)
-                        tuner.record(q, ar.config, quality)
+                    rm = metrics.retrieval_metrics(retrieved, q)
+                    poll = metrics.pollution_fraction(retrieved, q)
                     out.write(json.dumps({
                         "model_name": args.model_name, "model": args.model, "reasoning": args.reasoning,
                         "arm": arm_name, "pollution": level, "qid": q.id, "qtype": q.qtype,
                         "difficulty": q.difficulty, "correct": g["correct"], "grade_method": g["method"],
                         "is_numeric": q.is_numeric, "retrieval": rm, "pollution_frac": poll,
                         "prompt_tokens": resp["prompt_tokens"], "completion_tokens": resp["completion_tokens"],
-                        "latency_s": round(resp["latency_s"], 3), "decision": ar.decision,
+                        "latency_s": round(resp["latency_s"], 3), "decision": decision,
                         # self-contained for an off-box judge pass (no dataset access needed there)
                         "question": q.question, "gold_answer": q.answer,
                         "answer": resp["text"], "answer_preview": resp["text"][:160],
@@ -124,8 +130,8 @@ def main(argv=None):
                     out.flush()
                     n_new += 1
             if (qi + 1) % 10 == 0:
-                print(f"  {qi+1}/{len(questions)} q (+{n_new})  policy={tuner.policy()}", file=sys.stderr)
-    print(f"done: +{n_new} rows → {args.out}\nCR policy: {tuner.policy()}", file=sys.stderr)
+                print(f"  {qi+1}/{len(questions)} q (+{n_new})", file=sys.stderr)
+    print(f"done: +{n_new} rows → {args.out}", file=sys.stderr)
 
 
 if __name__ == "__main__":

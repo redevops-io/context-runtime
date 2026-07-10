@@ -1,4 +1,5 @@
 .financebench/
-results/*.jsonl
-results/*.png
+.nutridata/
+results/
 __pycache__/
+*.duckdb
