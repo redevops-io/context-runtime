@@ -141,6 +141,69 @@ def to_html(py: dict, go: dict | None) -> str:
 </div>"""
 
 
+def v3_results(seeds: int = 24) -> dict:
+    """v3 (preliminary) — online optimization under drift (Generation 4). The best plan drifts mid-run
+    (a model upgrade / corpus shift). A static v1/v2 planner is pinned to the now-stale plan; the v3 online
+    planner re-explores, and recency-weighted (discounted) learning lets it track the shift. We report the
+    post-drift average served-plan reward, seed-averaged."""
+    from context_runtime.optimizer.online import BanditOptimizer
+    from context_runtime.types import Candidate, Goal, PlanScore, StepSpec
+
+    STEPS, DRIFT = 400, 200
+    PRIOR = {"A": 0.80, "C": 0.20}
+    PRE = {"A": 0.80, "C": 0.20}
+    POST = {"A": 0.20, "C": 0.80}          # best plan flips A→C at t=DRIFT
+
+    def cand(a):
+        return Candidate(steps=(StepSpec(type="retrieve", params={"method": a}),), model_tier="cheap")
+
+    def scored():
+        return [(cand(a), PlanScore(total=PRIOR[a], feasible=True)) for a in PRIOR]
+
+    def run(discount, seed):
+        opt = BanditOptimizer(None, epsilon=0.2, discount=discount, seed=seed)
+        post = []
+        for t in range(STEPS):
+            plan = opt.select(scored(), Goal(text="q"), context="c")
+            arm = next(s.params["method"] for s in plan.chosen.steps if s.type == "retrieve")
+            r = (PRE if t < DRIFT else POST)[arm]
+            opt.learn_from_plan(plan, r)
+            if t >= DRIFT:
+                post.append(r)
+        return sum(post) / len(post)
+
+    static = POST["A"]                      # v1/v2 never adapt → pinned to the stale best (A)
+    plain = sum(run(0.0, 0x1000 + s) for s in range(seeds)) / seeds
+    disc = sum(run(0.2, 0x1000 + s) for s in range(seeds)) / seeds
+    return {"seeds": seeds, "static": static, "online_plain": plain, "online_discount": disc,
+            "oracle": max(POST.values())}
+
+
+def v3_document(v3: dict) -> str:
+    """A self-contained standalone markdown doc — kept OUT of the shipped BENCHMARKS.md because the v3
+    online-optimization line is preliminary (a different axis from the v1→v2 calibration gains)."""
+    r = v3
+    return (
+        "# Benchmarks — v3 (preliminary)\n\n"
+        "> **Preliminary.** This is a forward-looking axis distinct from — and not a replacement for — the\n"
+        "> shipped v1→v2 calibration results in [`BENCHMARKS.md`](../BENCHMARKS.md). It is kept in its own\n"
+        "> file until promoted. Reproduce with "
+        "`PYTHONPATH=. python examples/consolidated_benchmark.py --v3-doc docs/BENCHMARKS-v3-preliminary.md`.\n\n"
+        "## Online optimization under drift (Generation 4)\n\n"
+        "The best plan drifts mid-run (a model upgrade, a corpus shift). A **static** v1/v2 planner is pinned\n"
+        "to the now-stale plan; the **v3 online** planner re-explores, and recency-weighted (discounted)\n"
+        "learning lets it track the shift. We report the post-drift average served-plan reward, seed-averaged.\n\n"
+        "| Metric | v2 (static) | v3 (online) | Δ |\n| --- | --- | --- | --- |\n"
+        f"| Post-drift served-plan reward | {r['static']:.2f} | {r['online_discount']:.2f} | "
+        f"▲ +{r['online_discount'] - r['static']:.2f} |\n"
+        f"| Post-drift reward, online w/o discounting | {r['static']:.2f} | {r['online_plain']:.2f} | "
+        f"+{r['online_plain'] - r['static']:.2f} |\n\n"
+        f"_Seeded drift simulation, {r['seeds']}-seed average; post-drift oracle = {r['oracle']:.2f}. "
+        "Discounting is what converts online learning from a marginal gain into recovery of most of the\n"
+        "oracle reward after the drift. This axis is orthogonal to (and preserves) the v2 calibration gains._\n"
+    )
+
+
 def main() -> int:
     py = python_results()
     go = go_results()
@@ -150,6 +213,12 @@ def main() -> int:
         path = sys.argv[sys.argv.index("--html") + 1]
         pathlib.Path(path).write_text(to_html(py, go), encoding="utf-8")
         print(f"\n[wrote HTML → {path}]", file=sys.stderr)
+    if "--v3-doc" in sys.argv:
+        path = sys.argv[sys.argv.index("--v3-doc") + 1]
+        p = pathlib.Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(v3_document(v3_results()), encoding="utf-8")
+        print(f"\n[wrote v3 preliminary doc → {path}]", file=sys.stderr)
     if "--json" in sys.argv:
         print(json.dumps({"python": py, "go": go}, indent=2), file=sys.stderr)
     return 0
