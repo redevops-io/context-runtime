@@ -488,7 +488,9 @@ class LibreChatTenant:
                      "routing can prefer a genuinely better arm at equal cost"),
         }
         return {
-            "request": request, "intent_bucket": bucket, "query_type": qtype, "context_key": ctx_key,
+            "request": request, "intent_bucket": bucket,
+            "knowledge_representation": getattr(plan.intent, "representation", "document"),
+            "query_type": qtype, "context_key": ctx_key,
             "decision": {"chosen": {"key": chosen.key, "method": chosen.method,
                                     "final_k": chosen.final_k, "rerank": chosen.rerank},
                          "candidates": candidates},

@@ -21,7 +21,8 @@ TIER_LATENCY = {"local": 4.0, "cheap": 8.0, "premium": 18.0}
 TIER_ACCURACY = {"local": 0.62, "cheap": 0.78, "premium": 0.9}
 TIER_HALLUCINATION = {"local": 0.18, "cheap": 0.1, "premium": 0.05}
 
-METHOD_RECALL = {"bm25": 0.6, "vector": 0.7, "hybrid": 0.85, "code": 0.8, "graph": 0.75}
+METHOD_RECALL = {"bm25": 0.6, "vector": 0.7, "hybrid": 0.85, "code": 0.8, "graph": 0.75,
+                 "temporal": 0.7}
 
 
 class HeuristicEstimator:
@@ -52,6 +53,11 @@ class HeuristicEstimator:
         bucket, _risk = rules.classify(goal.text)
         if bucket == "multi_hop":
             recall = 0.93 if method == "graph" else recall * 0.55
+        elif bucket == "temporal":
+            # temporal questions (point-in-time state, what-changed, provenance) need the
+            # bi-temporal store; single-hop retrieval returns the latest chunk and misses the
+            # time dimension. This is how the planner routes Graphiti vs document retrieval.
+            recall = 0.9 if method == "temporal" else recall * 0.6
         is_graph = method == "graph"
 
         base_acc = TIER_ACCURACY.get(tier, 0.7)

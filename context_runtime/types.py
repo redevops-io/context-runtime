@@ -78,7 +78,7 @@ class Goal:
 
 IntentBucket = Literal[
     "exact_lookup", "conceptual", "incident", "code_reasoning",
-    "synthesis", "high_risk", "sensitive", "multi_hop", "unknown",
+    "synthesis", "high_risk", "sensitive", "multi_hop", "temporal", "unknown",
 ]
 
 
@@ -89,6 +89,10 @@ class Intent:
     risk: Literal["low", "medium", "high"] = "low"
     normalized: str = ""           # deterministic canonical form → cache key
     confidence: float = 0.0
+    # v4: the knowledge representation this request is about — the decision engine's first
+    # axis, chosen before any retrieval method. Candidate generation is constrained to the
+    # methods that specialize this representation (see planner/representations.py).
+    representation: "KnowledgeRepresentation" = "document"
 
 
 # ──────────────────────────── §2.3 candidate / plan ────────────────────────────
@@ -141,7 +145,16 @@ class Plan:
 
 Retrieval = Literal[
     "vector", "bm25", "hybrid", "graph", "community", "image", "colpali", "video",
-    "sql", "api", "logs", "file", "code",
+    "sql", "api", "logs", "file", "code", "temporal",
+]
+
+# The knowledge *representation* a retrieval method operates over. The planner's first
+# decision is which representation best answers the request (a document, a graph of
+# relationships, a bi-temporal fact history, an analytical/OLAP cube, code, or media);
+# the concrete `Retrieval` method is a specialization within the chosen representation.
+# Retrieval is therefore one family of knowledge access, not the whole of it.
+KnowledgeRepresentation = Literal[
+    "document", "graph", "temporal", "analytical", "community", "code", "multimodal",
 ]
 
 

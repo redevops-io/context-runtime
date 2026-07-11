@@ -67,6 +67,10 @@ CATALOG: dict[str, ModuleSpec] = {
                                  ("crowdsec", "threat_intel", "edr"), "correct_verdict", ("block_ip",)),
     "outreach":       ModuleSpec("outreach", "Twenty CRM", "pilot outreach & pipeline",
                                  ("signals", "accounts", "artifacts", "sequences"), "reply_to_pilot", ("send_sequence",)),
+    "guide":          ModuleSpec("guide", "Context Runtime", "onboarding & help",
+                                 ("docs", "walkthroughs", "faqs", "changelog"), "answer_grounded", ()),
+    "growth_assistant": ModuleSpec("growth_assistant", "ERPNext", "founder growth & traction",
+                                 ("playbooks", "benchmarks", "channels"), "traction_lift", ()),
     # ── net-new tenants from the use-cases doc ──
     "incident":       ModuleSpec("incident", "Kubernetes", "incident response",
                                  ("logs", "git", "metrics", "runbook"), "root_cause_found", ("rollback",)),

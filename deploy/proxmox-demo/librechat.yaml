@@ -1,13 +1,13 @@
-# LibreChat config for the public FinanceBench demo — one Context Runtime endpoint,
-# pointed at the control plane over the internal compose network (contextruntime:8092).
-# The Libre Query Board renders under the chat box (baked into the fork's frontend).
+# LibreChat config for the public Context Runtime demo — ONE custom endpoint pointed at the
+# control plane (contextruntime:8092/v1) that serves THREE corpus-scoped models, each its own
+# self-learning Context Runtime tenant. The Libre Query Board (baked into the fork) renders
+# under the chat box and inspects the corpus of whichever model is selected.
 version: 1.2.1
 cache: true
 
-# Guests land STRAIGHT on Context Runtime — no "select an Agent" step. modelSpecs with
-# prioritize+enforce makes the single FinanceBench spec the default (and only) model, so
-# a new chat opens ready to type. interface.agents:false removes the "My Agents" builder;
-# endpointsMenu/presets off keep the guest UI to just the one thing this demo is about.
+# Guests land straight on Context Runtime — no "select an Agent" step. modelSpecs.enforce keeps
+# the dropdown to just these three corpus models; prioritize + FinanceBench default opens a new
+# chat ready to type. interface.agents:false removes the "My Agents" builder.
 interface:
   agents: false
   endpointsMenu: false
@@ -17,24 +17,39 @@ modelSpecs:
   enforce: true
   prioritize: true
   list:
-    - name: "context-runtime"
+    - name: "context-runtime-finance"
       label: "Context Runtime · FinanceBench"
       default: true
-      description: "Self-learning RAG over the FinanceBench corpus — Context Runtime decides what the model sees before it answers."
+      description: "Self-learning RAG over the FinanceBench corpus (real SEC 10-K filings) — Context Runtime decides what the model sees before it answers."
       preset:
-        endpoint: "FinanceBench (Context Runtime)"
-        model: "context-runtime"
+        endpoint: "Context Runtime"
+        model: "context-runtime-finance"
+    - name: "context-runtime-medical"
+      label: "Context Runtime · MedicalBench"
+      description: "Self-learning RAG over the PubMedQA corpus (expert-labeled biomedical abstracts) — the same runtime, a different domain."
+      preset:
+        endpoint: "Context Runtime"
+        model: "context-runtime-medical"
+    - name: "context-runtime-mixed"
+      label: "Context Runtime · Mixed (finance × medical)"
+      description: "A heterogeneous mix of the finance AND medical corpora, sharded + coverage-routed — a query is answered from the domain it belongs to, cutting cross-domain noise to zero. The whitepaper's heterogeneous-source win, live."
+      preset:
+        endpoint: "Context Runtime"
+        model: "context-runtime-mixed"
 
 endpoints:
   custom:
-    - name: "FinanceBench (Context Runtime)"
+    - name: "Context Runtime"
       apiKey: "${CONTEXT_RUNTIME_API_KEY}"
       baseURL: "${CONTEXT_RUNTIME_URL}/v1"
+      # the control plane's /v1/models advertises one id per corpus tenant; fetch picks them up.
       models:
         default:
-          - "context-runtime"
+          - "context-runtime-finance"
+          - "context-runtime-medical"
+          - "context-runtime-mixed"
         fetch: true
       titleConvo: true
-      titleModel: "context-runtime"
+      titleModel: "context-runtime-finance"
       summarize: false
-      modelDisplayLabel: "Context Runtime · FinanceBench (self-learning RAG)"
+      modelDisplayLabel: "Context Runtime (self-learning RAG)"
