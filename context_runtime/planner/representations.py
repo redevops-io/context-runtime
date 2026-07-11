@@ -25,7 +25,13 @@ REPRESENTATION_OF: dict[Retrieval, KnowledgeRepresentation] = {
     "community": "community",
     "temporal": "temporal",
     "code": "code",
-    "sql": "analytical", "logs": "analytical", "api": "analytical",
+    # the analytical representation = a STRUCTURED data store. `sql` for relational; `mongo` / `elastic`
+    # where SQL is not applicable; `api`/`logs` for other structured feeds. A deployment binds a
+    # RetrieverPlugin under whichever method matches its DB; the planner routes here, the bound plugin
+    # executes the query. Unbound methods are pruned by the cost model (the `hybrid` fallback catches
+    # a store that isn't wired).
+    "sql": "analytical", "mongo": "analytical", "elastic": "analytical",
+    "logs": "analytical", "api": "analytical",
     "image": "multimodal", "colpali": "multimodal", "video": "multimodal",
 }
 
@@ -58,6 +64,15 @@ HINT_RULES: list[tuple[re.Pattern, KnowledgeRepresentation]] = [
                 r"top\s+\d+|rank(ed|ing)?|group\s+by|distribution\s+of|trend|breakdown|"
                 r"month[- ]over[- ]month|year[- ]over[- ]year|\bmrr\b|\barr\b|conversion\s+rate)\b",
                 re.I), "analytical"),
+    # structured-store lookups/filters against a KNOWN schema (relational or NoSQL/search) — not just
+    # aggregates. A deployment with a plugged-in DB routes these to its SQL/Mongo/Elastic retriever.
+    (re.compile(r"\b(select\s+.+\s+from\b|\bjoin\b|\bsql\b|\bnosql\b|"
+                r"(records?|rows?|documents?|entries?|orders?|customers?|users?|invoices?|"
+                r"transactions?|accounts?)\s+(where|with|whose|that\s+have)\b|"
+                r"(from|in|query|querying)\s+(the\s+)?[\w-]+\s+(table|collection|index|database|db|schema)\b|"
+                r"(table|collection|index|schema)\s+(named|called|for|containing)\b|"
+                r"(columns?|fields?|attributes?)\s+(of|in|from|for)\b|"
+                r"filter(ed)?\s+by\b|look\s*up\s+\w+\s+by\b)", re.I), "analytical"),
     (re.compile(r"\b(screenshot|screen\s?shot|image|photo|picture|diagram|figure|chart\s+image|"
                 r"scanned|scan\s+of|receipt|invoice\s+image|whiteboard|slide)\b", re.I), "multimodal"),
     (re.compile(r"\b(as\s+of|point[- ]in[- ]time|what\s+changed|history\s+of|superseded|"

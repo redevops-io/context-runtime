@@ -145,7 +145,9 @@ class Plan:
 
 Retrieval = Literal[
     "vector", "bm25", "hybrid", "graph", "community", "image", "colpali", "video",
-    "sql", "api", "logs", "file", "code", "temporal",
+    # structured-store methods (the `analytical` representation): relational + the NoSQL/search
+    # backends a deployment may plug in where SQL is not applicable.
+    "sql", "mongo", "elastic", "api", "logs", "file", "code", "temporal",
 ]
 
 # The knowledge *representation* a retrieval method operates over. The planner's first
