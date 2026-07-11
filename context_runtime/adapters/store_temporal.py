@@ -214,10 +214,15 @@ class GraphitiTemporalRetriever:
                  neo4j_user: str = "neo4j", neo4j_password: str = "graphiti-bench-pw",
                  llm_base_url: str, llm_model: str, llm_api_key: str = "sk-noauth",
                  embed_model: str = "BAAI/bge-large-en-v1.5",
-                 embedder=None, cross_encoder=None, group_id: str = "bench"):
+                 embedder=None, cross_encoder=None, group_id: str = "bench",
+                 hydrate_sources: bool = True):
         """``embedder`` / ``cross_encoder`` accept graphiti ``EmbedderClient`` / ``CrossEncoderClient``
         instances (CR plugin ethos — swap the engines). Left as ``None`` they default to a local
-        CPU sentence-transformers embedder + order-preserving reranker (see ``_make_graphiti_clients``)."""
+        CPU sentence-transformers embedder + order-preserving reranker (see ``_make_graphiti_clients``).
+
+        ``hydrate_sources`` (G1, redevops fork): when the installed ``graphiti_core`` supports source
+        hydration, retrieved edges are backfilled with their raw source turns so hits carry the
+        non-lossy text behind each LLM-extracted fact. Auto-disables against an upstream build."""
         import asyncio
         from graphiti_core import Graphiti  # lazy
         from graphiti_core.llm_client.config import LLMConfig
@@ -225,6 +230,7 @@ class GraphitiTemporalRetriever:
 
         self._loop = asyncio.new_event_loop()
         self.group_id = group_id
+        self.hydrate_sources = hydrate_sources
         self._ep_name: dict[str, str] = {}   # episode uuid → episode name (source id), for provenance
         cfg = LLMConfig(api_key=llm_api_key, model=llm_model, base_url=llm_base_url,
                         small_model=llm_model)
@@ -265,6 +271,19 @@ class GraphitiTemporalRetriever:
             n += 1
         return n
 
+    def _search_edges(self, query: str, k: int, *, search_filter=None):
+        """Run a Graphiti hybrid search, requesting source hydration (G1) when available. Falls back
+        transparently to a plain search if the installed graphiti_core predates the redevops fork."""
+        kw = {"num_results": k, "group_ids": [self.group_id]}
+        if search_filter is not None:
+            kw["search_filter"] = search_filter
+        if self.hydrate_sources:
+            try:
+                return self._run(self._g.search(query, hydrate_sources=True, **kw))
+            except TypeError:
+                self.hydrate_sources = False   # upstream graphiti-core — no hydrate_sources kwarg
+        return self._run(self._g.search(query, **kw))
+
     def _edge_to_hit(self, edge, rank: int, total: int) -> Hit:
         va = getattr(edge, "valid_at", None)
         iva = getattr(edge, "invalid_at", None)
@@ -272,14 +291,22 @@ class GraphitiTemporalRetriever:
         # so temporal retrieval can be scored at source granularity (comparable to doc-level recall).
         ep_uuids = getattr(edge, "episodes", None) or []
         sessions = [self._ep_name[u] for u in ep_uuids if u in self._ep_name]
+        # G1 source hydration: prefer the raw source turns behind the fact (non-lossy). hydrated_text()
+        # falls back to the extracted fact when the edge wasn't/couldn't be hydrated, so this is safe
+        # on both fork and upstream builds. The extracted fact stays available in meta.
+        fact = getattr(edge, "fact", "") or ""
+        hydrate = getattr(edge, "hydrated_text", None)
+        text = hydrate() if callable(hydrate) else fact
         return Hit(
             chunk_id=str(getattr(edge, "uuid", f"e{rank}")),
             filename="graphiti",
-            text=getattr(edge, "fact", "") or "",
+            text=text,
             score=(total - rank) / (total or 1),
             created_at=(va.isoformat() if va else None),
             source="temporal",
             meta={"name": getattr(edge, "name", ""),
+                  "fact": fact,
+                  "hydrated": callable(hydrate) and bool(getattr(edge, "source_episodes", None)),
                   "valid_at": (va.isoformat() if va else None),
                   "invalid_at": (iva.isoformat() if iva else None),
                   "source_sessions": sessions},
@@ -287,7 +314,7 @@ class GraphitiTemporalRetriever:
 
     # ── the RetrieverPlugin seam ──
     def search(self, query: str, k: int = 5, method: Retrieval = "temporal") -> list[Hit]:
-        edges = self._run(self._g.search(query, num_results=k, group_ids=[self.group_id]))
+        edges = self._search_edges(query, k)
         return [self._edge_to_hit(e, i, len(edges)) for i, e in enumerate(edges)]
 
     def as_of(self, query: str, k: int = 5, *, at: "str | datetime",
@@ -306,8 +333,7 @@ class GraphitiTemporalRetriever:
             invalid_at=[[DateFilter(date=atdt, comparison_operator=ComparisonOperator.greater_than)],
                         [DateFilter(comparison_operator=ComparisonOperator.is_null)]],
         )
-        edges = self._run(self._g.search(query, num_results=k, group_ids=[self.group_id],
-                                         search_filter=sf))
+        edges = self._search_edges(query, k, search_filter=sf)
         return [self._edge_to_hit(e, i, len(edges)) for i, e in enumerate(edges)]
 
     def changes(self, query: str = "", *, since: str, until: str, k: int = 20) -> list[dict]:
