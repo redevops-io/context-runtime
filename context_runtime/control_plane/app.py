@@ -1033,17 +1033,31 @@ def _already_in_script(text: str, lang: str) -> bool:
     return bool(rng and re.search(f"[{rng}]", text))
 
 
-def _query_expander(text: str) -> str:
-    if not _QUERY_LANGS:
-        return text
-    parts = [text]
-    for lang in _QUERY_LANGS:
-        if _already_in_script(text, lang):
-            continue  # already in this language — no cross-language expansion needed
-        t = _translate_query(text, lang)
-        if t and t.lower() != text.lower():
-            parts.append(t)
-    return " ".join(parts)
+def _make_query_expander(langs: list[str]):
+    """A cross-language query expander bound to a specific target-language set: the query is
+    expanded with translated terms into each `lang` before retrieval (so e.g. a Spanish question
+    matches an English corpus). Returns None when `langs` is empty (no expansion). Per-tenant, so
+    a multi-corpus deployment can bridge different languages per model (CR_TENANT_LANGS)."""
+    langs = [l for l in (langs or []) if l]
+    if not langs:
+        return None
+
+    def _expand(text: str) -> str:
+        parts = [text]
+        for lang in langs:
+            if _already_in_script(text, lang):
+                continue  # already in this language — no cross-language expansion needed
+            t = _translate_query(text, lang)
+            if t and t.lower() != text.lower():
+                parts.append(t)
+        return " ".join(parts)
+
+    return _expand
+
+
+# Backward-compatible global expander (used by the legacy single tenant): CR_QUERY_LANGS applies
+# to every tenant unless a tenant overrides it via CR_TENANT_LANGS (parsed in the multi-tenant block).
+_query_expander = _make_query_expander(_QUERY_LANGS)
 
 
 def _flag(name: str) -> bool:
@@ -1102,6 +1116,158 @@ if _lc_corpus and os.path.isdir(_lc_corpus) and not _shards_spec:   # shards sel
         pass
 
 
+# ── Multi-corpus tenants (opt-in via CR_TENANTS) ──────────────────────────────────────────
+# One control plane can expose several corpus-scoped models. Each model id in the chat dropdown
+# is its OWN Context Runtime tenant: own retriever, own learned policy/quality/calibration files,
+# own corpus (or heterogeneous shard mix). The chat shim (/v1) and the Query Board (/librechat/*)
+# both route by model id, so the transparency panel always reflects the corpus the visitor picked.
+#
+#   CR_TENANTS="context-runtime-finance=/corpus | context-runtime-medical=/med
+#               | context-runtime-mixed=shards(finance:/corpus,medical:/med)"
+#
+# '|'-separated `id=spec`; a bare path ⇒ single-corpus tenant; `shards(a:/p1,b:/p2)` ⇒ a
+# coverage-routed heterogeneous mix (the whitepaper's cross-domain-noise-22→0 win). Unset ⇒ the
+# single legacy tenant `librechat` (id = CR_SHIM_MODEL_ID) built above, so existing deploys/tests
+# are unaffected.
+
+def _parse_tenant_langs(spec: str) -> dict[str, list[str]]:
+    """CR_TENANT_LANGS → {tenant_id: [langs]} — per-tenant cross-language expansion. A query to
+    that model is expanded with translated terms into its langs before retrieval, so e.g. a Spanish
+    speaker can search an English corpus. Format: 'context-runtime-finance=es | other=ru,en'
+    ('|'-separated id=comma-langs). Overrides the global CR_QUERY_LANGS for the listed tenants."""
+    out: dict[str, list[str]] = {}
+    for entry in spec.split("|"):
+        entry = entry.strip()
+        if not entry:
+            continue
+        tid, sep, langs = entry.partition("=")
+        tid = tid.strip()
+        if not sep or not tid:
+            continue
+        out[tid] = [l.strip() for l in langs.split(",") if l.strip()]
+    return out
+
+
+_TENANT_LANGS = _parse_tenant_langs(os.getenv("CR_TENANT_LANGS", ""))
+
+
+def _parse_tenants_spec(spec: str) -> list[tuple[str, str, str]]:
+    """CR_TENANTS → [(tenant_id, corpus_dir, shards_spec)]. Exactly one of corpus_dir/shards_spec
+    is set per entry (shards_spec is the text inside `shards(...)`)."""
+    out: list[tuple[str, str, str]] = []
+    for entry in spec.split("|"):
+        entry = entry.strip()
+        if not entry:
+            continue
+        tid, sep, body = entry.partition("=")
+        tid, body = tid.strip(), body.strip()
+        if not sep or not tid:
+            continue
+        low = body.lower()
+        if low.startswith("shards(") and body.endswith(")"):
+            out.append((tid, "", body[len("shards("):-1].strip()))
+        else:
+            out.append((tid, body, ""))
+    return out
+
+
+def _build_lc_retriever(shards_spec: str = ""):
+    """A fresh LibreChat retriever built the same way the single-tenant path builds `_lc_retriever`
+    (hybrid→HopRouter base, optional coverage-routed shards, optional multimodal wrap) — one per
+    tenant so each corpus is indexed independently."""
+    retr = None
+    if os.getenv("CR_EMBEDDINGS") == "1":
+        try:
+            from ..adapters.store_semantic import HybridRetriever, embeddings_available
+            if embeddings_available():
+                retr = HybridRetriever()
+        except Exception:
+            retr = None
+    if retr is not None:
+        try:
+            from ..adapters.store_community import CommunityRetriever
+            from ..adapters.store_hipporag import SimGraphRetriever
+            from ..adapters.store_router import HopRouterRetriever
+            retr = HopRouterRetriever(single_hop=retr, graph=SimGraphRetriever([]),
+                                      community=CommunityRetriever([]))
+        except Exception:
+            pass
+    if shards_spec:
+        from ..adapters.store_inmemory import InMemoryStore
+        from ..scheduler.parallel_fusion import ShardedRetriever
+        shards = []
+        for _spec in shards_spec.split(","):
+            _spec = _spec.strip()
+            if not _spec:
+                continue
+            _name, _sep, _path = _spec.partition(":")
+            if not _sep:   # bare dir → derive a source name from the folder
+                _name, _path = (os.path.basename(_name.rstrip("/")) or "shard"), _name
+            if os.path.isdir(_path):
+                try:
+                    _sh = InMemoryStore([], source=_name)
+                    _sh.index(_path)
+                    shards.append(_sh)
+                except Exception:
+                    pass
+        if shards:
+            retr = ShardedRetriever(shards, router=os.getenv("CR_SHARD_ROUTER", "coverage"),
+                                    route_margin=float(os.getenv("CR_ROUTE_MARGIN", "0.15")))
+    if _flag("CR_MULTIMODAL"):
+        from ..adapters.store_image import ImageRetriever
+        from ..adapters.store_inmemory import InMemoryStore as _InMem
+        from ..adapters.store_multimodal import MultimodalRetriever
+        retr = MultimodalRetriever(text=retr or _InMem([]), image=ImageRetriever())
+    return retr
+
+
+def _make_tenant(retriever, *, tenant_id: str) -> LibreChatTenant:
+    """A LibreChatTenant sharing this deployment's cost/load config but with its OWN policy,
+    quality-ledger and calibration files (each corpus learns independently) and its OWN
+    cross-language config (CR_TENANT_LANGS, falling back to the global CR_QUERY_LANGS)."""
+    sfx = f"_{tenant_id}"
+    calib_path = str(fleet.home / f"librechat_calibration{sfx}.json")
+    calib_map = CalibrationMap.load(calib_path)
+    calib_log = CalibrationLog(str(fleet.home / f"librechat_calib_log{sfx}.jsonl")) if _flag("CR_CALIBRATE") else None
+    q_ledger = (QualityLedger(path=str(fleet.home / f"librechat_quality{sfx}.json"))
+                if _quality_routing or _flag("CR_QUALITY") else None)
+    langs = _TENANT_LANGS.get(tenant_id, _QUERY_LANGS)   # per-tenant cross-language, else the global default
+    return LibreChatTenant(
+        runtime=fleet.runtime, retriever=retriever, strategies=_lc_strategies,
+        query_expander=_make_query_expander(langs),
+        persist_path=str(fleet.home / f"librechat_bandit{sfx}.json"),
+        calibration=calib_map, calib_log=calib_log, load_meter=_load_meter,
+        cost_profile=_cost_profile, load_aware=_flag("CR_LOAD_AWARE"),
+        abstain_threshold=_abstain_threshold,
+        reward_beta=float(os.getenv("CR_REWARD_BETA", "0.5")),
+        quality_ledger=q_ledger, quality_routing=_quality_routing)
+
+
+_TENANTS: dict[str, LibreChatTenant] = {}
+_DEFAULT_TENANT_ID = os.getenv("CR_SHIM_MODEL_ID", "context-runtime")
+_tenants_spec = os.getenv("CR_TENANTS", "").strip()
+if _tenants_spec:
+    _parsed = _parse_tenants_spec(_tenants_spec)
+    for _tid, _cdir, _sspec in _parsed:
+        _t = _make_tenant(_build_lc_retriever(_sspec), tenant_id=_tid)
+        if _cdir and os.path.isdir(_cdir):
+            try:
+                _t.ingest(_cdir)   # single-corpus tenants index at startup; shards self-index
+            except Exception:
+                pass
+        _TENANTS[_tid] = _t
+    if _parsed:
+        _DEFAULT_TENANT_ID = _parsed[0][0]
+        librechat = _TENANTS[_DEFAULT_TENANT_ID]   # default tenant backs the legacy global + judge wiring + tests
+if not _TENANTS:                                    # CR_TENANTS unset ⇒ legacy single tenant
+    _TENANTS[_DEFAULT_TENANT_ID] = librechat
+
+
+def _tenant_for(model_id: str | None) -> LibreChatTenant:
+    """Pick the tenant a model id maps to; fall back to the default (legacy) tenant."""
+    return _TENANTS.get((model_id or "").strip()) or _TENANTS.get(_DEFAULT_TENANT_ID) or librechat
+
+
 def _hits_json(hits) -> list[dict]:
     return [{"chunk_id": h.chunk_id, "filename": h.filename, "score": round(h.score, 4),
              "text": h.text[:600]} for h in hits]
@@ -1109,38 +1275,43 @@ def _hits_json(hits) -> list[dict]:
 
 class LcIngestReq(BaseModel):
     path: str
+    model: str | None = None   # which corpus tenant to index into (default: the default tenant)
 
 
 class LcRetrieveReq(BaseModel):
     request: str
+    model: str | None = None   # which corpus tenant to route to (multi-corpus demos)
 
 
 class LcJudgeReq(BaseModel):
     request: str
     score: float
+    model: str | None = None
 
 
 @app.post("/librechat/ingest", dependencies=[Depends(require_api_key)])
 def librechat_ingest(req: LcIngestReq) -> dict:
-    """Index a (pre-built, normalized) corpus directory into LibreChat's retriever."""
+    """Index a (pre-built, normalized) corpus directory into a tenant's retriever."""
     if not os.path.isdir(req.path):
         raise HTTPException(400, f"not a directory: {req.path}")
-    return {"ingested": librechat.ingest(req.path)}
+    return {"ingested": _tenant_for(req.model).ingest(req.path)}
 
 
 @app.post("/librechat/retrieve")
 def librechat_retrieve(req: LcRetrieveReq) -> dict:
     """Plan + retrieve context for a request using the learned strategy (no judging yet)."""
-    ctx = librechat.retrieve(req.request)
+    tenant = _tenant_for(req.model)
+    ctx = tenant.retrieve(req.request)
     return {"request": ctx.request, "strategy": ctx.strategy.key,
             "method": ctx.strategy.method, "final_k": ctx.strategy.final_k,
             "hits": _hits_json(ctx.hits), "context": ctx.context, "plan_id": ctx.plan.id,
-            "suggestion": librechat.suggest(req.request)}
+            "suggestion": tenant.suggest(req.request)}
 
 
 class LcCompareReq(BaseModel):
     request: str
     k: int = 5
+    model: str | None = None   # the corpus the Query Board is inspecting (per selected chat model)
 
 
 @app.post("/librechat/compare")
@@ -1148,7 +1319,7 @@ def librechat_compare(req: LcCompareReq) -> dict:
     """Retrieval transparency: run every method (bm25/vector/hybrid/community/graph) side by
     side and report what the learned policy chose + served. Powers the LibreChat comparison
     panel that shows users WHY Context Runtime's answer is better than any single method."""
-    return librechat.compare(req.request, k=max(1, min(req.k, 10)))
+    return _tenant_for(req.model).compare(req.request, k=max(1, min(req.k, 10)))
 
 
 @app.post("/librechat/explain")
@@ -1157,16 +1328,16 @@ def librechat_explain(req: LcCompareReq) -> dict:
     candidate arm with its learned value + quality/cost decomposition, the per-method retrieval
     trace with calibrated P(relevant), what was served, the abstention decision, and how the reward
     is computed. Read-only, so inspecting never perturbs the learned policy."""
-    return librechat.explain(req.request, k=max(1, min(req.k, 10)))
+    return _tenant_for(req.model).explain(req.request, k=max(1, min(req.k, 10)))
 
 
 @app.get("/librechat/image")
-def librechat_image(chunk_id: str):
+def librechat_image(chunk_id: str, model: str | None = None):
     """Serve an indexed image by chunk_id so the LibreQB panel can render a thumbnail for
     cross-modal `image` hits. Only images the retriever has indexed are servable (no
     arbitrary file read)."""
     from fastapi.responses import FileResponse
-    path = librechat.image_path(chunk_id)
+    path = _tenant_for(model).image_path(chunk_id)
     if not path or not os.path.isfile(path):
         raise HTTPException(404, "image not found")
     return FileResponse(path)
@@ -1176,13 +1347,15 @@ def librechat_image(chunk_id: str):
 def librechat_judge(req: LcJudgeReq) -> dict:
     """Close the loop: an external LLM judge posts the retrieval-quality score (0..1) for
     the last retrieve of this request; the policy learns which strategy the judge rewards."""
-    reward = librechat.record_judgment(req.request, max(0.0, min(1.0, req.score)))
-    return {"reward": reward, "suggestion": librechat.suggest(req.request), "policy": librechat.policy()}
+    tenant = _tenant_for(req.model)
+    reward = tenant.record_judgment(req.request, max(0.0, min(1.0, req.score)))
+    return {"reward": reward, "suggestion": tenant.suggest(req.request), "policy": tenant.policy()}
 
 
 class LcFeedbackReq(BaseModel):
     request: str
     signal: str   # thumbs_up | kept | copied | regenerated | thumbs_down | edited | …
+    model: str | None = None
 
 
 @app.post("/librechat/feedback", dependencies=[Depends(require_api_key)])
@@ -1190,24 +1363,26 @@ def librechat_feedback(req: LcFeedbackReq) -> dict:
     """The app's NATIVE reward: map a user action (kept / regenerated / thumbs / …) to a
     retrieval-quality signal so the policy learns from REAL usage — no LLM in the loop.
     This is the primary online learning path; /librechat/judge is a cold-start bootstrap."""
-    reward = librechat.record_feedback(req.request, req.signal)
+    tenant = _tenant_for(req.model)
+    reward = tenant.record_feedback(req.request, req.signal)
     return {"signal": req.signal, "reward": reward,
-            "suggestion": librechat.suggest(req.request), "policy": librechat.policy()}
+            "suggestion": tenant.suggest(req.request), "policy": tenant.policy()}
 
 
 @app.post("/librechat/chat", dependencies=[Depends(require_api_key)])
 def librechat_chat(req: LcRetrieveReq) -> dict:
     """Self-contained loop: retrieve → (offline heuristic) judge → learn, in one call."""
-    ctx, score, reward = librechat.handle(req.request)
+    tenant = _tenant_for(req.model)
+    ctx, score, reward = tenant.handle(req.request)
     return {"request": ctx.request, "strategy": ctx.strategy.key, "score": score, "reward": reward,
             "hits": _hits_json(ctx.hits), "context": ctx.context,
-            "suggestion": librechat.suggest(req.request)}
+            "suggestion": tenant.suggest(req.request)}
 
 
 @app.get("/librechat/policy")
-def librechat_policy() -> dict:
-    """The retrieval strategy LibreChat has learned per request-type."""
-    return {"policy": librechat.policy()}
+def librechat_policy(model: str | None = None) -> dict:
+    """The retrieval strategy a tenant has learned per request-type."""
+    return {"policy": _tenant_for(model).policy()}
 
 
 # ──────────────────────────── OpenAI-compatible shim (LibreChat self-learning bridge) ────────────────────────────
@@ -1259,16 +1434,24 @@ _SHIM_MODEL_ID = os.getenv("CR_SHIM_MODEL_ID", "context-runtime")
 
 
 def _build_judge_model():
-    """A ModelPlugin pointed at the upstream, for the LLM judges — or None if unavailable
-    (→ the heuristic judge stays in place). Guarded so a missing litellm/upstream degrades."""
-    if not _UPSTREAM_BASE:
+    """A ModelPlugin for the LLM judges. Prefers a DEDICATED judge endpoint — CR_JUDGE_BASE_URL,
+    e.g. Grok 4.5 on https://api.x.ai/v1 — a strong but cheap judge kept SEPARATE from the chat model
+    (the chat model shouldn't grade its own retrieval, and Grok 4.5 is ~5x cheaper than GPT-5.5). Falls
+    back to the chat upstream if no dedicated judge is set. None if neither → the heuristic judge stays."""
+    jbase = os.getenv("CR_JUDGE_BASE_URL", "").rstrip("/")
+    if jbase:                                    # dedicated judge (default: Grok 4.5)
+        base, model, key = jbase, os.getenv("CR_JUDGE_MODEL", "grok-4.5"), os.getenv("CR_JUDGE_API_KEY", "")
+    elif _UPSTREAM_BASE:                          # else reuse the chat upstream as judge
+        base = _UPSTREAM_BASE
+        model = os.getenv("CR_JUDGE_MODEL") or _UPSTREAM_MODEL or _SHIM_MODEL_ID
+        key = _UPSTREAM_KEY
+    else:
         return None
     try:
-        from ..adapters.model_litellm import LiteLLMModel, Tier
-        model = os.getenv("CR_JUDGE_MODEL") or _UPSTREAM_MODEL or _SHIM_MODEL_ID
-        return LiteLLMModel(tiers=[Tier(name="judge", model=model,
-                                        base_url=_UPSTREAM_BASE, api_key=_UPSTREAM_KEY)],
-                            default_tier="judge")
+        from ..adapters.model_openai import OpenAICompatibleModel  # xAI is OpenAI-compatible; no litellm dep
+        from ..adapters.model_litellm import Tier
+        return OpenAICompatibleModel([Tier(name="judge", model=model, base_url=base, api_key=key or "sk-noauth")],
+                                     default_tier="judge")
     except Exception:
         return None
 
@@ -1280,8 +1463,10 @@ if _flag("CR_LLM_JUDGE"):
     if _jm is not None:
         from ..integrations.librechat import llm_judge as _mk_llm_judge
         from ..integrations.librechat import llm_passage_judge as _mk_passage_judge
-        librechat.judge = _mk_llm_judge(_jm)
-        librechat.passage_judge = _mk_passage_judge(_jm)
+        _lj, _pj = _mk_llm_judge(_jm), _mk_passage_judge(_jm)
+        for _t in _TENANTS.values():   # every corpus tenant shares the dedicated judge
+            _t.judge = _lj
+            _t.passage_judge = _pj
 
 
 class ChatMessage(BaseModel):
@@ -1299,9 +1484,12 @@ class ChatCompletionReq(BaseModel):
 
 @app.get("/v1/models")
 def v1_models() -> dict:
-    """OpenAI-compatible model list — LibreChat populates its model dropdown from this."""
+    """OpenAI-compatible model list — LibreChat populates its model dropdown from this. One entry
+    per corpus tenant (finance / medical / mixed …), so each selectable model is a scoped corpus."""
+    created = int(_time.time())
     return {"object": "list", "data": [
-        {"id": _SHIM_MODEL_ID, "object": "model", "created": int(_time.time()), "owned_by": "context-runtime"}]}
+        {"id": tid, "object": "model", "created": created, "owned_by": "context-runtime"}
+        for tid in _TENANTS]}
 
 
 def _forward_to_upstream(messages: list[dict], req: ChatCompletionReq) -> tuple[str, dict, str]:
@@ -1313,7 +1501,7 @@ def _forward_to_upstream(messages: list[dict], req: ChatCompletionReq) -> tuple[
         body = ctx_preamble.split("RETRIEVED CONTEXT:", 1)[-1].strip()
         answer = ("Based on the retrieved context:\n\n" + body[:1200]) if body else \
                  "No relevant context was retrieved for this request."
-        return answer, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, _SHIM_MODEL_ID
+        return answer, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, (req.model or _SHIM_MODEL_ID)
     payload = {"model": _UPSTREAM_MODEL or _SHIM_MODEL_ID, "messages": messages, "stream": False}
     # Reasoning upstreams (e.g. kimi-k2.6) need a temperature the model accepts and enough
     # max_tokens to finish reasoning AND write the answer — LibreChat's own params are often
@@ -1339,7 +1527,7 @@ def _forward_to_upstream(messages: list[dict], req: ChatCompletionReq) -> tuple[
 _shim_seen: dict[int, bool] = {}
 
 
-def _infer_feedback(req: "ChatCompletionReq", request_text: str) -> None:
+def _infer_feedback(tenant, req: "ChatCompletionReq", request_text: str) -> None:
     """Turn LibreChat's real behaviour into the app's NATIVE reward — no UI patch needed:
       • the user asked a NEW question after a prior answer → that prior turn was KEPT;
       • the exact conversation was re-sent (Regenerate) → that answer was REGENERATED.
@@ -1349,43 +1537,46 @@ def _infer_feedback(req: "ChatCompletionReq", request_text: str) -> None:
     if len(user_msgs) >= 2 and assistant_msgs:            # a completed prior turn the user moved on from
         prior = user_msgs[-2].content
         if prior and prior != request_text:
-            librechat.record_feedback(prior, "kept")
-    key = hash(tuple((m.role, m.content) for m in req.messages))
+            tenant.record_feedback(prior, "kept")
+    key = hash((req.model or "", tuple((m.role, m.content) for m in req.messages)))
     with _shim_seen_lock:                                 # runs on the learn pool → guard the dict
         regenerated = _shim_seen.get(key)
         if len(_shim_seen) > 512:
             _shim_seen.clear()
         _shim_seen[key] = True
     if regenerated:                                       # identical conversation re-sent → Regenerate
-        librechat.record_feedback(request_text, "regenerated")
+        tenant.record_feedback(request_text, "regenerated")
 
 
-def _learn_in_background(req: ChatCompletionReq, request_text: str, ctx) -> None:
+def _learn_in_background(tenant, req: ChatCompletionReq, request_text: str, ctx) -> None:
     """The learning half of a chat turn — off the response path. Infers implicit feedback,
     runs the (possibly LLM) judge, and records the reward (bandit update + persist)."""
     try:
-        _infer_feedback(req, request_text)                       # native implicit reward (primary)
-        librechat.annotate_relevance(request_text, ctx.hits)     # per-passage calibration labels (opt-in)
-        score = librechat.judge(request_text, ctx.context, ctx.hits)
-        librechat.record_judgment(request_text, score)
+        _infer_feedback(tenant, req, request_text)               # native implicit reward (primary)
+        tenant.annotate_relevance(request_text, ctx.hits)        # per-passage calibration labels (opt-in)
+        score = tenant.judge(request_text, ctx.context, ctx.hits)
+        tenant.record_judgment(request_text, score)
     except Exception:
         pass   # learning must never affect the served response
 
 
 def _chat_core(req: ChatCompletionReq) -> dict:
-    """The self-learning chat turn: retrieve → augment → answer (learning is deferred)."""
+    """The self-learning chat turn: retrieve → augment → answer (learning is deferred).
+    Routes to the corpus tenant named by req.model (finance / medical / mixed)."""
+    tenant = _tenant_for(req.model)
     user_msgs = [m for m in req.messages if m.role == "user"]
     request_text = user_msgs[-1].content if user_msgs else ""
     # Count this turn as in-flight so the load-aware sizer/bandit see current concurrency.
     tracker = _load_meter.track() if _load_meter is not None else _nullctx()
     with tracker:
-        ctx = librechat.retrieve(request_text)                   # learned retrieval strategy
+        ctx = tenant.retrieve(request_text)                      # learned retrieval strategy
         if ctx.abstain:
             # Best passage's calibrated P(relevant) is below the floor — answering would be
             # ungrounded. Say so instead of burning an upstream call, and still learn.
             answer = ("I don't have enough relevant context to answer that reliably. "
                       "Try rephrasing or adding detail.")
-            usage, model_name = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, _SHIM_MODEL_ID
+            usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            model_name = req.model or _SHIM_MODEL_ID
         else:
             system = ("You are a helpful assistant. Answer using the RETRIEVED CONTEXT below when "
                       "relevant, citing [n]. If it is insufficient, say so.\n\n"
@@ -1396,9 +1587,9 @@ def _chat_core(req: ChatCompletionReq) -> dict:
     # judge + bandit update run on the learn pool so they never add to response latency.
     score = _heuristic_judge(request_text, ctx.context, ctx.hits)
     rel = (sum(ctx.probs) / len(ctx.probs)) if ctx.probs else None
-    reward = _reward_from_judgment(score, ctx.strategy, librechat.strategies,
-                                   rel_signal=rel, beta=librechat.reward_beta)
-    _submit_learn(_learn_in_background, req, request_text, ctx)
+    reward = _reward_from_judgment(score, ctx.strategy, tenant.strategies,
+                                   rel_signal=rel, beta=tenant.reward_beta)
+    _submit_learn(_learn_in_background, tenant, req, request_text, ctx)
     return {
         "id": f"chatcmpl-{ctx.plan.id}", "object": "chat.completion", "created": int(_time.time()),
         "model": model_name,
@@ -1406,7 +1597,7 @@ def _chat_core(req: ChatCompletionReq) -> dict:
         "usage": usage or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         "context_runtime": {
             "strategy": ctx.strategy.key, "retrieval_score": round(score, 4), "reward": reward,
-            "citations": [h.chunk_id for h in ctx.hits], "suggestion": librechat.suggest(request_text),
+            "citations": [h.chunk_id for h in ctx.hits], "suggestion": tenant.suggest(request_text),
             "confidence": round(ctx.max_p_rel, 4), "abstained": ctx.abstain,
         },
     }

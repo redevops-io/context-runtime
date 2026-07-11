@@ -6,7 +6,7 @@ become the cheapest model tier; the contract is unchanged.
 from __future__ import annotations
 
 from ..types import Goal, Intent, PluginInfo
-from . import rules
+from . import representations, rules
 
 
 class RuleIntentAnalyzer:
@@ -22,12 +22,19 @@ class RuleIntentAnalyzer:
         confidence = 0.8 if bucket != "unknown" else 0.3
         if entities:
             confidence = min(1.0, confidence + 0.1)
+        # v4: the first decision — which knowledge representation is this question even about?
+        representation = representations.classify(bucket, goal.text, entities)
+        # a positive representation HINT (not the bucket default) is a strong signal — raise confidence
+        # so the hybrid LLM head trusts it for free instead of spending a model call to re-check.
+        if representation != "document" and representation != representations.BUCKET_REPRESENTATION.get(bucket, "document"):
+            confidence = max(confidence, 0.85)
         return Intent(
             bucket=bucket,
             entities=entities,
             risk=risk,  # type: ignore[arg-type]
             normalized=rules.normalize(goal.text),
             confidence=confidence,
+            representation=representation,
         )
 
     def info(self) -> PluginInfo:

@@ -14,6 +14,16 @@ from ..types import IntentBucket, Retrieval
 INTENT_RULES: list[tuple[re.Pattern, IntentBucket, str]] = [
     (re.compile(r"\b(error|exception|stack ?trace|code|status)\s*[:#]?\s*\w*\d", re.I), "exact_lookup", "low"),
     (re.compile(r"\b[A-Z]{2,}-\d+\b"), "exact_lookup", "low"),                 # JIRA-123, ERR-500
+    # temporal: the answer depends on WHEN — point-in-time state, what changed, provenance,
+    # supersession. Placed before multi_hop so a temporal cue wins over an incidental
+    # "between X and Y". The bi-temporal store answers these; semantic retrieval cannot.
+    (re.compile(r"\b(as\s+of|at\s+the\s+time|over\s+time|point[- ]in[- ]time|as\s+at|"
+                r"when\s+(did|was|were|is|does)|was\s+(true|active|valid|the\s+case)|"
+                r"no\s+longer|used\s+to|previously|originally|currently|still\b|"
+                r"supersed\w+|replac\w+|revis\w+|deprecat\w+|(?<!un)chang\w+|"
+                r"history\s+of|which\s+\w+\s+(was\s+later|were\s+later|later\s+(became|got))|"
+                r"(before|after|prior\s+to|since|until)\s+(the\s+)?(\d|release|launch|migration|version|v\d))\b",
+                re.I), "temporal", "low"),
     # multi-hop: the answer lives in the CONNECTIONS between documents, not one chunk
     (re.compile(r"(relat\w*|connect\w*|link\w*|depend\w*|\bchain\b|\bacross\b|trace\w*|"
                 r"lead\w*\s+to|root\s+cause|between\s+.+\s+and\s+|"
@@ -37,6 +47,9 @@ BUCKET_DEFAULTS: dict[IntentBucket, tuple[tuple[Retrieval, ...], str, bool]] = {
     "sensitive":      (("hybrid",), "single_shot", True),
     # multi_hop generates BOTH a graph candidate and a hybrid one; the cost model picks
     "multi_hop":      (("graph", "hybrid"), "single_shot", False),
+    # temporal generates a bi-temporal candidate + a hybrid fallback; the cost model picks
+    # (temporal wins only when a populated temporal store is wired; else it falls back)
+    "temporal":       (("temporal", "hybrid"), "single_shot", False),
     "unknown":        (("hybrid",), "single_shot", False),
 }
 
@@ -50,6 +63,7 @@ BUCKET_TIERS: dict[IntentBucket, tuple[str, ...]] = {
     "high_risk":      ("premium",),
     "sensitive":      ("local",),          # restricted data stays local
     "multi_hop":      ("cheap", "premium"),
+    "temporal":       ("cheap", "premium"),   # provenance/change reasoning benefits from a stronger model
     "unknown":        ("local", "cheap"),
 }
 

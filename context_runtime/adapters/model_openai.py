@@ -33,7 +33,7 @@ class OpenAICompatibleModel:
         cls,
         *,
         model_env: str = "AGENT_LLM_MODEL",
-        default_model: str = "gpt-5.5",
+        default_model: str = "grok-4.5",
         key_envs: tuple[str, ...] = ("AGENT_LLM_KEY", "OPENAI_API_KEY"),
         base_envs: tuple[str, ...] = ("AGENT_LLM_BASE_URL", "OPENAI_BASE_URL"),
         cost_per_1k: float = 0.0,

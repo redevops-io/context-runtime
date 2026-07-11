@@ -145,6 +145,13 @@ _CLASSIFY_SYS = (
     "for how-to / explain / what-is questions. Never invent a tool name."
 )
 
+# Interrogative/how-to leads that the deterministic fallback routes to help (not a tool). Kept as
+# explicit phrases so action queries like "what changed this week?" / "how's my traffic?" still route.
+_HELP_MARKERS = (
+    "how do i", "how do you", "how can i", "how to ", "how does ", "how would i",
+    "what is ", "what are ", "what does ", "what's a ", "explain", "tell me about", "why ",
+)
+
 
 def _policy_items(decisions) -> list[dict]:
     """Compact policy list for the panel (§10.1): only non-allow decisions become chips; allows fold."""
@@ -222,6 +229,12 @@ class AgentConsole:
 
     def _keyword_route(self, message: str) -> dict:
         """Deterministic fallback when the model can't return JSON (offline / parse fail)."""
+        # How-to / explain questions are help, not actions — mirror the LLM classify rule so a
+        # single incidental word ("...part of a page?" vs a "monitor a page" tool) can't misroute
+        # an interrogative into a side-effecting tool call.
+        low = (message or "").strip().lower()
+        if any(low.startswith(mk) or (" " + mk) in low for mk in _HELP_MARKERS):
+            return {"mode": "help", "tool": None, "args": {}, "reason": "how-to → help"}
         toks = set(_tokens(message))
         best, best_score = None, 0
         for name, t in self._tools.items():
@@ -265,9 +278,11 @@ class AgentConsole:
             body = f"{hits[0].text}\n\n(Grounded in the {self.tenant} guide [1].)"
             return {"intent": "help", "text": body, "evidence": evidence, "model": self.model.info().name}
         system = (
-            f"You are the assistant for {self.tenant}. Answer the user's how-to / explain question using "
-            "ONLY the numbered guide passages. Cite them inline like [1]. Be concise and practical — give the "
-            "concrete steps. If the passages don't cover it, say so plainly."
+            f"You are the assistant for {self.tenant}. Answer the user's question using ONLY the numbered "
+            "guide passages, citing them inline like [1]. For a 'what is' / explain question, define the term "
+            "AND explain how it fits this system from the passage context — keep the relevant specifics, don't "
+            "collapse it to a bare one-line definition. For a how-to question, give the concrete steps. Keep it "
+            "tight but complete; if the passages don't cover it, say so plainly."
         )
         prompt = f"Guide:\n{context}\n\nQuestion: {message}"
         try:

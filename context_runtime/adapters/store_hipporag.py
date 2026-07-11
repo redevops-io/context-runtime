@@ -98,22 +98,39 @@ class HippoRAGRetriever:
     package and the offline path don't need its (heavy) deps."""
 
     def __init__(self, save_dir: str = ".context_runtime/hipporag", llm_model_name: str = "gpt-4o-mini",
-                 embedding_model_name: str = "nvidia/NV-Embed-v2", source: str = "graph"):
+                 embedding_model_name: str = "nvidia/NV-Embed-v2", source: str = "graph",
+                 llm_base_url: str | None = None, embedding_base_url: str | None = None,
+                 llm_api_key: str | None = None):
         self.save_dir = save_dir
         self.llm_model_name = llm_model_name
         self.embedding_model_name = embedding_model_name
         self.source = source
+        # Optional OpenAI-compatible endpoints so HippoRAG's OpenIE + dense retrieval run against a
+        # locally-served LLM / embedding model (e.g. a vLLM NVFP4 endpoint) instead of hosted OpenAI.
+        self.llm_base_url = llm_base_url
+        self.embedding_base_url = embedding_base_url
+        self.llm_api_key = llm_api_key
         self._hr = None
         self._doc_meta: dict[str, dict] = {}   # doc text → {chunk_id, filename}
 
     def _get(self):
         if self._hr is None:
+            import os
             try:
-                from hipporag import HippoRAG  # type: ignore
+                from hipporag import HippoRAG  # type: ignore  # some forks export at package root
+                if not isinstance(HippoRAG, type):             # public OSU repo: got the submodule
+                    from hipporag.HippoRAG import HippoRAG      # type: ignore  # class lives here
             except ImportError as e:  # pragma: no cover
                 raise RuntimeError("HippoRAGRetriever needs: pip install 'context_runtime[hipporag]'") from e
-            self._hr = HippoRAG(save_dir=self.save_dir, llm_model_name=self.llm_model_name,
-                                embedding_model_name=self.embedding_model_name)
+            if self.llm_api_key:                       # HippoRAG/litellm read the key from env
+                os.environ.setdefault("OPENAI_API_KEY", self.llm_api_key)
+            kw = {"save_dir": self.save_dir, "llm_model_name": self.llm_model_name,
+                  "embedding_model_name": self.embedding_model_name}
+            if self.llm_base_url:
+                kw["llm_base_url"] = self.llm_base_url
+            if self.embedding_base_url:
+                kw["embedding_base_url"] = self.embedding_base_url
+            self._hr = HippoRAG(**kw)
         return self._hr
 
     def index(self, path_or_docs) -> dict:
@@ -132,8 +149,11 @@ class HippoRAGRetriever:
     def search(self, query: str, k: int, method: Retrieval = "graph") -> list[Hit]:
         results = self._get().retrieve(queries=[query], num_to_retrieve=k)
         sol = results[0]
-        docs = getattr(sol, "docs", []) or []
-        scores = list(getattr(sol, "doc_scores", []) or [])
+        # docs/doc_scores may be numpy arrays — avoid `or []` (ambiguous truth value on arrays).
+        _docs = getattr(sol, "docs", None)
+        docs = list(_docs) if _docs is not None else []
+        _scores = getattr(sol, "doc_scores", None)
+        scores = list(_scores) if _scores is not None else []
         out = []
         for i, text in enumerate(docs[:k]):
             meta = self._doc_meta.get(text, {"chunk_id": f"hr::{i}", "filename": f"doc-{i}"})
