@@ -97,7 +97,7 @@ class HippoRAGRetriever:
     """The real graph retriever — wraps redevops-io/HippoRAG. Lazy-imports so the core
     package and the offline path don't need its (heavy) deps."""
 
-    def __init__(self, save_dir: str = ".context_runtime/hipporag", llm_model_name: str = "gpt-4o-mini",
+    def __init__(self, save_dir: str = ".context_runtime/hipporag", llm_model_name: str = "gpt-5-mini",
                  embedding_model_name: str = "nvidia/NV-Embed-v2", source: str = "graph",
                  llm_base_url: str | None = None, embedding_base_url: str | None = None,
                  llm_api_key: str | None = None):

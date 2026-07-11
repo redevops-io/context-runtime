@@ -21,7 +21,7 @@ hipporag = ["hipporag @ git+https://github.com/redevops-io/HippoRAG.git"]
 # Pinned to the redevops fork for G1 source hydration (recovers the raw source turns
 # behind each lossy LLM-extracted fact); neo4j ships with graphiti-core.
 graphiti = [
-    "graphiti-core @ git+https://github.com/redevops-io/graphiti.git@redevops/g1-source-hydration",
+    "graphiti-core @ git+https://github.com/redevops-io/graphiti.git@main",
     "sentence-transformers>=3.0",
 ]
 # Semantic (embedding) retrieval + hybrid BM25⊕semantic fusion — deterministic ONNX
