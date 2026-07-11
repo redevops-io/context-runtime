@@ -89,6 +89,10 @@ class Intent:
     risk: Literal["low", "medium", "high"] = "low"
     normalized: str = ""           # deterministic canonical form → cache key
     confidence: float = 0.0
+    # v4: the knowledge representation this request is about — the decision engine's first
+    # axis, chosen before any retrieval method. Candidate generation is constrained to the
+    # methods that specialize this representation (see planner/representations.py).
+    representation: "KnowledgeRepresentation" = "document"
 
 
 # ──────────────────────────── §2.3 candidate / plan ────────────────────────────

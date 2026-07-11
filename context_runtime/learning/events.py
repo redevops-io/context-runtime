@@ -15,6 +15,7 @@ class OutcomeEvent:
     context: str                       # the selection context (intent bucket)
     arm: str                           # the chosen plan shape (method:tier)
     reward: float                      # measured reward for this execution
+    representation: str = ""           # v4: knowledge representation the plan routed to (attribution)
     seq: int = 0                       # monotonic sequence number (ordering / idempotency)
     mode: str = ""                     # exploit | explore | shadow (from the bandit metadata)
     p: float = 1.0                     # selection propensity, for off-policy evaluation
@@ -44,6 +45,7 @@ class OutcomeEvent:
             context=b.get("context", ""),
             arm=b.get("arm", ""),
             reward=reward,
+            representation=getattr(getattr(plan, "intent", None), "representation", "") or "",
             seq=seq,
             mode=b.get("mode", ""),
             p=float(b.get("p", 1.0)),

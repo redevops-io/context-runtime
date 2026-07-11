@@ -14,7 +14,9 @@ via the ``RetrieverPlugin`` seam; this table is only the taxonomy.
 """
 from __future__ import annotations
 
-from ..types import KnowledgeRepresentation, Retrieval
+import re
+
+from ..types import IntentBucket, KnowledgeRepresentation, Retrieval
 
 # method → the knowledge representation it operates over
 REPRESENTATION_OF: dict[Retrieval, KnowledgeRepresentation] = {
@@ -36,3 +38,42 @@ def representation_for(method: Retrieval | str) -> KnowledgeRepresentation:
 def methods_for(representation: KnowledgeRepresentation | str) -> tuple[Retrieval, ...]:
     """The retrieval methods that specialize a given representation."""
     return tuple(m for m, r in REPRESENTATION_OF.items() if r == representation)
+
+
+# ─── the classify head: intent → representation (v4's first-class decision) ───
+# A bucket carries a *default* representation (the buckets are already representation-leaning:
+# multi_hop→graph, temporal→temporal, code→code). Content HINTS override it — most importantly
+# they reach representations no bucket produces on its own (analytical OLAP, multimodal).
+BUCKET_REPRESENTATION: dict[IntentBucket, KnowledgeRepresentation] = {
+    "multi_hop": "graph",
+    "temporal": "temporal",
+    "code_reasoning": "code",
+    # everything else defaults to document unless a hint says otherwise
+}
+
+# Ordered: first hit wins. These are the signals a bucket alone misses.
+HINT_RULES: list[tuple[re.Pattern, KnowledgeRepresentation]] = [
+    (re.compile(r"\b(how\s+many|number\s+of|count\s+of|\btotal\b|\bsum\b|average|avg|median|"
+                r"per\s+(day|week|month|quarter|user|account)|over\s+the\s+(last|past)\s+\w+|"
+                r"top\s+\d+|rank(ed|ing)?|group\s+by|distribution\s+of|trend|breakdown|"
+                r"month[- ]over[- ]month|year[- ]over[- ]year|\bmrr\b|\barr\b|conversion\s+rate)\b",
+                re.I), "analytical"),
+    (re.compile(r"\b(screenshot|screen\s?shot|image|photo|picture|diagram|figure|chart\s+image|"
+                r"scanned|scan\s+of|receipt|invoice\s+image|whiteboard|slide)\b", re.I), "multimodal"),
+    (re.compile(r"\b(as\s+of|point[- ]in[- ]time|what\s+changed|history\s+of|superseded|"
+                r"no\s+longer|used\s+to\s+be|previously|valid\s+(from|until))\b", re.I), "temporal"),
+    (re.compile(r"\b(related\s+to|connected\s+to|depend(s|ency|encies)?\s+on|graph\s+of|"
+                r"network\s+of|linked\s+to|relationship\s+between|traverse|multi[- ]hop)\b",
+                re.I), "graph"),
+]
+
+
+def classify(bucket: IntentBucket | str, text: str, entities: tuple[str, ...] = ()) -> KnowledgeRepresentation:
+    """Map an analysed intent to the knowledge representation that can answer it.
+
+    Content hints win over the bucket default, so 'how many incidents last week' routes to the
+    analytical representation even though its bucket is 'incident'. Default: document."""
+    for pat, rep in HINT_RULES:
+        if pat.search(text or ""):
+            return rep
+    return BUCKET_REPRESENTATION.get(bucket, "document")  # type: ignore[arg-type]
