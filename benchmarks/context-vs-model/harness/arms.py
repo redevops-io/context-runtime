@@ -44,6 +44,12 @@ def _chunks_to_context(chunks, *, max_tokens: int) -> str:
     for c in chunks:
         block = f"[doc {c.doc_id}]\n{c.text}\n"
         if used + len(block) > budget:
+            # First block alone exceeds the budget → include it TRUNCATED rather than dropping it.
+            # Dropping it silently zeroed the context for long single passages (e.g. LongMemEval
+            # sessions), which made an arm look like it scored 0 when it simply got no context.
+            if not parts:
+                parts.append(block[:budget])
+                used = budget
             break
         parts.append(block)
         used += len(block)
