@@ -9,11 +9,16 @@ on vs off" is which config the planner's bandit picks, not a different retriever
 """
 from __future__ import annotations
 
+import inspect
 import os
 from dataclasses import dataclass
 
 from redevops_rag.rag import RAG
 from redevops_rag.retrieve import hybrid_search
+
+# Native document_ids scoping landed in redevops-rag (pinned in pyproject). Feature-detect so the
+# harness still runs against an older/unpinned install, falling back to post-hoc filtering there.
+_HYBRID_HAS_DOC_IDS = "document_ids" in inspect.signature(hybrid_search).parameters
 
 
 @dataclass
@@ -48,8 +53,24 @@ class FinanceBenchStore:
         """Real hybrid_search with the bandit-chosen RetrievalConfig, scoped to
         ``document_ids``. cfg.rerank decides whether the cross-encoder runs."""
         rr = self.rag.reranker if getattr(cfg, "rerank", False) else None
-        hits = hybrid_search(self.rag.store, query, reranker=rr,
-                             document_ids=document_ids, **cfg.kwargs())
+        kw = cfg.kwargs()
+        if document_ids and _HYBRID_HAS_DOC_IDS:
+            # Native pre-filtering: scope BEFORE RRF fusion + boosts, so the candidate pool is drawn
+            # entirely from the allowed docs — the correct graduated-pollution pool.
+            hits = hybrid_search(self.rag.store, query, reranker=rr,
+                                 document_ids=list(document_ids), **kw)
+        elif document_ids:
+            # Fallback for an older/unpinned redevops-rag without document_ids: scope POST-HOC (widen
+            # → retrieve → filter → top-k). Runs RRF/boosts over the GLOBAL pool then filters, so it
+            # biases toward globally-high-ranking docs — kept only so the harness still runs on a
+            # stale install. Pin redevops-rag to the document_ids commit to take the native path.
+            allowed = set(document_ids)
+            want = int(kw.get("limit", 8) or 8)
+            wide = dict(kw, limit=max(want * 8, 60), pool=max(int(kw.get("pool", 100) or 100), 400))
+            hits = hybrid_search(self.rag.store, query, reranker=rr, **wide)
+            hits = [h for h in hits if (h.get("document_id") or "") in allowed][:want]
+        else:
+            hits = hybrid_search(self.rag.store, query, reranker=rr, **kw)
         return [_hit_to_chunk(h) for h in hits]
 
     def close(self):
