@@ -56,11 +56,11 @@ while the core does the domain work:
 | agentic-billing | Lago | market-radar | changedetection |
 | agentic-books | ERPNext | edge-sentinel (SOC) | CrowdSec |
 | agentic-support | Chatwoot | agentic-compliance | OpenSCAP |
-| agentic-crm | Twenty CRM | control-tower | Metabase |
+| agentic-crm | ERPNext (CRM) | control-tower | Metabase |
 | social-autopilot | Postiz | growth-engine | Umami |
 | lifecycle | Listmonk | guide | redevops-rag |
 
-Plus **outreach-engine**, **growth-assistant**, and **agentic-privacy**, and the **control plane**
+Plus **outreach-engine** (Twenty CRM), and **growth-assistant** + **agentic-privacy** (both on ERPNext — leads / contacts, not books), and the **control plane**
 (`agentic_os`: deploy / observe / approve, `/m/<app>` proxy + a module catalog). Most have the offline
 reward examples shown above (`examples/<app>.py`); the rest are native realizations without a
 standalone tuner.
