@@ -11,12 +11,21 @@ date, and *as it was known* at a past date (so a late-arriving correction doesn'
 densest in conversational corpora (chat/tickets) where facts are constantly revised.
 
 Dependency-free (stdlib + the ``RetrieverPlugin`` seam), so it drops into the planner as one more
-routable capability (``method="temporal"``); the full Graphiti engine can back it as an optional binding.
-Times are compared as plain ISO strings (``"2026-01-15"``): ``""`` = the beginning of time, ``None`` on
-``valid_to`` = still valid.
+routable capability (``method="temporal"``). Times are compared as plain ISO strings
+(``"2026-01-15"``): ``""`` = the beginning of time, ``None`` on ``valid_to`` = still valid.
+
+Three bindings, same seam (the router can't tell them apart):
+  * ``TemporalDocumentRetriever`` — the **DEFAULT**. Document retrieval (BM25) over the RAW turns +
+    a bi-temporal time layer. Non-lossy → matches document recall while adding point-in-time, which
+    is why it wins recall-sensitive regimes (LongMemEval-oracle) that Graphiti's lossy extraction caps.
+  * ``TemporalStore`` — the stdlib bi-temporal FACT store (subject/predicate/object), for structured
+    fact histories.
+  * ``GraphitiTemporalRetriever`` — an **OPTIONAL** binding for its real strength: point-in-time
+    reasoning over a LARGE, REVISED history (validate on the full haystack, not the oracle).
 """
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 
@@ -360,3 +369,150 @@ class GraphitiTemporalRetriever:
             self._run(self._g.close())
         finally:
             self._loop.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DEFAULT temporal binding: a bi-temporal DOCUMENT retriever (non-lossy).
+#
+# Retrieves the RAW turns/sessions (not LLM-extracted facts), so it matches
+# document-retrieval recall while adding the two time axes that make it a
+# *temporal* method — point-in-time (`valid_at`) and as-known (`recorded_at`).
+# This is why it wins the recall-sensitive regime (e.g. LongMemEval-oracle),
+# where Graphiti's lossy LLM extraction caps out at what it managed to extract:
+# hydration can recover the turns behind FOUND edges, never the sessions the
+# extractor missed. Graphiti (below) stays an OPTIONAL binding for its real
+# strength — point-in-time reasoning over a LARGE, REVISED history.
+#
+# Engine: compact Okapi BM25 (dependency-free). A deployment may inject a hybrid
+# (BM25 ⊕ dense) substrate for higher recall at scale by overriding `_rank`.
+# Timestamps are compared as ISO strings ("2026-01-15"); "" = the beginning of
+# time. Callers pass ISO `valid_at` / `reference_time`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_DOC_WORD = re.compile(r"[a-z0-9][a-z0-9'\-]*")
+_DOC_STOP = {"the", "a", "an", "of", "to", "in", "on", "for", "is", "was", "are", "were", "did",
+             "do", "does", "who", "what", "when", "where", "how", "why", "and", "or", "but", "with",
+             "at", "by", "as", "it", "this", "that", "i", "you", "he", "she", "they", "we", "my",
+             "your", "me", "am", "be", "been"}
+
+
+def _doc_tokens(text: str) -> list[str]:
+    return [t for t in _DOC_WORD.findall((text or "").lower()) if len(t) > 1 and t not in _DOC_STOP]
+
+
+def _iso(v) -> str:
+    """Coerce to a comparable ISO-ish string; None/'' = the beginning of time."""
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v
+    fn = getattr(v, "isoformat", None)
+    return fn() if callable(fn) else str(v)
+
+
+@dataclass
+class TemporalDoc:
+    id: str
+    text: str
+    valid_at: str = ""       # when the content is true (session/event time); "" = -inf
+    recorded_at: str = ""    # when the system learned it (transaction time); "" = -inf
+    meta: dict = field(default_factory=dict)
+
+
+class TemporalDocumentRetriever:
+    """The default ``temporal`` binding: document retrieval + a bi-temporal time layer.
+
+    Non-lossy — it returns raw turns, not LLM-extracted facts — so it matches document recall while
+    answering point-in-time questions plain document retrieval can't (``as_of`` / ``known_at``).
+    Same ``RetrieverPlugin`` seam as ``TemporalStore`` / ``GraphitiTemporalRetriever`` (search /
+    as_of / changes / info), so the router can't tell them apart.
+    """
+
+    def __init__(self, *, k1: float = 1.5, b: float = 0.75):
+        self._docs: list[TemporalDoc] = []
+        self._k1, self._b = k1, b
+
+    # ── ingest ──
+    def index(self, items) -> int:
+        """Index timestamped items. Each: dict(text|body, valid_at|reference_time, id?/name?,
+        recorded_at?, meta?). Returns the total doc count."""
+        for it in items:
+            vt = it.get("valid_at")
+            if vt is None:
+                vt = it.get("reference_time")
+            self._docs.append(TemporalDoc(
+                id=str(it.get("id") or it.get("name") or f"doc{len(self._docs)}"),
+                text=it.get("text") or it.get("body") or "",
+                valid_at=_iso(vt),
+                recorded_at=_iso(it.get("recorded_at")),
+                meta=dict(it.get("meta") or {}),
+            ))
+        return len(self._docs)
+
+    def add(self, text: str, *, valid_at="", recorded_at="", id=None, meta=None) -> "TemporalDocumentRetriever":
+        self._docs.append(TemporalDoc(id=str(id or f"doc{len(self._docs)}"), text=text,
+                                      valid_at=_iso(valid_at), recorded_at=_iso(recorded_at), meta=meta or {}))
+        return self
+
+    # ── Okapi BM25 over a candidate view (IDF computed over the point-in-time corpus) ──
+    def _rank(self, query: str, candidates: list[TemporalDoc], k: int) -> list[tuple[TemporalDoc, float]]:
+        q = set(_doc_tokens(query))
+        if not q or not candidates:
+            return []
+        doc_toks = [_doc_tokens(d.text) for d in candidates]
+        n = len(candidates)
+        dls = [len(dt) for dt in doc_toks]
+        avgdl = (sum(dls) / n) or 1.0
+        df: dict[str, int] = {}
+        for dt in doc_toks:
+            for t in set(dt):
+                df[t] = df.get(t, 0) + 1
+        scored: list[tuple[TemporalDoc, float]] = []
+        for i, dt in enumerate(doc_toks):
+            tf: dict[str, int] = {}
+            for t in dt:
+                tf[t] = tf.get(t, 0) + 1
+            s = 0.0
+            for t in q:
+                f = tf.get(t, 0)
+                if f == 0:
+                    continue
+                idf = math.log(1 + (n - df[t] + 0.5) / (df[t] + 0.5))
+                s += idf * (f * (self._k1 + 1)) / (f + self._k1 * (1 - self._b + self._b * dls[i] / avgdl))
+            if s > 0:
+                scored.append((candidates[i], s))
+        scored.sort(key=lambda ds: ds[1], reverse=True)
+        return scored[:k]
+
+    def _hit(self, d: TemporalDoc, score: float) -> Hit:
+        return Hit(chunk_id=d.id, filename="temporal", text=d.text, score=round(score, 4),
+                   created_at=d.valid_at or None, source="temporal",
+                   meta={"valid_at": d.valid_at, "recorded_at": d.recorded_at, **d.meta})
+
+    # ── the RetrieverPlugin seam ──
+    def search(self, query: str, k: int = 5, method: Retrieval = "temporal") -> list[Hit]:
+        """Relevance over all turns (the current view); each hit carries its time axes for the answer."""
+        return [self._hit(d, s) for d, s in self._rank(query, self._docs, k)]
+
+    def as_of(self, query: str, k: int = 5, *, at, known_at=None) -> list[Hit]:
+        """Point-in-time: only turns valid at ``at`` (valid_at ≤ at) and, if given, known by
+        ``known_at`` (recorded_at ≤ known_at) — the bi-temporal view document retrieval can't give."""
+        at_s = _iso(at)
+        known_s = _iso(known_at) if known_at is not None else None
+        cands = [d for d in self._docs
+                 if d.valid_at <= at_s and (known_s is None or d.recorded_at <= known_s)]
+        return [self._hit(d, s) for d, s in self._rank(query, cands, k)]
+
+    def changes(self, query: str = "", *, since: str, until: str, k: int = 20) -> list[dict]:
+        """Turns that entered the record in ``[since, until)`` — "what came in, and when?"."""
+        qt = set(_doc_tokens(query))
+        out = []
+        for d in self._docs:
+            if since <= d.valid_at < until and (not qt or qt & set(_doc_tokens(d.text))):
+                out.append({"at": d.valid_at, "change": "recorded", "id": d.id, "text": d.text[:200]})
+        out.sort(key=lambda c: c["at"])
+        return out[:k]
+
+    def info(self) -> PluginInfo:
+        return PluginInfo(name="temporal-doc", kind="retriever",
+                          capabilities=frozenset({"temporal", "retrieval", "bm25", "point-in-time"}))
