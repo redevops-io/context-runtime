@@ -61,8 +61,9 @@ while the core does the domain work:
 | lifecycle | Listmonk | guide | redevops-rag |
 
 Plus **outreach-engine**, **growth-assistant**, and **agentic-privacy**, and the **control plane**
-(`agentic_os`: deploy / observe / approve, `/m/<app>` proxy + a module catalog). Eleven of these have
-the offline reward examples shown above; the rest are native realizations without a standalone tuner.
+(`agentic_os`: deploy / observe / approve, `/m/<app>` proxy + a module catalog). Most have the offline
+reward examples shown above (`examples/<app>.py`); the rest are native realizations without a
+standalone tuner.
 
 The **enterprise line** (`CR-enterprise`, v4) adds the commercial open-core layer that *composes with*
 this optimizer rather than replacing it: **Policy-Constrained Planning** — provider / budget / PII /
