@@ -1,4 +1,6 @@
-# Can better context management beat a better model?
+<!-- Detailed lab report. Synthesis: ../RESULTS.md · Article: https://redevops.io/blog/better-context-beats-more-context -->
+
+# Can better context management beat a better model? (nutrition corpus)
 
 **Dataset:** Russian nutrition-consultation corpus (private) — 107 documents → ~10k chunks,
 80 grok-generated grounded QA, hybrid retrieval over a BAAI/bge-m3 DuckDB store.

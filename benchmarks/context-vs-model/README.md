@@ -9,6 +9,16 @@ as the retrieval corpus gets polluted.
 The interesting outcome isn't "Model X wins." It's whether execution planning is becoming
 as important as the model.
 
+## Results
+
+**→ [`RESULTS.md`](./RESULTS.md)** — the headline synthesis, organized by the three lessons of the
+article [**"Better Context Beats More Context"**](https://redevops.io/blog/better-context-beats-more-context):
+(1) heavy infrastructure must earn its cost, (2) context quality beats context quantity, and
+(3) runtime orchestration still matters once context is large or polluted.
+
+Detailed lab reports in [`reports/`](./reports): the 3-regime routing study, the large-model
+(80–284B) replication with the LiveRAG polluted-context run, and the proprietary nutrition-corpus study.
+
 ## The experiment
 
 **Dataset — FinanceBench** (Patronus AI, public): 150 expert Q&A over 84 SEC 10-K/10-Q

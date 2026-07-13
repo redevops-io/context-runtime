@@ -3,6 +3,14 @@
 Every result below is produced by a runnable example in [`examples/`](./examples) — no
 invented numbers. Reproduce with `PYTHONPATH=. python examples/<name>.py`.
 
+> **Better Context Beats More Context** — the knowledge-aware routing study (3 graph regimes ×
+> 24B–284B models, SimGraph vs HippoRAG, and the LiveRAG polluted-context run) behind the
+> [article of the same name](https://redevops.io/blog/better-context-beats-more-context) lives in
+> [`benchmarks/context-vs-model/RESULTS.md`](./benchmarks/context-vs-model/RESULTS.md), organized by its
+> three lessons: heavy infrastructure must earn its cost, context quality beats quantity, and runtime
+> orchestration still matters at scale. Detailed lab reports in
+> [`benchmarks/context-vs-model/reports/`](./benchmarks/context-vs-model/reports).
+
 ---
 
 ## v1 → v2, measured in both runtimes (headline)
