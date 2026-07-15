@@ -43,6 +43,36 @@ installed).
 > **EXPLAIN** for the retrieval decision (see [Also shipped](#also-shipped)). See
 > [SPEC.md](./SPEC.md) §10 for the conformance checklist these tests assert against.
 
+## The agentic fleet (v4)
+
+The reward table above is the measured slice; the full **v4** fleet is **15 native agent services + a
+control plane**, mirrored from the live demo at **[demo.redevops.io](https://demo.redevops.io)**. Each
+service wraps a mature OSS core and exposes `/health`, a Material-3 dashboard, and its agent endpoints —
+the Context Runtime is the decision layer *inside* each (which context / tools / config per request),
+while the core does the domain work:
+
+| App | OSS core | App | OSS core |
+|---|---|---|---|
+| agentic-billing | Lago | market-radar | changedetection |
+| agentic-books | ERPNext | edge-sentinel (SOC) | CrowdSec |
+| agentic-support | Chatwoot | agentic-compliance | OpenSCAP |
+| agentic-crm | ERPNext (CRM) | control-tower | Metabase |
+| social-autopilot | Postiz | growth-engine | Umami |
+| lifecycle | Listmonk | guide | redevops-rag |
+
+Plus **outreach-engine** (Twenty CRM), and **growth-assistant** + **agentic-privacy** (both on ERPNext — leads / contacts, not books), and the **control plane**
+(`agentic_os`: deploy / observe / approve, `/m/<app>` proxy + a module catalog). Most have the offline
+reward examples shown above (`examples/<app>.py`); the rest are native realizations without a
+standalone tuner.
+
+The **enterprise line** (`CR-enterprise`, v4) adds the commercial open-core layer that *composes with*
+this optimizer rather than replacing it: **Policy-Constrained Planning** — provider / budget / PII /
+data-residency / mandatory-verification / human-approval predicates define the *feasible* plan set
+**before** the cost model ranks, so every execution can be proven within governance — and
+**Trust-Aware Execution**, a trust ledger built from operator acceptance / overrides / regenerations /
+grounded abstention, so the planner optimizes for the strategy operators will actually rely on. (v5
+apps — the mission-runtime line — are not released yet.)
+
 ## Install
 
 ```bash
