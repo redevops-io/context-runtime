@@ -951,15 +951,21 @@ def _make_reason_llm():
     return _reason
 
 
-def _maybe_diver_temporal():
+def _maybe_diver_temporal(tenant_id: str = ""):
     """The DIVER temporal RetrieverPlugin when CR_DIVER=1, else None. Import + construction are
     guarded: a deployment without the [rag] extra (sentence-transformers/bge) just gets no arm,
-    and HopRouterRetriever falls its `temporal` route back to single-hop."""
+    and HopRouterRetriever falls its `temporal` route back to single-hop.
+
+    When CR_DIVER_DB_DIR is set, each tenant's bge store persists to
+    ``<dir>/diver_<tenant>.duckdb`` — so a pre-built index survives restarts and the corpus is
+    embedded once, not on every boot (see DiverTemporalRetriever.index)."""
     if os.getenv("CR_DIVER", "").strip().lower() not in ("1", "true", "yes", "on"):
         return None
     try:
         from ..adapters.store_diver import DiverTemporalRetriever
-        return DiverTemporalRetriever(_make_reason_llm())
+        db_dir = os.getenv("CR_DIVER_DB_DIR", "").strip()
+        db_path = os.path.join(db_dir, f"diver_{tenant_id or 'default'}.duckdb") if db_dir else ":memory:"
+        return DiverTemporalRetriever(_make_reason_llm(), db_path=db_path)
     except Exception:
         return None
 
@@ -1218,7 +1224,7 @@ def _parse_tenants_spec(spec: str) -> list[tuple[str, str, str]]:
     return out
 
 
-def _build_lc_retriever(shards_spec: str = ""):
+def _build_lc_retriever(shards_spec: str = "", tenant_id: str = ""):
     """A fresh LibreChat retriever built the same way the single-tenant path builds `_lc_retriever`
     (hybrid→HopRouter base, optional coverage-routed shards, optional multimodal wrap) — one per
     tenant so each corpus is indexed independently."""
@@ -1237,7 +1243,7 @@ def _build_lc_retriever(shards_spec: str = ""):
             from ..adapters.store_router import HopRouterRetriever
             retr = HopRouterRetriever(single_hop=retr, graph=SimGraphRetriever([]),
                                       community=CommunityRetriever([]),
-                                      temporal=_maybe_diver_temporal())
+                                      temporal=_maybe_diver_temporal(tenant_id))
         except Exception:
             pass
     if shards_spec:
@@ -1297,7 +1303,7 @@ _tenants_spec = os.getenv("CR_TENANTS", "").strip()
 if _tenants_spec:
     _parsed = _parse_tenants_spec(_tenants_spec)
     for _tid, _cdir, _sspec in _parsed:
-        _t = _make_tenant(_build_lc_retriever(_sspec), tenant_id=_tid)
+        _t = _make_tenant(_build_lc_retriever(_sspec, tenant_id=_tid), tenant_id=_tid)
         if _cdir and os.path.isdir(_cdir):
             try:
                 _t.ingest(_cdir)   # single-corpus tenants index at startup; shards self-index

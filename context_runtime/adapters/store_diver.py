@@ -59,6 +59,12 @@ class DiverTemporalRetriever:
     def index(self, path: str) -> dict[str, Any]:
         from redevops_rag.ingest import ingest as _ingest
 
+        # A persisted DuckDB store (db_path is a file) survives restarts: skip the expensive bge
+        # embed when it is already populated, and only rebuild the (cheap) in-process FTS index.
+        # This is what keeps a warm, pre-built index from re-embedding a large corpus every boot.
+        if self._store.count() > 0:
+            self._store.reindex_fts()
+            return {"reused_chunks": self._store.count()}
         res = _ingest(self._store, self._embedder, path)
         self._store.reindex_fts()
         n = self._store.count()
