@@ -1,5 +1,11 @@
 # Results — Better Context Beats More Context
 
+> **Deep-dive appendix.** The single source of truth for all Context Runtime benchmarks is
+> [`BENCHMARKS.md`](../../BENCHMARKS.md) (the capability ladder + a drill-down per version). This
+> file is the **v4 lab report** it links to — the full *Better Context Beats More Context* study
+> with per-model tables, CIs, and the nutrition-corpus rescue. Start at `BENCHMARKS.md`; come here
+> for depth.
+
 The benchmark results behind the article
 [**"Better Context Beats More Context"**](https://redevops.io/blog/better-context-beats-more-context).
 
