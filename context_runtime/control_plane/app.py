@@ -964,7 +964,10 @@ def _maybe_diver_temporal(tenant_id: str = ""):
     try:
         from ..adapters.store_diver import DiverTemporalRetriever
         db_dir = os.getenv("CR_DIVER_DB_DIR", "").strip()
-        db_path = os.path.join(db_dir, f"diver_{tenant_id or 'default'}.duckdb") if db_dir else ":memory:"
+        db_path = ":memory:"
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)   # DuckDB won't create a missing parent dir
+            db_path = os.path.join(db_dir, f"diver_{tenant_id or 'default'}.duckdb")
         return DiverTemporalRetriever(_make_reason_llm(), db_path=db_path)
     except Exception:
         return None
