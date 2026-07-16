@@ -14,7 +14,7 @@ dependencies = [
 # Real model transport across 100+ providers (the ModelPlugin binding).
 litellm = ["litellm>=1.40"]
 # Single-hop hybrid retrieval (DuckDB vector + BM25 + RRF + rerank).
-rag = ["redevops-rag @ git+https://github.com/redevops-io/redevops-rag.git"]
+rag = ["redevops-rag @ git+https://github.com/redevops-io/redevops-rag.git@6e50d6db262135f9fa51f8c5cbc9be4b8952179b"]
 # Multi-hop graph retrieval (knowledge graph + Personalized PageRank).
 hipporag = ["hipporag @ git+https://github.com/redevops-io/HippoRAG.git"]
 # Bi-temporal graph retrieval (the `temporal` method) — real Graphiti KG over Neo4j.

@@ -921,6 +921,49 @@ def vibex_scoreboard() -> dict:
 # ──────────────────────────── LibreChat — self-learning retrieval (LLM-judged) ────────────────────────────
 from ..integrations.librechat import LibreChatTenant   # noqa: E402
 
+# ── DIVER temporal-reasoning arm (opt-in, CR_DIVER=1) ─────────────────────────────────────
+# redevops-rag's diver_search wired as the HopRouter `temporal` slot: query-expand → hybrid →
+# listwise rerank, driven by the reasoning upstream (KIMI). Needs the [rag] extra
+# (sentence-transformers + a bge model); guarded so a deployment without it simply has no arm.
+def _make_reason_llm():
+    """reason_llm(system, user) -> str bound to the reasoning upstream (KIMI/CR_UPSTREAM_*).
+    None when no upstream is configured, so DIVER degrades to plain hybrid."""
+    base = os.getenv("CR_UPSTREAM_BASE_URL", "").rstrip("/")
+    if not base:
+        return None
+    model = os.getenv("CR_DIVER_MODEL") or os.getenv("CR_UPSTREAM_MODEL", "") or "default"
+
+    def _reason(system: str, user: str) -> str:
+        try:
+            import httpx
+            headers = {"Content-Type": "application/json"}
+            if k := os.getenv("CR_UPSTREAM_API_KEY"):
+                headers["Authorization"] = f"Bearer {k}"
+            r = httpx.post(base + "/chat/completions", timeout=180, headers=headers, json={
+                "model": model,
+                "messages": [{"role": "system", "content": system},
+                             {"role": "user", "content": user}],
+                "max_tokens": int(os.getenv("CR_DIVER_MAX_TOKENS", "4096")),
+                "temperature": float(os.getenv("CR_UPSTREAM_TEMPERATURE", "1"))})
+            return (r.json()["choices"][0]["message"]["content"] or "").strip()
+        except Exception:
+            return ""
+    return _reason
+
+
+def _maybe_diver_temporal():
+    """The DIVER temporal RetrieverPlugin when CR_DIVER=1, else None. Import + construction are
+    guarded: a deployment without the [rag] extra (sentence-transformers/bge) just gets no arm,
+    and HopRouterRetriever falls its `temporal` route back to single-hop."""
+    if os.getenv("CR_DIVER", "").strip().lower() not in ("1", "true", "yes", "on"):
+        return None
+    try:
+        from ..adapters.store_diver import DiverTemporalRetriever
+        return DiverTemporalRetriever(_make_reason_llm())
+    except Exception:
+        return None
+
+
 # Opt into deterministic semantic retrieval (embeddings ⊕ BM25) when CR_EMBEDDINGS=1 and
 # the [embeddings] extra is installed — otherwise pure BM25. Embedding the corpus at index
 # time is costly, so it's opt-in.
@@ -943,7 +986,8 @@ if _lc_retriever is not None:
         from ..adapters.store_router import HopRouterRetriever
         _lc_retriever = HopRouterRetriever(single_hop=_lc_retriever,
                                            graph=SimGraphRetriever([]),
-                                           community=CommunityRetriever([]))
+                                           community=CommunityRetriever([]),
+                                           temporal=_maybe_diver_temporal())
     except Exception:
         pass  # keep the plain hybrid retriever if graph/community can't load
 
@@ -1069,6 +1113,7 @@ def _flag(name: str) -> bool:
 # bandit gets an `image` arm and the planner decides when visual retrieval is worth paying for.
 from ..integrations.librechat import DEFAULT_STRATEGIES as _BASE_STRATEGIES  # noqa: E402
 from ..integrations.librechat import IMAGE_STRATEGY as _IMAGE_STRATEGY  # noqa: E402
+from ..integrations.librechat import TEMPORAL_STRATEGY as _TEMPORAL_STRATEGY  # noqa: E402
 
 _lc_strategies = _BASE_STRATEGIES
 if _flag("CR_MULTIMODAL"):
@@ -1076,7 +1121,9 @@ if _flag("CR_MULTIMODAL"):
     from ..adapters.store_inmemory import InMemoryStore as _InMem
     from ..adapters.store_multimodal import MultimodalRetriever
     _lc_retriever = MultimodalRetriever(text=_lc_retriever or _InMem([]), image=ImageRetriever())
-    _lc_strategies = _BASE_STRATEGIES + (_IMAGE_STRATEGY,)   # give the bandit the image arm
+    _lc_strategies = _lc_strategies + (_IMAGE_STRATEGY,)    # give the bandit the image arm
+if _flag("CR_DIVER"):
+    _lc_strategies = _lc_strategies + (_TEMPORAL_STRATEGY,)  # give the bandit the DIVER temporal arm
 
 
 # ── DSpark-inspired opt-in: score calibration + load-aware depth (all default-off) ──
@@ -1189,7 +1236,8 @@ def _build_lc_retriever(shards_spec: str = ""):
             from ..adapters.store_hipporag import SimGraphRetriever
             from ..adapters.store_router import HopRouterRetriever
             retr = HopRouterRetriever(single_hop=retr, graph=SimGraphRetriever([]),
-                                      community=CommunityRetriever([]))
+                                      community=CommunityRetriever([]),
+                                      temporal=_maybe_diver_temporal())
         except Exception:
             pass
     if shards_spec:
