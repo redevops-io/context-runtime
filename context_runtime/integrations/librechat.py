@@ -42,7 +42,7 @@ class RetrievalStrategy:
 
     def cost_units(self) -> float:
         # deeper retrieval + a rerank pass cost more; the frontier is cheapest-good-enough.
-        extra = 0.4 if self.method == "graph" else (0.3 if self.method == "community" else 0.0)
+        extra = {"graph": 0.4, "community": 0.3, "temporal": 0.9}.get(self.method, 0.0)
         return self.final_k / 5.0 + (0.8 if self.rerank else 0.0) + extra
 
 
@@ -64,8 +64,15 @@ COLPALI_STRATEGY = RetrievalStrategy("colpali", 5, False)
 VIDEO_STRATEGY = RetrievalStrategy("video", 5, False)
 MODALITY_METHODS = ("image", "colpali", "video")   # non-text arms, dynamically shown in compare()
 
-# The retrieval methods the transparency view (compare()) runs side-by-side. Modality methods are
-# appended dynamically in compare() only for the arms the tenant actually has.
+# DIVER temporal-reasoning arm — added to a tenant's strategy set only when the temporal store is
+# wired (CR_DIVER). It is the priciest arm (LLM query-expansion + listwise rerank), so the
+# cost-based planner spends it only on the reasoning-intensive / temporal queries where it beats
+# hybrid. Its "temporal" route resolves to the redevops-rag DIVER retriever (store_diver).
+TEMPORAL_STRATEGY = RetrievalStrategy("temporal", 8, False)
+REASONING_METHODS = ("temporal",)   # reasoning/temporal arms, dynamically shown in compare()
+
+# The retrieval methods the transparency view (compare()) runs side-by-side. Modality + reasoning
+# methods are appended dynamically in compare() only for the arms the tenant actually has.
 COMPARE_METHODS = ("bm25", "vector", "hybrid", "community", "graph")
 
 COST_LAMBDA = 0.15   # how much retrieval cost trades against judged quality
@@ -365,6 +372,7 @@ class LibreChatTenant:
         methods = list(COMPARE_METHODS)
         arms = {s.method for s in self.strategies}
         methods += [m for m in MODALITY_METHODS if m in arms]
+        methods += [m for m in REASONING_METHODS if m in arms]
         per: dict[str, list[dict]] = {}
         for m in methods:
             try:
@@ -455,6 +463,7 @@ class LibreChatTenant:
         methods = list(COMPARE_METHODS)
         arms = {s.method for s in self.strategies}
         methods += [m for m in MODALITY_METHODS if m in arms]
+        methods += [m for m in REASONING_METHODS if m in arms]
         retrieval: dict[str, list[dict]] = {}
         for m in methods:
             try:
