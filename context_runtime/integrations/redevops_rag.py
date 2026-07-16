@@ -37,12 +37,15 @@ class RetrievalConfig:
     keyword_boost_per_term: float = 0.05
     keyword_boost_cap: float = 1.5
     rerank: bool = False                # the expensive cross-encoder stage
+    diver: bool = False                 # the DIVER+ReasonIR temporal reasoning arm
+                                        # (LLM query-expansion + listwise rerank; strong
+                                        # on reasoning-intensive/temporal queries, dear)
 
     @property
     def key(self) -> str:
         return (f"p{self.pool}:k{self.limit}:vt{self.vector_threshold}:"
                 f"hl{self.recency_half_life_days:g}:kb{self.keyword_boost_per_term:g}:"
-                f"{'rr' if self.rerank else 'norr'}")
+                f"{'diver' if self.diver else ('rr' if self.rerank else 'norr')}")
 
     def kwargs(self) -> dict:
         """The keyword args to hand redevops-rag's ``hybrid_search``."""
@@ -53,9 +56,10 @@ class RetrievalConfig:
             "keyword_boost_cap": self.keyword_boost_cap,
         }
 
-    # rough relative cost of running this config (latency proxy: pool size + rerank)
+    # rough relative cost of running this config (latency proxy: pool size + rerank +
+    # DIVER's extra LLM calls for query expansion and listwise reranking)
     def cost_units(self) -> float:
-        return self.pool / 50.0 + (1.5 if self.rerank else 0.0)
+        return self.pool / 50.0 + (1.5 if self.rerank else 0.0) + (3.0 if self.diver else 0.0)
 
 
 # A small, sensible arm set spanning cheap→thorough. Tune/extend per corpus.
@@ -65,6 +69,7 @@ DEFAULT_ARMS: tuple[RetrievalConfig, ...] = (
     RetrievalConfig(pool=50, limit=8, vector_threshold=0.3, rerank=True),    # thorough + rerank
     RetrievalConfig(pool=100, limit=12, vector_threshold=0.3, rerank=True),  # max recall
     RetrievalConfig(pool=30, limit=8, recency_half_life_days=14.0, rerank=False),  # recency-biased
+    RetrievalConfig(pool=25, limit=8, diver=True),  # DIVER+ReasonIR temporal reasoning arm
 )
 
 COST_LAMBDA = 0.15   # how much efficiency (cheapness) trades against quality in the reward
@@ -109,10 +114,11 @@ class ContextRuntimeRetrieverTuner:
     """
 
     def __init__(self, rag=None, runtime: ContextRuntime | None = None,
-                 bandit: EpsilonGreedyBandit | None = None):
+                 bandit: EpsilonGreedyBandit | None = None, reason_llm=None):
         self.rag = rag                                  # redevops_rag.RAG (or None offline)
         self.runtime = runtime or ContextRuntime.default([])
         self.bandit = bandit or _rag_bandit()
+        self.reason_llm = reason_llm                    # callable(system,user)->str; enables the DIVER arm
         self._pending: dict[str, tuple[Plan, RetrievalConfig]] = {}
 
     def choose(self, query: str) -> RetrievalConfig:
@@ -128,8 +134,14 @@ class ContextRuntimeRetrieverTuner:
         cfg = self.choose(query)
         if self.rag is None:
             raise RuntimeError("no RAG bound — install 'context_runtime[rag]' and pass rag=RAG(...)")
-        from redevops_rag.retrieve import hybrid_search  # type: ignore
         reranker = getattr(self.rag, "reranker", None) if cfg.rerank else None
+        # DIVER arm: the merged ReasonIR+DIVER temporal reasoning retriever (needs reason_llm;
+        # falls back to hybrid on cold start so the arm is always safe to select).
+        if cfg.diver and self.reason_llm is not None:
+            from redevops_rag.retrieve import diver_search  # type: ignore
+            return diver_search(self.rag.store, query, self.reason_llm,
+                                limit=cfg.limit, pool=cfg.pool, reranker=reranker)
+        from redevops_rag.retrieve import hybrid_search  # type: ignore
         return hybrid_search(self.rag.store, query, reranker=reranker, **cfg.kwargs())
 
     def record_outcome(self, query: str, *, quality: float | None = None,
