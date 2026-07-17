@@ -47,11 +47,18 @@ class DiverTemporalRetriever:
                  db_path: str = ":memory:") -> None:
         # Lazy imports: redevops-rag (sentence-transformers/torch) is an opt-in [rag] extra,
         # so importing this module must not require it — only constructing the arm does.
-        from redevops_rag.embed import Embedder
+        import os
+
+        from redevops_rag.embed import make_embedder
         from redevops_rag.store import Store
         from redevops_rag.temporal import TemporalReasoningRetriever
 
-        self._embedder = Embedder(embed_model)          # bge-small-en by default
+        # Encoder is backend-selectable (REDEVOPS_RAG_EMBED_BACKEND, or CR_NEMOTRON=1 → nemotron): bge
+        # by default, Nemotron-3-Embed-8B when flagged — so DIVER can be benched over either encoder.
+        # embed_model only overrides the bge model name (Nemotron is picked by URL/env, not model path).
+        _backend = os.environ.get("REDEVOPS_RAG_EMBED_BACKEND", "bge").strip().lower()
+        self._embedder = (make_embedder("bge", model_name=embed_model)
+                          if _backend == "bge" and embed_model else make_embedder(_backend))
         self._store = Store(self._embedder, db_path)
         self._plug = TemporalReasoningRetriever(reason_llm, pool=pool, n_subqueries=n_subqueries)
 

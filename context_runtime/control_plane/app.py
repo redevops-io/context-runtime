@@ -921,6 +921,15 @@ def vibex_scoreboard() -> dict:
 # ──────────────────────────── LibreChat — self-learning retrieval (LLM-judged) ────────────────────────────
 from ..integrations.librechat import LibreChatTenant   # noqa: E402
 
+# ── Nemotron embedding arm (opt-in, CR_NEMOTRON=1) ────────────────────────────────────────
+# Nemotron-3-Embed-8B (RTEB #1, 4096-d) as the vector encoder, served over an OpenAI-compatible
+# /v1/embeddings endpoint (NIM/vLLM on GPU). CR_NEMOTRON=1 is the friendly switch — normalize it to
+# the redevops-rag backend var so BOTH encoder arms agree: the DIVER arm (store_diver → make_embedder,
+# reads REDEVOPS_RAG_EMBED_BACKEND) and the vector/hybrid arm (store_semantic._nemotron_selected).
+# Opt-in + heavier than the cheap bge default — enable it to A/B, not blindly (see benchmarks/eval_embedders.py).
+if os.getenv("CR_NEMOTRON", "").strip().lower() in ("1", "true", "yes", "on"):
+    os.environ.setdefault("REDEVOPS_RAG_EMBED_BACKEND", "nemotron")
+
 # ── DIVER temporal-reasoning arm (opt-in, CR_DIVER=1) ─────────────────────────────────────
 # redevops-rag's diver_search wired as the HopRouter `temporal` slot: query-expand → hybrid →
 # listwise rerank, driven by the reasoning upstream (KIMI). Needs the [rag] extra
