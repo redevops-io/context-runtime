@@ -71,6 +71,10 @@ class OpenAICompatibleModel:
         payload: dict = {"model": tier.model, "messages": messages, tok_key: req.max_tokens}
         if req.tools:
             payload["tools"] = list(req.tools)
+        # Generation-strategy thinking toggle: reasoning models (Qwen/Nemotron) read
+        # chat_template_kwargs.enable_thinking; harmless to others that ignore unknown extras.
+        if req.thinking is not None:
+            payload["chat_template_kwargs"] = {"enable_thinking": bool(req.thinking)}
         request = urllib.request.Request(
             tier.base_url + "/chat/completions",
             data=json.dumps(payload).encode(),

@@ -164,10 +164,17 @@ class ContextRuntime:
         tb.span("retrieve", "retrieve", {"hits": len(ctx.hits), "tokens": ctx.token_budget.get("compress", 0)},
                 t0, traces.now())
 
-        # reason (Reasoner → Router → Model)
+        # reason (Reasoner → Router → Model). Dispatch by the plan's generation strategy: `single_shot`
+        # keeps the legacy reasoner byte-for-byte; the generation-strategy arms route to StrategyReasoner.
         tier = ctx.plan.chosen.model_tier
         model = self.models.get(tier) or next(iter(self.models.values()))
-        reasoner = SingleShotReasoner(model)
+        _rstep = next((s for s in ctx.plan.chosen.steps if s.type == "reason"), None)
+        _strat = (_rstep.params.get("strategy") if _rstep else None) or "single_shot"
+        if _strat == "single_shot":
+            reasoner = SingleShotReasoner(model)
+        else:
+            from ..reasoner.strategy_reasoner import StrategyReasoner
+            reasoner = StrategyReasoner(model, _strat)
         t1 = traces.now()
         result = reasoner.reason(ReasonRequest(context=ctx, capability="synthesis",
                                                constraints=(goal.constraints if goal else Constraints())))

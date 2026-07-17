@@ -6,6 +6,7 @@ the survivors.
 """
 from __future__ import annotations
 
+from ..reasoner import strategies as genstrat
 from ..types import Candidate, Goal, Intent, PluginInfo, StepSpec
 from . import representations, rules
 
@@ -45,20 +46,30 @@ class RuleCandidateGenerator:
         # citations are checked by the verify step, so requiring them implies verify
         require_verify = want_verify or c.require_verification or c.require_citations
 
+        # Generation-strategy layer (CR_GENSTRATEGY): the `reason` step becomes a bandit arm too — one
+        # candidate per (method × tier × generation strategy), the strategies seeded per intent bucket.
+        # Off → the single legacy strategy from BUCKET_DEFAULTS, so plans are byte-identical to before.
+        gen_strats = genstrat.strategies_for(intent.bucket) if genstrat.enabled() else (strategy,)
+
         out: list[Candidate] = []
         for method in methods:
             for tier in tiers:
-                steps: list[StepSpec] = [
-                    StepSpec("retrieve", {"method": method, "top_k": self.default_top_k}),
-                ]
-                if method in ("hybrid", "vector", "code"):
-                    steps.append(StepSpec("rerank", {"final_k": self.final_k}))
-                steps.append(StepSpec("compress", {"target_tokens": self.target_tokens}))
-                steps.append(StepSpec("route", {"tier": tier}))
-                steps.append(StepSpec("reason", {"strategy": strategy, "capability": "synthesis"}))
-                if require_verify:
-                    steps.append(StepSpec("verify", {"method": "citation"}))
-                out.append(Candidate(steps=tuple(steps), model_tier=tier))
+                for gstrat in gen_strats:
+                    steps: list[StepSpec] = [
+                        StepSpec("retrieve", {"method": method, "top_k": self.default_top_k}),
+                    ]
+                    if method in ("hybrid", "vector", "code"):
+                        steps.append(StepSpec("rerank", {"final_k": self.final_k}))
+                    steps.append(StepSpec("compress", {"target_tokens": self.target_tokens}))
+                    steps.append(StepSpec("route", {"tier": tier}))
+                    reason_params = {"strategy": gstrat, "capability": "synthesis"}
+                    if genstrat.enabled():
+                        gs = genstrat.get(gstrat)
+                        reason_params.update(thinking=gs.thinking, max_tokens=gs.max_tokens)
+                    steps.append(StepSpec("reason", reason_params))
+                    if require_verify:
+                        steps.append(StepSpec("verify", {"method": "citation"}))
+                    out.append(Candidate(steps=tuple(steps), model_tier=tier))
         return out
 
     def prune(self, candidates: list[Candidate], goal: Goal) -> list[Candidate]:
