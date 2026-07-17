@@ -43,7 +43,7 @@ def render_explain(exp: dict) -> str:
     # ── generation strategy (the answer plane) ──
     gen = exp.get("generation")
     if gen and gen.get("enabled"):
-        out.append(_section(f"generation — strategy ladder for {gen['bucket']} (learned)"))
+        out.append(_section(f"reasoning — strategy ladder for {gen['bucket']} (learned)"))
         for i, c in enumerate(gen["candidates"]):
             mark = "►" if c.get("entry_point") else " "
             b = c["bandit"]
@@ -51,6 +51,15 @@ def render_explain(exp: dict) -> str:
             entry = "  ← entry point" if c.get("entry_point") else ""
             out.append(f"  {mark} {c['strategy']:<12} {think} · {c['max_tokens']}t · cost≈{c['cost_units']:.1f}"
                        f"   reward {b['value']:.3f} (n={b['n']}){entry}")
+        extras = []
+        if gen.get("verify_offered"):
+            extras.append("self-check + retry variant offered (Verification Optimizer)")
+        if gen.get("competent_model"):
+            comp = gen.get("model_competence") or {}
+            ranked = ", ".join(f"{m} {a:.2f}" for m, a in sorted(comp.items(), key=lambda kv: -kv[1]))
+            extras.append(f"model competence — best: {gen['competent_model']} ({ranked})")
+        for e in extras:
+            out.append(f"      └ {e}")
     elif gen is not None:
         out.append(_section("generation"))
         out.append(f"  {gen.get('note', 'legacy single_shot')}")

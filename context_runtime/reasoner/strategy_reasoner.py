@@ -17,11 +17,12 @@ from . import strategies
 
 
 class StrategyReasoner:
-    def __init__(self, model: ModelPlugin, strategy: str = "reason"):
+    def __init__(self, model: ModelPlugin, strategy: str = "reason", *, verify: bool = False):
         self.model = model
         self.strategy = strategies.get(strategy)
+        self.verify = verify
 
-    def reason(self, req: ReasonRequest) -> ModelResult:
+    def _one(self, req: ReasonRequest) -> ModelResult:
         s = self.strategy
         ctx = req.context
         question = ctx.plan.intent.normalized or ctx.plan.id
@@ -40,6 +41,21 @@ class StrategyReasoner:
             res = replace(res, models_used=(res.model,))
         return res
 
+    def reason(self, req: ReasonRequest) -> ModelResult:
+        res = self._one(req)
+        # Verification Optimizer: self-check the answer's grounding; if it's weak, retry once and keep
+        # the better attempt. This is the "self-check · retry" the runtime learns to spend on per class.
+        if self.verify:
+            from .verify import faithfulness
+            ctx_text = req.context.assembled_text
+            f0 = faithfulness(res.text, ctx_text)
+            if f0 < strategies.VERIFY_FAITHFULNESS_MIN:
+                retry = self._one(req)
+                if faithfulness(retry.text, ctx_text) > f0:
+                    res = retry
+        return res
+
     def info(self) -> PluginInfo:
-        return PluginInfo(name=f"strategy:{self.strategy.name}", kind="reasoner",
-                          capabilities=frozenset({"single_shot", self.strategy.name}))
+        caps = {"single_shot", self.strategy.name} | ({"verify"} if self.verify else set())
+        return PluginInfo(name=f"strategy:{self.strategy.name}{'+v' if self.verify else ''}",
+                          kind="reasoner", capabilities=frozenset(caps))

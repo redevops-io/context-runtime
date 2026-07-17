@@ -1,14 +1,17 @@
-"""Generation-strategy registry — the answer-plane arms (SPEC §4.4, generation-strategy layer).
+"""Reasoning-strategy registry — the Reasoning Plane's arms (SPEC §4.4).
 
-Producing an answer from retrieved context is not one fixed prompt; it is a choice among
-*strategies*, each a (system prompt, thinking flag, token budget, cost prior) bundle. The planner
-treats the choice as another bandit arm keyed by intent — the same self-optimization it already runs
-for retrieval — so one intent classification drives two decisions (retrieval method + generation
-strategy). This module holds the strategy definitions and the per-intent warm-start priors; the
-bandit refines them from measured reward (Phase 2).
+Once retrieval quality passes a threshold, the dominant error shifts from *missing knowledge* to
+*imperfect reasoning over correctly retrieved knowledge* — retrieval optimization and reasoning
+optimization are distinct problems. So reasoning over the assembled context is not one fixed prompt;
+it is a choice among *strategies*, each a (system prompt, thinking flag, token budget, cost prior)
+bundle. The planner treats the choice as another bandit arm keyed by intent (mission class) — the same
+self-optimization it runs for retrieval — so one classification drives two decisions (retrieval method
++ reasoning strategy). What the runtime learns here are **execution policies**, not answers ("this
+class needs decomposition; that model succeeds on this class; self-verification pays off here").
 
-Opt-in: only wired when CR_GENSTRATEGY is set (see planner.candidates); otherwise the planner keeps
-emitting the legacy ``single_shot`` reason step and nothing here is used.
+This module holds the strategy definitions and the per-mission-class warm-start priors; the bandit
+refines them from measured reward (Phase 2). Opt-in: only wired when CR_GENSTRATEGY is set (see
+planner.candidates); otherwise the planner keeps the legacy ``single_shot`` reason step.
 """
 from __future__ import annotations
 
@@ -96,6 +99,15 @@ DATASET_BUCKET = {"popqa": "exact_lookup", "musique": "multi_hop",
 # the bench names the cheapest arm `direct`; CR calls it `terse`.
 _BENCH_ALIAS = {"direct": "terse"}
 
+# ── Verification Optimizer (Phase 4) ──
+# Mission classes where a SELF-CHECKED variant of each strategy (verify the answer, retry once if it
+# fails the check) is ALSO offered as a distinct arm. The bandit then learns, per class, whether the
+# self-check pays off net of its extra cost — verification becomes a learned decision, not always-on.
+# Seeded to correctness-sensitive / error-costly classes; refined online like everything else.
+VERIFY_BUCKETS = frozenset({"high_risk", "sensitive", "incident", "multi_hop", "temporal"})
+VERIFY_FAITHFULNESS_MIN = 0.5   # first attempt below this faithfulness → one retry
+VERIFY_COST_MULT = 2.0          # a verified arm's cost prior ≈ generate + check (+ maybe regenerate)
+
 
 def enabled() -> bool:
     """Generation-strategy layer is opt-in via CR_GENSTRATEGY (mirrors CR_DIVER / CR_NEMOTRON)."""
@@ -104,6 +116,11 @@ def enabled() -> bool:
 
 def strategies_for(bucket: str) -> tuple[str, ...]:
     return _ACTIVE_PRIORS.get(bucket, DEFAULT_STRATEGIES)
+
+
+def offers_verify(bucket: str) -> bool:
+    """Whether to also offer self-checked (verify+retry) variants for this mission class."""
+    return enabled() and bucket in VERIFY_BUCKETS
 
 
 def set_priors(priors: dict) -> None:
@@ -117,12 +134,17 @@ def set_priors(priors: dict) -> None:
 
 
 def load_priors(path: str) -> dict:
-    """Load a compact ``{bucket: [strategies]}`` priors file (written by benchmarks/build_priors.py)
-    and apply it. Returns the applied mapping."""
+    """Load + apply a priors file written by benchmarks/build_priors.py. Two shapes are accepted:
+    the compact ``{bucket: [strategies]}`` map, or the richer ``{"strategies": {...},
+    "model_competence": {...}}``. Returns the parsed object."""
     import json
-    priors = json.load(open(path))
-    set_priors(priors)
-    return priors
+    data = json.load(open(path))
+    if isinstance(data, dict) and ("strategies" in data or "model_competence" in data):
+        set_priors(data.get("strategies") or {})
+        set_model_competence(data.get("model_competence") or {})
+    else:
+        set_priors(data)
+    return data
 
 
 def priors_from_ablation(results_dir: str, *, dataset_bucket: dict | None = None,
@@ -158,6 +180,47 @@ def priors_from_ablation(results_dir: str, *, dataset_bucket: dict | None = None
     return priors
 
 
+# ── Model competence (Phase 5) — "bigger ≠ better", learned per mission class ──
+# The reasoning arm already includes the model tier (see optimizer.plan_key), so the bandit learns
+# model competence per class ONLINE. This is its warm start + its transparency: which model actually
+# succeeds on which mission class, measured at oracle context (generation isolated from retrieval).
+_MODEL_COMPETENCE: dict[str, dict[str, float]] = {}
+
+
+def model_competence_from_ablation(results_dir: str, *, dataset_bucket: dict | None = None,
+                                   cond: str = "oracle") -> dict:
+    """``{bucket: {model: mean_acc}}`` from the eval_cube2 cells — the measured 'DeepSeek here, Qwen
+    there' signal. A model that over-abstains on a class shows a low number here and is routed around."""
+    import glob
+    import json
+
+    dataset_bucket = dataset_bucket or DATASET_BUCKET
+    agg: dict[str, dict[str, list]] = {}
+    for f in glob.glob(os.path.join(results_dir, "*.json")):
+        try:
+            cell = json.load(open(f))
+        except Exception:  # noqa: BLE001
+            continue
+        bucket = dataset_bucket.get(cell.get("dataset"))
+        model = cell.get("model")
+        acc = cell.get(f"acc_{cond}")
+        if not bucket or not model or acc is None:
+            continue
+        agg.setdefault(bucket, {}).setdefault(model, []).append(float(acc))
+    return {b: {m: round(sum(v) / len(v), 4) for m, v in per.items()} for b, per in agg.items()}
+
+
+def set_model_competence(comp: dict) -> None:
+    _MODEL_COMPETENCE.clear()
+    _MODEL_COMPETENCE.update({b: dict(m) for b, m in (comp or {}).items()})
+
+
+def competent_model(bucket: str) -> str | None:
+    """The best-measured model for a mission class (None if unknown) — the warm-start model pick."""
+    comp = _MODEL_COMPETENCE.get(bucket)
+    return max(comp, key=comp.get) if comp else None
+
+
 def get(name: str) -> GenerationStrategy:
     return STRATEGIES.get(name) or STRATEGIES["single_shot"]
 
@@ -185,7 +248,10 @@ def explain_block(bucket: str, *, method: str = "", tier: str = "", bandit=None)
         cands.append({"strategy": name, "thinking": spec.thinking, "max_tokens": spec.max_tokens,
                       "cost_units": spec.cost_units, "entry_point": i == 0,
                       "bandit": {"n": int(n), "value": round(float(val), 4)}})
-    return {"enabled": True, "bucket": bucket, "ladder": list(ladder), "candidates": cands}
+    return {"enabled": True, "bucket": bucket, "ladder": list(ladder), "candidates": cands,
+            "verify_offered": bucket in VERIFY_BUCKETS,
+            "model_competence": _MODEL_COMPETENCE.get(bucket),
+            "competent_model": competent_model(bucket)}
 
 
 def extract_final(text: str) -> str:

@@ -60,7 +60,7 @@ def test_render_explain_includes_the_generation_section(monkeypatch):
     monkeypatch.setenv("CR_GENSTRATEGY", "1")
     gen = gs.explain_block("multi_hop", method="hybrid", tier="cheap")
     text = render_explain(_min_exp(gen))
-    assert "generation — strategy ladder for multi_hop" in text
+    assert "reasoning — strategy ladder for multi_hop" in text
     assert "decompose" in text and "reason" in text
     assert "entry point" in text
 

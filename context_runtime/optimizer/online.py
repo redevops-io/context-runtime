@@ -42,9 +42,12 @@ def plan_key(candidate: Candidate) -> str:
     (anything but the legacy ``single_shot``), so existing arms keep their exact keys and learned
     values when CR_GENSTRATEGY is off."""
     method = next((s.params.get("method", "") for s in candidate.steps if s.type == "retrieve"), "")
-    strat = next((s.params.get("strategy", "") for s in candidate.steps if s.type == "reason"), "")
+    rstep = next((s for s in candidate.steps if s.type == "reason"), None)
+    strat = (rstep.params.get("strategy", "") if rstep else "")
     if strat and strat != "single_shot":
-        return f"{method}:{strat}:{candidate.model_tier}"
+        # a self-checked variant is a distinct arm (+v), so the bandit learns where verification pays off
+        seg = strat + ("+v" if rstep and rstep.params.get("verify") else "")
+        return f"{method}:{seg}:{candidate.model_tier}"
     return f"{method}:{candidate.model_tier}"
 
 
