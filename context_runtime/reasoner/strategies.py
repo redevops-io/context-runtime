@@ -86,6 +86,16 @@ BUCKET_STRATEGIES: dict[str, tuple[str, ...]] = {
 
 DEFAULT_STRATEGIES = ("reason",)
 
+# The ACTIVE ladders. Defaults to the hand-seeded priors above; a deployment overrides them from the
+# benchmark via load_priors / CR_GENSTRATEGY_PRIORS so the warm start is measured, not guessed.
+_ACTIVE_PRIORS: dict[str, tuple[str, ...]] = dict(BUCKET_STRATEGIES)
+
+# eval_cube2 datasets → intent buckets (the ablation's regime → CR's classifier bucket).
+DATASET_BUCKET = {"popqa": "exact_lookup", "musique": "multi_hop",
+                  "longmemeval": "temporal", "tempo": "temporal", "nutrition": "conceptual"}
+# the bench names the cheapest arm `direct`; CR calls it `terse`.
+_BENCH_ALIAS = {"direct": "terse"}
+
 
 def enabled() -> bool:
     """Generation-strategy layer is opt-in via CR_GENSTRATEGY (mirrors CR_DIVER / CR_NEMOTRON)."""
@@ -93,7 +103,59 @@ def enabled() -> bool:
 
 
 def strategies_for(bucket: str) -> tuple[str, ...]:
-    return BUCKET_STRATEGIES.get(bucket, DEFAULT_STRATEGIES)
+    return _ACTIVE_PRIORS.get(bucket, DEFAULT_STRATEGIES)
+
+
+def set_priors(priors: dict) -> None:
+    """Override the active strategy ladders (from a measured ablation). Unknown strategies are dropped;
+    each ladder is re-ordered cheapest-capable first so index 0 stays the escalation entry point."""
+    for bucket, strats in (priors or {}).items():
+        clean = [_BENCH_ALIAS.get(s, s) for s in strats]
+        clean = [s for s in dict.fromkeys(clean) if s in STRATEGIES]
+        if clean:
+            _ACTIVE_PRIORS[bucket] = tuple(sorted(clean, key=lambda s: get(s).cost_units))
+
+
+def load_priors(path: str) -> dict:
+    """Load a compact ``{bucket: [strategies]}`` priors file (written by benchmarks/build_priors.py)
+    and apply it. Returns the applied mapping."""
+    import json
+    priors = json.load(open(path))
+    set_priors(priors)
+    return priors
+
+
+def priors_from_ablation(results_dir: str, *, dataset_bucket: dict | None = None,
+                         cond: str = "oracle", margin: float = 0.1) -> dict:
+    """Compute per-bucket strategy ladders from the eval_cube2 cell JSONs. For each bucket (via
+    ``dataset_bucket``), average the cells' ``acc_<cond>`` per strategy, keep every strategy within
+    ``margin`` of the bucket's best (so a cheap-but-adequate arm stays the entry point and better
+    costlier ones stay on the ladder for escalation), and order cheapest-first. ``cond=oracle``
+    isolates generation from retrieval — the right signal to seed a generation prior."""
+    import glob
+    import json
+
+    dataset_bucket = dataset_bucket or DATASET_BUCKET
+    agg: dict[str, dict[str, list]] = {}
+    for f in glob.glob(os.path.join(results_dir, "*.json")):
+        try:
+            cell = json.load(open(f))
+        except Exception:  # noqa: BLE001
+            continue
+        bucket = dataset_bucket.get(cell.get("dataset"))
+        strat = _BENCH_ALIAS.get(cell.get("strategy"), cell.get("strategy"))
+        acc = cell.get(f"acc_{cond}")
+        if not bucket or strat not in STRATEGIES or acc is None:
+            continue
+        agg.setdefault(bucket, {}).setdefault(strat, []).append(float(acc))
+
+    priors: dict[str, tuple[str, ...]] = {}
+    for bucket, per_strat in agg.items():
+        mean = {s: sum(v) / len(v) for s, v in per_strat.items()}
+        best = max(mean.values())
+        keep = [s for s, a in mean.items() if a >= best - margin] or [max(mean, key=mean.get)]
+        priors[bucket] = tuple(sorted(keep, key=lambda s: get(s).cost_units))
+    return priors
 
 
 def get(name: str) -> GenerationStrategy:
@@ -136,3 +198,13 @@ def extract_final(text: str) -> str:
         if s.lower().startswith("answer:"):
             return s.split(":", 1)[1].strip()
     return body.splitlines()[-1].strip() if body.strip() else body
+
+
+# Auto-load measured priors at import when CR_GENSTRATEGY_PRIORS points at a priors file — so a
+# deployment's warm start comes from its own ablation without editing this module.
+_PRIORS_FILE = os.getenv("CR_GENSTRATEGY_PRIORS", "").strip()
+if _PRIORS_FILE:
+    try:
+        load_priors(_PRIORS_FILE)
+    except Exception:  # noqa: BLE001 — a missing/bad priors file must never break import
+        pass
