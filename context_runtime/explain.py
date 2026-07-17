@@ -40,6 +40,21 @@ def render_explain(exp: dict) -> str:
         out.append(f"  {mark} {c['key']:<20} reward {b['value']:.3f} (n={b['n']}){qtxt}{served}")
         out.append(f"      └ {c['reason']}")
 
+    # ── generation strategy (the answer plane) ──
+    gen = exp.get("generation")
+    if gen and gen.get("enabled"):
+        out.append(_section(f"generation — strategy ladder for {gen['bucket']} (learned)"))
+        for i, c in enumerate(gen["candidates"]):
+            mark = "►" if c.get("entry_point") else " "
+            b = c["bandit"]
+            think = "think" if c["thinking"] else "no-think"
+            entry = "  ← entry point" if c.get("entry_point") else ""
+            out.append(f"  {mark} {c['strategy']:<12} {think} · {c['max_tokens']}t · cost≈{c['cost_units']:.1f}"
+                       f"   reward {b['value']:.3f} (n={b['n']}){entry}")
+    elif gen is not None:
+        out.append(_section("generation"))
+        out.append(f"  {gen.get('note', 'legacy single_shot')}")
+
     # ── retrieval trace ──
     out.append(_section("retrieval — every method, calibrated P(relevant)"))
     for method, rows in exp["retrieval"].items():

@@ -100,6 +100,32 @@ def get(name: str) -> GenerationStrategy:
     return STRATEGIES.get(name) or STRATEGIES["single_shot"]
 
 
+def explain_block(bucket: str, *, method: str = "", tier: str = "", bandit=None) -> dict:
+    """The generation-plane 'show your work' for the transparency panel + EXPLAIN — the mirror of the
+    retrieval decision block. Lists the intent bucket's strategy ladder, each arm's config (thinking,
+    budget, cost prior), the entry point (the default first pick), and — when a generation bandit is
+    supplied — the learned value per strategy arm (arm key = ``method:strategy:tier``, matching
+    ``optimizer.online.plan_key``). Off → reports the legacy single_shot."""
+    if not enabled():
+        return {"enabled": False, "strategy": "single_shot",
+                "note": "generation-strategy layer off (set CR_GENSTRATEGY=1)"}
+    ladder = strategies_for(bucket)
+    cands = []
+    for i, name in enumerate(ladder):
+        spec = get(name)
+        arm = f"{method}:{name}:{tier}" if (method or tier) else name
+        n, val = 0, 0.0
+        if bandit is not None:
+            try:
+                n, val = bandit.value(bucket, arm)
+            except Exception:  # noqa: BLE001 — transparency must never break serving
+                pass
+        cands.append({"strategy": name, "thinking": spec.thinking, "max_tokens": spec.max_tokens,
+                      "cost_units": spec.cost_units, "entry_point": i == 0,
+                      "bandit": {"n": int(n), "value": round(float(val), 4)}})
+    return {"enabled": True, "bucket": bucket, "ladder": list(ladder), "candidates": cands}
+
+
 def extract_final(text: str) -> str:
     """Pull the final answer from a reasoning response: strip <think> blocks, take the last
     'Answer:' line if present, else the last non-empty line."""

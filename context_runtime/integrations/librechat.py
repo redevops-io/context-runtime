@@ -395,8 +395,17 @@ class LibreChatTenant:
                        "rerank": chosen.rerank, "bucket": bucket, "learned": key is not None,
                        "query_type": (self.query_classifier(request)
                                       if self.query_classifier is not None else None)},
+            "generation": self._generation_block(bucket, chosen.method, plan.chosen.model_tier),
             "served": {"context": served[:4000], "citations": [h.chunk_id for h in hits]},
         }
+
+    def _generation_block(self, bucket: str, method: str, tier: str) -> dict:
+        """The generation-strategy decision for the panel — the answer-plane mirror of the retrieval
+        block. Reads learned values from the runtime's generation bandit when present."""
+        from ..reasoner import strategies as genstrat
+        opt = getattr(self.runtime, "optimizer", None)
+        return genstrat.explain_block(bucket, method=method, tier=tier,
+                                      bandit=getattr(opt, "bandit", None))
 
     def _compare_hit(self, method: str, h: Hit) -> dict:
         """One hit for the transparency panel, with calibrated P(relevant) when available —
@@ -503,6 +512,7 @@ class LibreChatTenant:
             "decision": {"chosen": {"key": chosen.key, "method": chosen.method,
                                     "final_k": chosen.final_k, "rerank": chosen.rerank},
                          "candidates": candidates},
+            "generation": self._generation_block(bucket, chosen.method, plan.chosen.model_tier),
             "retrieval": retrieval, "served": served, "reward": reward,
         }
 
