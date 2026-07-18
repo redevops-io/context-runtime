@@ -75,6 +75,9 @@ class OpenAICompatibleModel:
         # chat_template_kwargs.enable_thinking; harmless to others that ignore unknown extras.
         if req.thinking is not None:
             payload["chat_template_kwargs"] = {"enable_thinking": bool(req.thinking)}
+        # Self-consistency arm samples at temperature > 0 so its K traces diverge (None = adapter default).
+        if req.temperature is not None:
+            payload["temperature"] = float(req.temperature)
         request = urllib.request.Request(
             tier.base_url + "/chat/completions",
             data=json.dumps(payload).encode(),

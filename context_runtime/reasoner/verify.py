@@ -69,6 +69,25 @@ def self_consistency(samples: list[str]) -> float:
     return best / len(samples)
 
 
+def consensus_index(answers: list[str], context: str = "") -> int:
+    """The index of the answer that best represents the majority across K samples (self-consistency, A):
+    the answer in the largest cluster sharing ≥60% content overlap with the others, tie-broken by
+    faithfulness to the context. Abstentions are skipped; all-abstain → 0 (the verifier floors it)."""
+    if not answers:
+        return 0
+    toks = [_content_tokens(a) for a in answers]
+    best_idx, best_score = -1, -1.0
+    for i, a in enumerate(answers):
+        if is_abstention(a) or not toks[i]:
+            continue
+        cluster = 1 + sum(1 for j, b in enumerate(answers)
+                          if j != i and not is_abstention(b) and len(toks[i] & toks[j]) / len(toks[i]) >= 0.6)
+        score = cluster + 0.001 * faithfulness(a, context)   # cluster size dominates; faith breaks ties
+        if score > best_score:
+            best_idx, best_score = i, score
+    return best_idx if best_idx >= 0 else 0
+
+
 class GenerationVerifier:
     """Produce a measured reward for a generated answer. ``judge`` (optional) is a
     ``judge(answer, context, question) -> float in [0,1]`` — e.g. an LLM grader — used in place of the

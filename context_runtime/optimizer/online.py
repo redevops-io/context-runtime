@@ -45,8 +45,13 @@ def plan_key(candidate: Candidate) -> str:
     rstep = next((s for s in candidate.steps if s.type == "reason"), None)
     strat = (rstep.params.get("strategy", "") if rstep else "")
     if strat and strat != "single_shot":
-        # a self-checked variant is a distinct arm (+v), so the bandit learns where verification pays off
-        seg = strat + ("+v" if rstep and rstep.params.get("verify") else "")
+        # +sc (self-consistency) and +v (self-check) are distinct arms, so the bandit learns per class
+        # where Best@k and where verification pay off.
+        seg = strat
+        if rstep and (rstep.params.get("self_consistency") or 0) > 1:
+            seg += "+sc"
+        if rstep and rstep.params.get("verify"):
+            seg += "+v"
         return f"{method}:{seg}:{candidate.model_tier}"
     return f"{method}:{candidate.model_tier}"
 

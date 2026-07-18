@@ -174,7 +174,9 @@ class ContextRuntime:
             reasoner = SingleShotReasoner(model)
         else:
             from ..reasoner.strategy_reasoner import StrategyReasoner
-            reasoner = StrategyReasoner(model, _strat, verify=bool(_rstep and _rstep.params.get("verify")))
+            reasoner = StrategyReasoner(model, _strat,
+                                        verify=bool(_rstep and _rstep.params.get("verify")),
+                                        samples=int(_rstep.params.get("self_consistency") or 0) if _rstep else 0)
         t1 = traces.now()
         result = reasoner.reason(ReasonRequest(context=ctx, capability="synthesis",
                                                constraints=(goal.constraints if goal else Constraints())))

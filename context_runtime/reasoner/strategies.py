@@ -123,6 +123,59 @@ def offers_verify(bucket: str) -> bool:
     return enabled() and bucket in VERIFY_BUCKETS
 
 
+# ── Self-consistency arm (A) — Best@k / majority@k as an effort tier ──
+# The strongest inference-scaling lever (Best@k ≫ Pass@1): sample K reasoning traces and return the
+# consensus answer. A distinct arm (+sc) the bandit deploys per class where it pays. Opt-in
+# (CR_SELFCONSISTENCY) so the default candidate set (verify only) is unchanged.
+SC_BUCKETS = frozenset({"high_risk", "sensitive", "incident", "multi_hop", "temporal"})
+
+
+def self_consistency_enabled() -> bool:
+    return os.getenv("CR_SELFCONSISTENCY", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def self_consistency_k() -> int:
+    """Sample count K (CR_SC_K, default 5, min 2). Best@k rises with K."""
+    try:
+        k = int(os.getenv("CR_SC_K", "5"))
+        return k if k >= 2 else 5
+    except ValueError:
+        return 5
+
+
+def self_consistency_temp() -> float:
+    """Sampling temperature for the K samples (CR_SC_TEMP, default 0.7) — must be > 0 or the samples
+    don't diverge and self-consistency is vacuous."""
+    try:
+        t = float(os.getenv("CR_SC_TEMP", "0.7"))
+        return t if t > 0 else 0.7
+    except ValueError:
+        return 0.7
+
+
+def offers_self_consistency(bucket: str) -> bool:
+    """Whether to also offer a +sc variant for this class (thinking arms only)."""
+    return enabled() and self_consistency_enabled() and bucket in SC_BUCKETS
+
+
+# ── Self-refinement depth (C) — verify+retry as an N-iteration budget ──
+def refine_depth() -> int:
+    """Self-check→retry rounds for a verified arm (CR_REFINE_DEPTH, default 1 = the prior single retry).
+    Sequential self-refinement scales quality; the bandit still learns whether the extra rounds pay."""
+    try:
+        d = int(os.getenv("CR_REFINE_DEPTH", "1"))
+        return d if d >= 1 else 1
+    except ValueError:
+        return 1
+
+
+# ── Effort-up vs model-up (B) ──
+def effort_vs_model() -> bool:
+    """Offer a cheap-tier bucket's ladder at BOTH its tier and the strong tier, so the bandit weighs
+    'more effort, same model' against 'bigger model' (CR_EFFORT_VS_MODEL). Opt-in."""
+    return os.getenv("CR_EFFORT_VS_MODEL", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def set_priors(priors: dict) -> None:
     """Override the active strategy ladders (from a measured ablation). Unknown strategies are dropped;
     each ladder is re-ordered cheapest-capable first so index 0 stays the escalation entry point."""
@@ -250,8 +303,47 @@ def explain_block(bucket: str, *, method: str = "", tier: str = "", bandit=None)
                       "bandit": {"n": int(n), "value": round(float(val), 4)}})
     return {"enabled": True, "bucket": bucket, "ladder": list(ladder), "candidates": cands,
             "verify_offered": bucket in VERIFY_BUCKETS,
+            "sc_offered": offers_self_consistency(bucket), "sc_k": self_consistency_k(),
+            "effort_menu": _effort_menu(bucket, method=method, tier=tier, bandit=bandit),
+            "effort_note": ("cost_units vs learned value — pareto_optimal marks the non-dominated "
+                            "effort tier (no cheaper arm scores as high); effort is spent up the frontier."),
             "model_competence": _MODEL_COMPETENCE.get(bucket),
             "competent_model": competent_model(bucket)}
+
+
+def _effort_menu(bucket: str, *, method: str = "", tier: str = "", bandit=None) -> list[dict]:
+    """The full effort menu (D): each strategy × {base, +sc, +v, +sc+v} with its cost prior and learned
+    value, flagging the cost/quality Pareto frontier (an arm is pareto-optimal if no other arm has
+    ≤ cost AND ≥ value). Makes 'picked the cheapest arm that scores as high' legible in EXPLAIN."""
+    offer_v = enabled() and bucket in VERIFY_BUCKETS
+    offer_sc = offers_self_consistency(bucket)
+    k = self_consistency_k()
+    arms = []
+    for name in strategies_for(bucket):
+        spec = get(name)
+        variants = [("", spec.cost_units)]
+        if offer_sc and spec.thinking:
+            variants.append(("+sc", spec.cost_units * k))
+        if offer_v:
+            variants.append(("+v", spec.cost_units * VERIFY_COST_MULT))
+        if offer_sc and offer_v and spec.thinking:
+            variants.append(("+sc+v", spec.cost_units * k * VERIFY_COST_MULT))
+        for suffix, cost in variants:
+            arm_key = f"{method}:{name}{suffix}:{tier}" if (method or tier) else f"{name}{suffix}"
+            n, val = 0, 0.0
+            if bandit is not None:
+                try:
+                    n, val = bandit.value(bucket, arm_key)
+                except Exception:  # noqa: BLE001 — transparency must never break serving
+                    pass
+            arms.append({"arm": f"{name}{suffix}", "strategy": name, "variant": suffix,
+                         "cost_units": round(float(cost), 4), "value": round(float(val), 4), "n": int(n)})
+    for a in arms:
+        a["pareto_optimal"] = not any(
+            b is not a and b["cost_units"] <= a["cost_units"] and b["value"] >= a["value"]
+            and (b["cost_units"] < a["cost_units"] or b["value"] > a["value"])
+            for b in arms)
+    return arms
 
 
 def extract_final(text: str) -> str:

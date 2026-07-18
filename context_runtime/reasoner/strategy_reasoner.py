@@ -17,12 +17,15 @@ from . import strategies
 
 
 class StrategyReasoner:
-    def __init__(self, model: ModelPlugin, strategy: str = "reason", *, verify: bool = False):
+    def __init__(self, model: ModelPlugin, strategy: str = "reason", *, verify: bool = False,
+                 samples: int = 0, refine_depth: int | None = None):
         self.model = model
         self.strategy = strategies.get(strategy)
         self.verify = verify
+        self.samples = samples   # ≥2 → self-consistency (+sc): sample K, return the consensus
+        self.refine_depth = strategies.refine_depth() if refine_depth is None else refine_depth
 
-    def _one(self, req: ReasonRequest) -> ModelResult:
+    def _one(self, req: ReasonRequest, *, temperature: float | None = None) -> ModelResult:
         s = self.strategy
         ctx = req.context
         question = ctx.plan.intent.normalized or ctx.plan.id
@@ -33,6 +36,7 @@ class StrategyReasoner:
             system=s.system,
             max_tokens=s.max_tokens,
             thinking=s.thinking,
+            temperature=temperature,
         )
         res = self.model.complete(mreq)
         if s.extractive:
@@ -42,20 +46,47 @@ class StrategyReasoner:
         return res
 
     def reason(self, req: ReasonRequest) -> ModelResult:
-        res = self._one(req)
-        # Verification Optimizer: self-check the answer's grounding; if it's weak, retry once and keep
-        # the better attempt. This is the "self-check · retry" the runtime learns to spend on per class.
+        res = self._self_consistent(req) if self.samples >= 2 else self._one(req)
         if self.verify:
-            from .verify import faithfulness
-            ctx_text = req.context.assembled_text
-            f0 = faithfulness(res.text, ctx_text)
-            if f0 < strategies.VERIFY_FAITHFULNESS_MIN:
-                retry = self._one(req)
-                if faithfulness(retry.text, ctx_text) > f0:
-                    res = retry
+            res = self._refine(req, res)
         return res
 
+    def _refine(self, req: ReasonRequest, res: ModelResult) -> ModelResult:
+        """Self-refinement (C): up to ``refine_depth`` self-check→retry rounds, keeping the most-grounded
+        attempt. Depth 1 reproduces the prior single retry."""
+        from .verify import faithfulness
+        ctx_text = req.context.assembled_text
+        best, best_f = res, faithfulness(res.text, ctx_text)
+        rounds = 0
+        while best_f < strategies.VERIFY_FAITHFULNESS_MIN and rounds < max(1, self.refine_depth):
+            retry = self._one(req)
+            f = faithfulness(retry.text, ctx_text)
+            if f > best_f:
+                best, best_f = retry, f
+            rounds += 1
+        return best
+
+    def _self_consistent(self, req: ReasonRequest) -> ModelResult:
+        """Self-consistency (A): sample K traces at temperature > 0, return the consensus answer (largest
+        agreement cluster, faithfulness tiebreak), rolling up the K-sample cost so the arm's cost prior
+        reflects the extra compute — the bandit still learns whether Best@k pays for this class."""
+        from .verify import consensus_index
+        temp = strategies.self_consistency_temp()
+        results = [self._one(req, temperature=temp) for _ in range(self.samples)]
+        if not results:
+            return self._one(req)
+        chosen = results[consensus_index([r.text for r in results], req.context.assembled_text)]
+        return replace(chosen,
+                       prompt_tokens=sum(r.prompt_tokens for r in results),
+                       completion_tokens=sum(r.completion_tokens for r in results),
+                       est_cost_usd=sum(r.est_cost_usd for r in results))
+
     def info(self) -> PluginInfo:
-        caps = {"single_shot", self.strategy.name} | ({"verify"} if self.verify else set())
-        return PluginInfo(name=f"strategy:{self.strategy.name}{'+v' if self.verify else ''}",
+        caps = {"single_shot", self.strategy.name}
+        suffix = ""
+        if self.samples >= 2:
+            caps.add("self_consistency"); suffix += "+sc"
+        if self.verify:
+            caps.add("verify"); suffix += "+v"
+        return PluginInfo(name=f"strategy:{self.strategy.name}{suffix}",
                           kind="reasoner", capabilities=frozenset(caps))

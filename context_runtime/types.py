@@ -188,6 +188,7 @@ class ModelRequest:
     system: str | None = None
     tools: tuple[dict, ...] | None = None
     thinking: bool | None = None   # None = model default; True/False toggles a reasoning model's think mode
+    temperature: float | None = None   # None = adapter default; the +sc arm sets >0 so its K samples diverge
 
 
 @dataclass(frozen=True)
