@@ -53,6 +53,14 @@ class SimGraphRetriever:
                 n += 1
         return {"files": n, "chunks": n}
 
+    def insert(self, docs: list[dict]) -> dict:
+        """Incremental add — append new docs; search recomputes activation over them at query time, so
+        there is NO index to rebuild. Deduplicates by chunk_id. The live-corpus update path."""
+        seen = {d.get("chunk_id") for d in self.docs}
+        added = [d for d in docs if d.get("chunk_id") not in seen]
+        self.docs.extend(added)
+        return {"inserted": len(added), "skipped": len(docs) - len(added), "total": len(self.docs)}
+
     def search(self, query: str, k: int, method: Retrieval = "graph") -> list[Hit]:
         q = _terms(query)
         doc_terms = [(_terms(d["text"]), d) for d in self.docs]
@@ -145,6 +153,21 @@ class HippoRAGRetriever:
             self._doc_meta[text] = {"chunk_id": f"hr::{i}", "filename": f"doc-{i}"}
         self._get().index(docs=docs)
         return {"docs": len(docs)}
+
+    def insert(self, docs) -> dict:
+        """Incrementally add documents to the graph WITHOUT re-OpenIE-ing the whole corpus. HippoRAG
+        caches OpenIE per document, so only the NEW texts incur LLM extraction; already-indexed texts are
+        skipped. This is the LightRAG-style live-corpus update the batch `index` rebuild lacks — a
+        streaming corpus (new tickets, edited docs) extends the graph instead of rebuilding it.
+        ``docs`` is a list of text strings (HippoRAG's unit)."""
+        docs = list(docs) if isinstance(docs, (list, tuple)) else [docs]
+        new = [t for t in docs if t not in self._doc_meta]
+        base = len(self._doc_meta)
+        for j, text in enumerate(new):
+            self._doc_meta[text] = {"chunk_id": f"hr::{base + j}", "filename": f"doc-{base + j}"}
+        if new:
+            self._get().index(docs=new)   # cached OpenIE ⇒ only `new` extracted; graph extended
+        return {"inserted": len(new), "skipped": len(docs) - len(new), "total": len(self._doc_meta)}
 
     def search(self, query: str, k: int, method: Retrieval = "graph") -> list[Hit]:
         results = self._get().retrieve(queries=[query], num_to_retrieve=k)
