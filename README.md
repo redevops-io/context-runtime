@@ -1,5 +1,9 @@
 # Context Runtime
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) ![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB.svg) ![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8.svg) [![NVIDIA Inception](https://img.shields.io/badge/NVIDIA-Inception%20Program%20Member-76B900.svg)](https://www.nvidia.com/en-us/startups/)
+
+> **🚀 NVIDIA Inception Program Member** — ReDevOps is a member of the NVIDIA Inception Program, supporting startups advancing AI and accelerated computing. Membership provides access to NVIDIA technology, technical resources, and the startup ecosystem. It does not imply product endorsement by NVIDIA.
+
 **An efficiency optimizer for a fleet of apps** — a database query planner for LLM
 context. The application says *"I need an answer"*; the runtime decides what the model
 sees — what to retrieve, compress, route, and verify — emits an inspectable,
@@ -8,12 +12,12 @@ planners did for SQL. See [POSITIONING.md](./POSITIONING.md) for the thesis.
 
 It optimizes any app with (a) a decision point about what context/config to use and
 (b) a measurable outcome. Eleven tenants are built and green (each number is the
-learned-vs-baseline reward its offline `examples/<tenant>.py` prints):
+learned-vs-baseline reward its offline example in `examples/` prints):
 
 | Tenant | Context Runtime tunes | Result |
 |---|---|---|
 | **sidekick** | which skills to recall · budget | drop-in for `SkillStore`; **67% vs 33%** naive baseline acceptance |
-| **redevops-rag** | `pool · limit · threshold · rerank …` per query | `ContextRuntimeRetrieverTuner`; **0.773 vs 0.323** vs fixed default |
+| **redevops-rag** | `pool · limit · threshold · rerank …` per query | `ContextRuntimeRetrieverTuner`; **0.780 vs 0.428** vs fixed default |
 | **edge-sentinel (SOC)** | which sources to pull per alert (CrowdSec · threat-intel · EDR) | tool-using + approval-gated; **0.900 vs 0.800** always-full baseline |
 | **growth-engine** | which attribution window + source bundle per lead-source query | **7.851 vs 5.282** vs fixed window |
 | **control-tower** | which Metabase query set per "ask anything" question | **5.326 vs 1.643** vs core query set |
@@ -23,6 +27,8 @@ learned-vs-baseline reward its offline `examples/<tenant>.py` prints):
 | **agentic-books** | which ledgers/reports to pull per books question | **3.632 vs 2.430** vs full-books |
 | **market-radar** | which competitor watches to sweep per intel question | **3.611 vs 0.403** vs full-sweep |
 | **agentic-compliance** | which rule-family evidence to pull per finding | **3.562 vs 2.463** vs full-evidence |
+
+> Reward numbers are single-run outputs of each tenant's `examples/` script — re-run to reproduce (they drift with model/data changes). The **sidekick** and **redevops-rag** rows are current; the others may need a refresh.
 
 ```bash
 PYTHONPATH=. python examples/sidekick_learning.py   # discrete-strategy bandit
@@ -43,9 +49,9 @@ installed).
 > **EXPLAIN** for the retrieval decision (see [Also shipped](#also-shipped)). See
 > [SPEC.md](./SPEC.md) §10 for the conformance checklist these tests assert against.
 
-## The agentic fleet (v4)
+## The agentic fleet
 
-The reward table above is the measured slice; the full **v4** fleet is **15 native agent services + a
+The reward table above is the measured slice; the full fleet is **15 native agent services + a
 control plane**, mirrored from the live demo at **[demo.redevops.io](https://demo.redevops.io)**. Each
 service wraps a mature OSS core and exposes `/health`, a Material-3 dashboard, and its agent endpoints —
 the Context Runtime is the decision layer *inside* each (which context / tools / config per request),
@@ -70,8 +76,8 @@ this optimizer rather than replacing it: **Policy-Constrained Planning** — pro
 data-residency / mandatory-verification / human-approval predicates define the *feasible* plan set
 **before** the cost model ranks, so every execution can be proven within governance — and
 **Trust-Aware Execution**, a trust ledger built from operator acceptance / overrides / regenerations /
-grounded abstention, so the planner optimizes for the strategy operators will actually rely on. (v5
-apps — the mission-runtime line — are not released yet.)
+grounded abstention, so the planner optimizes for the strategy operators will actually rely on. (The
+mission-runtime line has since shipped — the v6 mission cockpit is live at demo.redevops.io.)
 
 ## Install
 
@@ -176,5 +182,5 @@ The decision layer is thin; the substrate is reused. See:
 ## Test
 
 ```bash
-pip install -e ".[dev]" && pytest      # 18 tests; test_conformance.py == SPEC §10
+pip install -e ".[dev]" && pytest      # 360+ tests; test_conformance.py == SPEC §10
 ```
