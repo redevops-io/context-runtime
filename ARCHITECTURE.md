@@ -59,7 +59,7 @@ contracts.
 | Context Runtime plugin | Repo | What it provides |
 |---|---|---|
 | **Retriever** | [`redevops-rag`](https://github.com/redevops-io/redevops-rag) (single-hop) + [`HippoRAG`](https://github.com/redevops-io/HippoRAG) (multi-hop) | DuckDB dense + BM25 → **RRF** → rerank for single-hop; knowledge graph + Personalized PageRank for multi-hop. The planner routes between them per query. |
-| **Router** | native (`context_runtime/adapters/model_litellm.py`) | Capability-tiered routing (local → cheap → premium), per-task budget, fallback up tiers. *Context Runtime is the control plane — routing is native; prototyped in the now-retired agentic-os.* |
+| **Router** | native (`context_runtime/adapters/model_litellm.py`) | Capability-tiered routing (local → cheap → premium), per-task budget, fallback up tiers. *Context Runtime is the control plane — routing is native; prototyped in agentic-os (now the public v6 cockpit).* |
 | **Policy / Tools** | native (`context_runtime/tools/`, `context_runtime/policy/`) | ApprovalPolicy + dangerous-pattern scan, human-in-the-loop gates, append-only audit log. *Absorbed from agentic-os `safety.py`/`control_plane`.* |
 | **Agent Scheduler** | [`sidekick`](https://github.com/redevops-io/sidekick) `orchestrator.py`, `planner.py`, `worktree.py` | DAG decomposition → bounded parallel waves → isolated worktrees → acceptance checks → merge. Validated 5.4× speedup, 0 conflicts. |
 | **Compression (structural) + Token Budget** | `sidekick` `context_budget.py`, `memory.py` | `clip()` + `reduce_transcript()` (tiered, dedup). |
@@ -463,7 +463,9 @@ observability: {exporter: openllmetry, sink: langfuse, traces: true}
 
 ---
 
-## 9. Repository structure (revised)
+## 9. Repository structure (target)
+
+> This is the **target** layout — several entries are roadmap-gated (CP-SAT optimizer, mixture reasoner, OPA/Presidio policy, prompt cache) and not all present yet; see [ROADMAP.md](ROADMAP.md) for what has shipped.
 
 ```
 context_runtime/

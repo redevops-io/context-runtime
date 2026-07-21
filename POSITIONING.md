@@ -54,19 +54,19 @@ the *arms* (what to choose) and the *reward* (how to score it) are app-specific.
 | Tenant | Decision point Context Runtime optimizes | Reward (the app's own metric) | Status |
 |---|---|---|---|
 | **sidekick** (coding agent) | which skills to recall · bundle size · token budget | acceptance rate · first-try · tokens | **built, green** — drop-in for `SkillStore`; 67% vs 33% naive baseline |
-| **redevops-rag** (retrieval) | `pool · limit · vector_threshold · recency · keyword priors · rerank` per query intent | retrieval quality − efficiency penalty | **built, green** — `ContextRuntimeRetrieverTuner`; 0.773 vs 0.323 fixed default |
+| **redevops-rag** (retrieval) | `pool · limit · vector_threshold · recency · keyword priors · rerank` per query intent | retrieval quality − efficiency penalty | **built, green** — `ContextRuntimeRetrieverTuner`; 0.780 vs 0.428 fixed default |
 | **edge-sentinel** (SOC) | which sources to pull per alert (CrowdSec · threat-intel · EDR) | correct verdict − source cost | **built, green** — tool-using + approval-gated; 0.900 vs 0.800 always-full |
-| **business modules** (billing · support · BI · compliance …) | which sources/cores to query · which model tier | task success · cost-per-good-answer | next — each becomes a tenant with a goal + a metric |
+| **business modules** (billing · support · BI · compliance …) | which sources/cores to query · which model tier | task success · cost-per-good-answer | **now built** — each is a tenant with a goal + a metric (see the full fleet) |
 
 These prove the pattern generalizes across very different decision types: sidekick
 chooses among **discrete strategies**, redevops-rag tunes **numeric knobs**,
 edge-sentinel selects **sources/tools with side effects**. Same bandit, same
 cost-model, same wrap. That is the whole bet.
 
-**Context Runtime *is* the control plane.** It supersedes the earlier `agentic-os` fleet
-controller — the routing, approval/safety, and audit-log capabilities prototyped there
-now live natively in Context Runtime (`adapters/model_litellm.py`, `tools/`,
-`observability/`). The business modules that the old fleet ran become **tenants**: each
+**Context Runtime *is* the control plane.** It absorbs the earlier `agentic-os` fleet-controller logic — the routing, approval/safety,
+and audit-log capabilities prototyped there now live natively in Context Runtime (agentic-os
+itself continues as the public v6 mission cockpit) (`adapters/model_litellm.py`, `tools/`,
+`observability/`). The business modules become **tenants**: each
 gets a goal, a metric, and a learned policy, instead of a hand-wired controller.
 
 ## Why this is a more durable position

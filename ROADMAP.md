@@ -74,7 +74,7 @@ model calls than hand-rolled RAG.
 **Assemble (reuse, don't build):**
 - Retrieval → **redevops-rag** behind `StoreAdapter`
 - Providers → **LiteLLM** (deletes the hand-written `providers/` dir)
-- Routing policy → **native** cost-tiered router (prototyped in the now-retired agentic-os)
+- Routing policy → **native** cost-tiered router (prototyped in agentic-os (now the public v6 cockpit))
 - Structural compression + token clipping → **sidekick** `context_budget.py`
 - Semantic compression → **LLMLingua-2**
 - Memory → **mem0** (simple store; Graphiti deferred to v0.3)
