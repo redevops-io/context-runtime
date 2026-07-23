@@ -13,8 +13,8 @@ from ...types import ModelCapabilities, ModelRequest, ModelResult, PluginInfo
 from ...adapters.model_litellm import Tier
 
 _DEFAULT_TIERS = [
-    Tier(name="local", model="gemini-2.0-flash-lite", cost_per_1k=0.00004),
-    Tier(name="cheap", model="gemini-2.0-flash", cost_per_1k=0.0002),
+    Tier(name="local", model="gemini-2.5-flash-lite", cost_per_1k=0.00004),
+    Tier(name="cheap", model="gemini-2.5-flash", cost_per_1k=0.0002),
     Tier(name="premium", model="gemini-2.5-pro", cost_per_1k=0.005),
 ]
 

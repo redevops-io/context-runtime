@@ -10,11 +10,11 @@ from __future__ import annotations
 from ...types import ModelCapabilities, ModelRequest, ModelResult, PluginInfo
 from ...adapters.model_litellm import Tier
 
-# DO model ids are configurable; these are reasonable defaults (override via config).
+# DO model ids from the live serverless-inference catalog (GET /v1/models); override via config.
 _DEFAULT_TIERS = [
-    Tier(name="local", model="llama3.3-70b-instruct", cost_per_1k=0.0006),
-    Tier(name="cheap", model="llama3.3-70b-instruct", cost_per_1k=0.0006),
-    Tier(name="premium", model="anthropic-claude-3.5-sonnet", cost_per_1k=0.009),
+    Tier(name="local", model="alibaba-qwen3-32b", cost_per_1k=0.0004),
+    Tier(name="cheap", model="anthropic-claude-haiku-4.5", cost_per_1k=0.001),
+    Tier(name="premium", model="anthropic-claude-4.5-sonnet", cost_per_1k=0.009),
 ]
 
 

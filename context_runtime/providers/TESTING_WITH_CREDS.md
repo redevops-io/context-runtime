@@ -4,6 +4,22 @@ The test suite runs entirely on injected fakes (no SDK, no network). To validate
 account, install the provider extra, set the env vars, and run the snippets below. Each adapter is
 independent, so test them one at a time.
 
+## Live validation status (2026-07-23)
+
+| Adapter | Result |
+|---|---|
+| **GCP GeminiModel** (Developer API via `api_key`) | ✅ **verified end-to-end** — `gemini-2.5-flash` returned text + token counts. Note: `gemini-2.0-flash` is free-tier `limit: 0` on this key; use the 2.5 family. Thinking models need adequate `max_tokens` (>= ~200) or `.text` is empty. |
+| **DO GradientModel** (serverless inference) | ✅ **adapter correct** (auth accepted, request well-formed, valid model) — blocked only by **HTTP 402 Payment Required**: the account needs billing/credits enabled. The DO API token doubles as the inference key. |
+| **DO GradientKBRetriever** | ⏸ not yet tested — the account has **0 knowledge bases**; create one to validate. |
+| **GCP Vertex Search / BigQuery / Model Armor** | ⏸ not yet tested — need ADC/service-account + provisioned resources (only the API-key Gemini path was available). |
+
+**Two account-standing blocks to clear for full validation:** enable billing on the DigitalOcean
+account (for serverless inference) and on the Gemini API key's project (2.0-flash free tier is 0).
+The adapters themselves are verified correct.
+
+Creds are in Vault: `vibexgen/google/gemini_api_key`, `vibexgen/digitalocean/api_token` (the DO token
+serves both the knowledge base and inference).
+
 ---
 
 ## GCP
@@ -18,10 +34,14 @@ gcloud auth application-default login        # ADC
 ```python
 from context_runtime.providers import get_provider
 
+# Two model-plane modes:
+#   Vertex AI    → get_provider("gcp", project=..., location=...) + ADC (retrieval/BigQuery/Model Armor)
+#   Developer API → get_provider("gcp", api_key=...)  (Gemini only, no project/ADC; GEMINI_API_KEY env works)
 gcp = get_provider(
     "gcp",
+    api_key="…",                                # Gemini Developer API (simplest; omit for Vertex)
     project="your-project", location="us-central1",
-    vertex_engine_id="your-search-engine-id",   # or data_store_id="..."
+    vertex_engine_id="your-search-engine-id",   # or data_store_id="..."  (Vertex path)
     bigquery_dataset="your_dataset",
     model_armor_template="projects/…/locations/…/templates/…",  # optional
 )

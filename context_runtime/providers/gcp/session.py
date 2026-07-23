@@ -12,16 +12,20 @@ import os
 
 class GcpSession:
     def __init__(self, project: str | None = None, location: str = "us-central1",
-                 credentials=None):
+                 credentials=None, api_key: str | None = None):
         self.project = project or os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT")
         self.location = location or os.environ.get("GOOGLE_CLOUD_LOCATION") or "us-central1"
         self.credentials = credentials
+        # api_key → the Gemini Developer API (no project/ADC needed); absent → Vertex AI (project + ADC).
+        self.api_key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
     # each builder lazy-imports only its own SDK; adapters inject a client in tests and never reach here
     def genai_client(self):
         from google import genai  # context-runtime[gcp]
+        if self.api_key:
+            return genai.Client(api_key=self.api_key)      # Gemini Developer API
         return genai.Client(vertexai=True, project=self.project, location=self.location,
-                            credentials=self.credentials)
+                            credentials=self.credentials)  # Vertex AI
 
     def discoveryengine_client(self):
         from google.cloud import discoveryengine_v1 as de

@@ -29,10 +29,12 @@ from .session import GcpSession
 class GcpProvider(CloudProvider):
     name = "gcp"
 
-    def __init__(self, *, project=None, location="us-central1", credentials=None,
+    def __init__(self, *, project=None, location="us-central1", credentials=None, api_key=None,
                  model_tiers=None, vertex_engine_id=None, data_store_id=None,
                  bigquery_dataset=None, model_armor_template=None):
-        self.session = GcpSession(project=project, location=location, credentials=credentials)
+        # api_key → Gemini Developer API (no project/ADC); omit for Vertex AI (project + ADC).
+        self.session = GcpSession(project=project, location=location, credentials=credentials,
+                                  api_key=api_key)
         self.model_tiers = model_tiers
         self.vertex_engine_id = vertex_engine_id
         self.data_store_id = data_store_id
