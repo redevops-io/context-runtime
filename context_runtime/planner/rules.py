@@ -42,11 +42,14 @@ BUCKET_DEFAULTS: dict[IntentBucket, tuple[tuple[Retrieval, ...], str, bool]] = {
     "conceptual":     (("vector", "hybrid"), "single_shot", False),
     "incident":       (("hybrid",), "single_shot", True),
     "code_reasoning": (("hybrid", "code"), "single_shot", True),
-    "synthesis":      (("hybrid",), "single_shot", False),
-    "high_risk":      (("hybrid",), "single_shot", True),
+    # synthesis composes several sources → decompose, answer each, then synthesize + self-critique
+    "synthesis":      (("hybrid",), "plan_worker_critic", False),
+    # high-risk answers get an adversarial second opinion before they're trusted
+    "high_risk":      (("hybrid",), "debate", True),
     "sensitive":      (("hybrid",), "single_shot", True),
-    # multi_hop generates BOTH a graph candidate and a hybrid one; the cost model picks
-    "multi_hop":      (("graph", "hybrid"), "single_shot", False),
+    # multi_hop generates BOTH a graph candidate and a hybrid one; the cost model picks. The answer
+    # lives in connections across chunks → decompose the hops with plan-worker-critic.
+    "multi_hop":      (("graph", "hybrid"), "plan_worker_critic", False),
     # temporal generates a bi-temporal candidate + a hybrid fallback; the cost model picks
     # (temporal wins only when a populated temporal store is wired; else it falls back)
     "temporal":       (("temporal", "hybrid"), "single_shot", False),

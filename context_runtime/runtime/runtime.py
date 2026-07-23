@@ -15,11 +15,13 @@ from ..compression.structural import StructuralCompressor
 from ..costmodel.estimators import HeuristicEstimator
 from ..execution import graph as graphmod
 from ..observability import traces
+from ..learning.reward import DefaultReward
 from ..optimizer.knapsack import KnapsackOptimizer
 from ..plancache.cache import NullPlanCache, build_key
 from ..planner.candidates import RuleCandidateGenerator
 from ..planner.intent import RuleIntentAnalyzer
 from ..reasoner.single_shot import SingleShotReasoner
+from ..reasoner.strategies import reasoner_for
 from ..scheduler.schedule import TopoScheduler
 from ..types import (
     BuiltContext,
@@ -44,7 +46,8 @@ _TIER_MODELS = ("local", "cheap", "premium")
 class ContextRuntime:
     def __init__(self, *, models, retriever, estimator=None, config: Config | None = None,
                  intent=None, candidates=None, optimizer=None, compressor=None,
-                 scheduler=None, verifier=None, plan_cache=None, exporter=None):
+                 scheduler=None, verifier=None, plan_cache=None, exporter=None,
+                 learning: bool = False, reward=None):
         self.config = config or Config()
         # models: a dict tier->ModelPlugin, or a single ModelPlugin used for all tiers
         if not isinstance(models, dict):
@@ -57,7 +60,18 @@ class ContextRuntime:
             default_top_k=self.config.top_k, final_k=self.config.final_k,
             target_tokens=self.config.target_tokens,
         )
-        self.optimizer = optimizer or KnapsackOptimizer(self.estimator)
+        # learning=True puts the online BanditOptimizer on the DEFAULT serving path (the audit's gap:
+        # the machinery existed but the runtime defaulted to the static knapsack optimizer and never
+        # fed reward back). execute() then closes the loop via the shared RewardContract below.
+        self.learning = learning
+        if optimizer is not None:
+            self.optimizer = optimizer
+        elif learning:
+            from ..optimizer.online import BanditOptimizer
+            self.optimizer = BanditOptimizer(self.estimator, context_of=lambda g: "default")
+        else:
+            self.optimizer = KnapsackOptimizer(self.estimator)
+        self.reward = reward or DefaultReward()
         self.compressor = compressor or StructuralCompressor()
         self.scheduler = scheduler or TopoScheduler()
         self.verifier = verifier or CitationVerifier()
@@ -164,10 +178,14 @@ class ContextRuntime:
         tb.span("retrieve", "retrieve", {"hits": len(ctx.hits), "tokens": ctx.token_budget.get("compress", 0)},
                 t0, traces.now())
 
-        # reason (Reasoner → Router → Model)
+        # reason (Reasoner → Router → Model). The plan's chosen strategy selects the reasoner —
+        # single_shot, plan_worker_critic, debate or tool_loop — and multi-call strategies roll
+        # their sub-call cost up into one result (SPEC §4.4).
         tier = ctx.plan.chosen.model_tier
         model = self.models.get(tier) or next(iter(self.models.values()))
-        reasoner = SingleShotReasoner(model)
+        strategy = next((s.params.get("strategy", "single_shot")
+                         for s in ctx.plan.chosen.steps if s.type == "reason"), "single_shot")
+        reasoner = reasoner_for(strategy, model)
         t1 = traces.now()
         result = reasoner.reason(ReasonRequest(context=ctx, capability="synthesis",
                                                constraints=(goal.constraints if goal else Constraints())))
@@ -191,6 +209,10 @@ class ContextRuntime:
 
         # close the loop: record estimate-vs-actual into the cost-model statistics
         self.estimator.observe(ctx.plan, trace)
+        # and — when learning is on — fold a measured reward back into the online optimizer, so the
+        # DEFAULT serving path learns which (retrieval × tier × strategy) arm wins per bucket.
+        if self.learning and hasattr(self.optimizer, "learn_from_plan"):
+            self.optimizer.learn_from_plan(ctx.plan, self.reward.reward(trace, verdict))
         if self.config.trace_dir:
             traces.save_trace(trace, self.config.trace_dir)
         if self.exporter is not None:   # ship to Langfuse / OTel / JSONL
