@@ -42,6 +42,14 @@ class BedrockModel:
                          cost_per_1k=(t[2] if len(t) > 2 else 0.0)))
         return cls(built, session=session, default_tier=default_tier)
 
+    def per_tier_models(self) -> dict:
+        """Expand to a CR-tier → ModelPlugin dict so the runtime's tier choice (local/cheap/premium)
+        actually maps to the matching Bedrock model, sharing one client. A single BedrockModel would
+        collapse every tier onto ``default_tier``; this preserves the tier decision the planner made."""
+        tiers = list(self.tiers.values())
+        return {name: BedrockModel(tiers, session=self._session, client=self._client, default_tier=name)
+                for name in self.tiers}
+
     def _bedrock(self):
         if self._client is None:
             self._client = self._session.client("bedrock-runtime")
