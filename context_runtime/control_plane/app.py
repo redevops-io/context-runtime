@@ -1345,15 +1345,27 @@ def librechat_ingest(req: LcIngestReq) -> dict:
     return {"ingested": _tenant_for(req.model).ingest(req.path)}
 
 
-@app.post("/librechat/retrieve")
-def librechat_retrieve(req: LcRetrieveReq) -> dict:
-    """Plan + retrieve context for a request using the learned strategy (no judging yet)."""
-    tenant = _tenant_for(req.model)
-    ctx = tenant.retrieve(req.request)
+def retrieve_bundle(tenant, request: str) -> dict:
+    """Plan + retrieve a context bundle for ``request`` using the tenant's learned strategy.
+
+    The single source of truth for "give me an optimal context bundle", shared by the HTTP route and
+    the MCP tool (control_plane/mcp_server.py) so an AgentCore Gateway / Strands agent gets exactly
+    what /librechat/retrieve returns — routed KR, cost-optimal method, hits + assembled context + an
+    EXPLAIN-able plan id."""
+    ctx = tenant.retrieve(request)
     return {"request": ctx.request, "strategy": ctx.strategy.key,
             "method": ctx.strategy.method, "final_k": ctx.strategy.final_k,
             "hits": _hits_json(ctx.hits), "context": ctx.context, "plan_id": ctx.plan.id,
-            "suggestion": tenant.suggest(req.request)}
+            "suggestion": tenant.suggest(request)}
+
+
+@app.post("/librechat/retrieve", dependencies=[Depends(require_api_key)])
+def librechat_retrieve(req: LcRetrieveReq) -> dict:
+    """Plan + retrieve context for a request using the learned strategy (no judging yet).
+
+    API-key gated (§3.2): this returns corpus content, so before an agent calls it over the network
+    set CONTEXT_RUNTIME_API_KEY. Unset → open (localhost-only deployments), unchanged."""
+    return retrieve_bundle(_tenant_for(req.model), req.request)
 
 
 class LcCompareReq(BaseModel):
@@ -1362,7 +1374,7 @@ class LcCompareReq(BaseModel):
     model: str | None = None   # the corpus the Query Board is inspecting (per selected chat model)
 
 
-@app.post("/librechat/compare")
+@app.post("/librechat/compare", dependencies=[Depends(require_api_key)])
 def librechat_compare(req: LcCompareReq) -> dict:
     """Retrieval transparency: run every method (bm25/vector/hybrid/community/graph) side by
     side and report what the learned policy chose + served. Powers the LibreChat comparison
@@ -1370,7 +1382,7 @@ def librechat_compare(req: LcCompareReq) -> dict:
     return _tenant_for(req.model).compare(req.request, k=max(1, min(req.k, 10)))
 
 
-@app.post("/librechat/explain")
+@app.post("/librechat/explain", dependencies=[Depends(require_api_key)])
 def librechat_explain(req: LcCompareReq) -> dict:
     """EXPLAIN (the DB EXPLAIN-ANALYZE analogue): why the runtime retrieved what it did — every
     candidate arm with its learned value + quality/cost decomposition, the per-method retrieval
@@ -1540,9 +1552,57 @@ def v1_models() -> dict:
         for tid in _TENANTS]}
 
 
+# ── Bedrock as a first-class /v1 upstream (§2.5) ──────────────────────────────────────────────────
+# Point the shim at Bedrock instead of an OpenAI-compatible endpoint: set CR_UPSTREAM_PROVIDER=aws
+# (and optionally CR_BEDROCK_MODEL / AWS_REGION). Then ANY agent pointed at CR's /v1 gets
+# context-optimized Bedrock calls with EXPLAIN + learning, zero client change. Built once, lazily;
+# tests inject a model via _set_bedrock_upstream().
+_BEDROCK_UPSTREAM = None
+_BEDROCK_UPSTREAM_BUILT = False
+
+
+def _set_bedrock_upstream(model) -> None:  # test seam
+    global _BEDROCK_UPSTREAM, _BEDROCK_UPSTREAM_BUILT
+    _BEDROCK_UPSTREAM, _BEDROCK_UPSTREAM_BUILT = model, True
+
+
+def _bedrock_upstream_model():
+    global _BEDROCK_UPSTREAM, _BEDROCK_UPSTREAM_BUILT
+    if _BEDROCK_UPSTREAM_BUILT:
+        return _BEDROCK_UPSTREAM
+    _BEDROCK_UPSTREAM_BUILT = True
+    if os.getenv("CR_UPSTREAM_PROVIDER", "").lower() == "aws" or os.getenv("CR_BEDROCK_MODEL"):
+        try:
+            from ..providers import get_provider
+            model_id = os.getenv("CR_BEDROCK_MODEL", "amazon.nova-lite-v1:0")
+            cost = float(os.getenv("CR_BEDROCK_COST_PER_1K", "0") or 0)
+            prov = get_provider("aws", region=os.getenv("AWS_REGION"),
+                                model_tiers=[("chat", model_id, cost)])
+            _BEDROCK_UPSTREAM = prov.model()
+        except Exception:  # noqa: BLE001 — misconfigured/absent boto3 → fall back to OpenAI/offline path
+            _BEDROCK_UPSTREAM = None
+    return _BEDROCK_UPSTREAM
+
+
+def _forward_via_bedrock(model, messages: list[dict], req: ChatCompletionReq) -> tuple[str, dict, str]:
+    from ..types import ModelRequest
+    system = next((m["content"] for m in messages if m["role"] == "system"), None)
+    convo = tuple({"role": m["role"], "content": m["content"]} for m in messages if m["role"] != "system")
+    floor = int(os.getenv("CR_UPSTREAM_MAX_TOKENS", "2048"))
+    res = model.complete(ModelRequest(messages=convo, system=system,
+                                      max_tokens=max(req.max_tokens or 0, floor)))
+    usage = {"prompt_tokens": res.prompt_tokens, "completion_tokens": res.completion_tokens,
+             "total_tokens": res.prompt_tokens + res.completion_tokens}
+    return res.text, usage, res.model
+
+
 def _forward_to_upstream(messages: list[dict], req: ChatCompletionReq) -> tuple[str, dict, str]:
-    """Forward the augmented messages to an OpenAI-compatible upstream. Returns
-    (answer, usage, model_name). Falls back to a grounded extractive answer offline."""
+    """Forward the augmented messages to an upstream. Returns (answer, usage, model_name).
+    Precedence: Bedrock (if CR_UPSTREAM_PROVIDER=aws) → OpenAI-compatible (CR_UPSTREAM_BASE_URL) →
+    a grounded extractive answer offline."""
+    bedrock = _bedrock_upstream_model()
+    if bedrock is not None:
+        return _forward_via_bedrock(bedrock, messages, req)
     if not _UPSTREAM_BASE:
         # offline / no upstream: answer straight from the retrieved context (grounded stub)
         ctx_preamble = next((m["content"] for m in messages if m["role"] == "system"), "")
