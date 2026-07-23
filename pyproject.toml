@@ -69,6 +69,10 @@ ocr = ["paddleocr>=2.7", "paddlepaddle>=2.6"]
 # Text-layer PDF table extraction (ExtractorPlugin) — pdfplumber (MIT). Preserves tables
 # from financial filings / reports so figures stay retrievable (vs. flattened text).
 pdf-tables = ["pdfplumber>=0.11"]
+# Cloud-provider adapters (providers/aws — Bedrock model + KB, OpenSearch, Athena, Guardrails).
+# One SDK per cloud; adapters lazy-import it and accept injected clients, so the base runtime and
+# the test suite never require it. Azure/GCP/DigitalOcean add their own extra alongside this one.
+aws = ["boto3>=1.34"]
 # Observability export.
 otel = ["opentelemetry-sdk>=1.20"]
 langfuse = ["langfuse>=2.0"]
