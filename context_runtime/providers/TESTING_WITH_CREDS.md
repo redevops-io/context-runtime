@@ -9,8 +9,8 @@ independent, so test them one at a time.
 | Adapter | Result |
 |---|---|
 | **GCP GeminiModel** (Developer API via `api_key`) | ✅ **verified end-to-end** — `gemini-2.5-flash` returned text + token counts. Note: `gemini-2.0-flash` is free-tier `limit: 0` on this key; use the 2.5 family. Thinking models need adequate `max_tokens` (>= ~200) or `.text` is empty. |
-| **DO GradientModel** (serverless inference) | ✅ **adapter correct** (auth accepted, request well-formed, valid model) — blocked only by **HTTP 402 Payment Required**: the account needs billing/credits enabled. The DO API token doubles as the inference key. |
-| **DO GradientKBRetriever** | ⏸ not yet tested — the account has **0 knowledge bases**; create one to validate. |
+| **DO GradientModel** (serverless inference) | ✅ **adapter correct** (auth accepted, request well-formed, valid model). Blocked by credential type, not billing: `/chat/completions` needs a **model access key**, NOT the general DO API token (the token returns a misleading 402 for every model). The API create-key endpoint is **retired (410)** — create the key in the **control panel** → Gradient AI → Serverless Inference → Model access keys, then set `DO_INFERENCE_KEY`. |
+| **DO GradientKBRetriever** | ⏸ not yet tested — the account has **0 knowledge bases**; create one to validate. The KB `/retrieve` uses the general DO API token (works today). |
 | **GCP Vertex Search / BigQuery / Model Armor** | ⏸ not yet tested — need ADC/service-account + provisioned resources (only the API-key Gemini path was available). |
 
 **Two account-standing blocks to clear for full validation:** enable billing on the DigitalOcean
