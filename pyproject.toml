@@ -73,6 +73,12 @@ pdf-tables = ["pdfplumber>=0.11"]
 # One SDK per cloud; adapters lazy-import it and accept injected clients, so the base runtime and
 # the test suite never require it. Azure/GCP/DigitalOcean add their own extra alongside this one.
 aws = ["boto3>=1.34"]
+# providers/gcp — Gemini (google-genai), Vertex AI Search, BigQuery, Model Armor, Cloud Monitoring.
+gcp = ["google-genai>=1.0", "google-cloud-discoveryengine>=0.13", "google-cloud-bigquery>=3.20",
+       "google-cloud-modelarmor>=0.2", "google-cloud-monitoring>=2.21"]
+# providers/digitalocean — Gradient serverless inference (OpenAI-compatible over stdlib) + the
+# knowledge-base retrieve API (REST). No SDK required; both adapters use the stdlib + injected clients.
+digitalocean = []
 # Observability export.
 otel = ["opentelemetry-sdk>=1.20"]
 langfuse = ["langfuse>=2.0"]

@@ -1,9 +1,20 @@
 # Cloud providers
 
 Managed clouds plug into Context Runtime **behind the runtime's existing plugin Protocols** — the
-kernel never imports a cloud SDK. AWS is the first provider; Azure, GCP and DigitalOcean follow the
-same shape. This directory is the mechanical form of the audit's finding that *every integration is an
-adapter, not a kernel change.*
+kernel never imports a cloud SDK. AWS, GCP and DigitalOcean ship today; Azure is the next drop-in.
+This directory is the mechanical form of the audit's finding that *every integration is an adapter, not
+a kernel change.*
+
+| Provider | model | document retrieval | analytical | guardrail | telemetry |
+|---|---|---|---|---|---|
+| `aws` | Bedrock (`converse`) | OpenSearch + Bedrock KB | Athena | Bedrock Guardrails | CloudWatch |
+| `gcp` | Gemini (google-genai) | Vertex AI Search | BigQuery | Model Armor | Cloud Monitoring |
+| `digitalocean` (`do`) | Gradient inference (OpenAI-compat) | Gradient knowledge base | — | — | — |
+| `azure` | *planned* | *planned* | *planned* | *planned* | *planned* |
+
+DigitalOcean is the lean platform: it ships no serverless SQL warehouse and its guardrails are applied
+inside an agent (not as a standalone check), so `analytical_backend()` / `guardrail()` /
+`identity_broker()` honestly return `None` and the caller falls back to the in-tree defaults.
 
 ## The seam (`base.py`)
 
