@@ -9,7 +9,7 @@ independent, so test them one at a time.
 | Adapter | Result |
 |---|---|
 | **GCP GeminiModel** (Developer API via `api_key`) | ✅ **verified end-to-end** — `gemini-2.5-flash` returned text + token counts. Note: `gemini-2.0-flash` is free-tier `limit: 0` on this key; use the 2.5 family. Thinking models need adequate `max_tokens` (>= ~200) or `.text` is empty. |
-| **DO GradientModel** (serverless inference) | ✅ **adapter correct** (auth accepted, request well-formed, valid model). Blocked by credential type, not billing: `/chat/completions` needs a **model access key**, NOT the general DO API token (the token returns a misleading 402 for every model). The API create-key endpoint is **retired (410)** — create the key in the **control panel** → Gradient AI → Serverless Inference → Model access keys, then set `DO_INFERENCE_KEY`. |
+| **DO GradientModel** (serverless inference) | ✅ **adapter correct** — verified through auth. Two credential gotchas, neither a code issue: (1) `/chat/completions` needs a **model access key**, not the general DO API token (token → misleading 402; create-key API is retired-410, use the control panel). (2) A **VPC-restricted** model access key returns **401 from outside its VPC** — a key scoped to a VPC only works from resources inside it. Use a **No-VPC** key to call from a public host, or run from inside the VPC. Set the key as `DO_INFERENCE_KEY`. |
 | **DO GradientKBRetriever** | ⏸ not yet tested — the account has **0 knowledge bases**; create one to validate. The KB `/retrieve` uses the general DO API token (works today). |
 | **GCP Vertex Search / BigQuery / Model Armor** | ⏸ not yet tested — need ADC/service-account + provisioned resources (only the API-key Gemini path was available). |
 
