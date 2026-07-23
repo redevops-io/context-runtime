@@ -1,6 +1,6 @@
 # Context Runtime
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) ![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB.svg) ![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8.svg) [![NVIDIA Inception](https://img.shields.io/badge/NVIDIA-Inception%20Program%20Member-76B900.svg)](https://www.nvidia.com/en-us/startups/)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE) ![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB.svg) ![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8.svg) [![NVIDIA Inception](https://img.shields.io/badge/NVIDIA-Inception%20Program%20Member-76B900.svg)](https://www.nvidia.com/en-us/startups/)
 
 > **🚀 NVIDIA Inception Program Member** — ReDevOps is a member of the NVIDIA Inception Program, supporting startups advancing AI and accelerated computing. Membership provides access to NVIDIA technology, technical resources, and the startup ecosystem. It does not imply product endorsement by NVIDIA.
 
@@ -41,7 +41,7 @@ with an approval-gated audit trail) and **trace exporters** (`context_runtime/ob
 exporters.py` — JSONL offline, or Langfuse / OpenLLMetry-OTel when the extras are
 installed).
 
-> Status: **runnable reference implementation — Python and Go at feature parity.** Runs fully
+> Status: **runnable reference implementation. Python is the source of truth; the Go port tracks it closely.** Runs fully
 > offline with stub models; real bindings are wired and lazy-imported: LiteLLM models, and
 > [redevops-rag](https://github.com/redevops-io/redevops-rag) / DuckDB / Postgres retrieval
 > (BM25 · dense · hybrid · graph-PPR · community · sharded routing · cross-modal). Beyond the
@@ -146,7 +146,7 @@ The six plugin seams and their initial slice; several "real bindings" below are 
 
 ## Also shipped
 
-Beyond the initial slice, in both the Python source-of-truth and the Go port (feature parity):
+Beyond the initial slice, in both the Python source-of-truth and the Go port (which tracks it):
 
 - **Retrieval as a routable capability** — BM25 · dense (fastembed ONNX) · hybrid (RRF) · graph
   (Personalized-PageRank multi-hop) · community · **sharded coverage routing** for heterogeneous
@@ -182,5 +182,5 @@ The decision layer is thin; the substrate is reused. See:
 ## Test
 
 ```bash
-pip install -e ".[dev]" && pytest      # 360+ tests; test_conformance.py == SPEC §10
+pip install -e ".[dev]" && pytest      # 325 tests; test_conformance.py == SPEC §10
 ```

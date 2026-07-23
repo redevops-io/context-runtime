@@ -1,6 +1,6 @@
 # Context Runtime RAG Evaluation Report
 
-_Run date: 2024-?? (python eval/context_runtime_eval.py)_
+_Reproduce: `python eval/context_runtime_eval.py`_
 
 ## Python backend results
 
