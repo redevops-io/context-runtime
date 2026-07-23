@@ -151,10 +151,18 @@ def get_provider(name: str, **config) -> CloudProvider:
     """Construct a registered provider by name. ``config`` is passed to the provider factory
     (region, credentials, resource ids). Raises KeyError for an unknown provider."""
     key = name.lower()
+    if key == "do":                     # common alias → canonical name
+        key = "digitalocean"
     if key not in _REGISTRY:
         # lazy self-registration for built-ins, so callers don't have to import the subpackage
         if key == "aws":
             from .aws import register as _reg
+            _reg()
+        elif key == "gcp":
+            from .gcp import register as _reg
+            _reg()
+        elif key == "digitalocean":
+            from .digitalocean import register as _reg
             _reg()
     if key not in _REGISTRY:
         raise KeyError(f"unknown cloud provider '{name}'; registered: {sorted(_REGISTRY)}")
