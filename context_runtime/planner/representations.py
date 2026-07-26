@@ -82,8 +82,10 @@ HINT_RULES: list[tuple[re.Pattern, KnowledgeRepresentation]] = [
                 r"no\s+longer|used\s+to\s+be|previously|valid\s+(from|until))\b", re.I), "temporal"),
     (re.compile(r"\b(related\s+to|connected\s+to|depend(s|ency|encies)?\s+on|graph\s+of|"
                 r"network\s+of|linked\s+to|relationship\s+between|traverse|multi[- ]hop|"
+                # dependency / impact traversal (service graphs, blast radius)
+                r"blast\s+radius|dependency\s+(of|around)|what\s+breaks\s+if|impact\s+if\s+\w+\s+fails?|"
                 # ownership / hierarchy / control chains — property-graph traversal (KYC/UBO, org trees)
-                r"owns?|owned\s+by|ownership|(ultimate|beneficial)\s+owner|\bubo\b|"
+                r"owns?|owners?|owned\s+by|ownership|(ultimate|beneficial)\s+owners?|\bubo\b|"
                 r"parent\s+(company|of)|subsidiar(y|ies)|controls?|controlled\s+by|"
                 r"upstream|downstream|reports?\s+to|hierarchy|who\s+owns)\b",
                 re.I), "graph"),
