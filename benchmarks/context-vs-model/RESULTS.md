@@ -40,6 +40,8 @@ the anti-parametric control.
 | FinanceBench | public | numeric 10-K QA |
 | Nutrition-consultation corpus | **proprietary** | anti-parametric — never in training |
 
+Dataset provenance and licenses for every public corpus above: [`../DATA_SOURCES.md`](../DATA_SOURCES.md).
+
 ### At a glance
 
 | | Finding | Evidence |

@@ -27,6 +27,8 @@ so both **answer quality** and **retrieval quality** are ground-truth. The multi
 corpus is the pollution axis: a question targets one filing, but 83 others share the same
 financial vocabulary with different numbers — adversarial distractors by construction.
 
+> Dataset provenance and licenses for every corpus used here: [`../DATA_SOURCES.md`](../DATA_SOURCES.md).
+
 **Three arms** (per question):
 
 | arm | what it does | tests |
