@@ -2,6 +2,10 @@
 
 Benchmarks here use the public datasets below. Loaders fetch data at runtime; we do not redistribute raw data.
 
+## How this data is used
+
+These datasets are used solely to develop and benchmark the Context Runtime software itself (internal R&D and regression testing of stack improvements). They are NOT redistributed, NOT embedded in or shipped with the product, and NOT part of any customer deployment. Context Runtime customers apply the software to their own data under their own data licenses.
+
 ## LiveRAG Benchmark (default for context-vs-model)
 - Source: HuggingFace `LiveRAG/Benchmark`. Built by DataMorgana over FineWeb-10BT web pages. (SIGIR'25.)
 - License: the underlying FineWeb corpus is ODC-BY 1.0 (https://huggingface.co/datasets/HuggingFaceFW/fineweb); attribute FineWeb + the LiveRAG benchmark authors. Used for non-commercial research/benchmarking.
