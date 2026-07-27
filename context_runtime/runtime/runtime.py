@@ -178,14 +178,25 @@ class ContextRuntime:
         tb.span("retrieve", "retrieve", {"hits": len(ctx.hits), "tokens": ctx.token_budget.get("compress", 0)},
                 t0, traces.now())
 
-        # reason (Reasoner → Router → Model). The plan's chosen strategy selects the reasoner —
-        # single_shot, plan_worker_critic, debate or tool_loop — and multi-call strategies roll
-        # their sub-call cost up into one result (SPEC §4.4).
+        # reason (Reasoner -> Router -> Model). Unified dispatch over both reasoning lines, keyed by the
+        # plan's chosen strategy (SPEC 4.4):
+        #   single_shot                            -> SingleShotReasoner (legacy path, byte-for-byte)
+        #   plan_worker_critic / debate / tool_loop -> concrete multi-shot reasoners (reasoner_for)
+        #   any generation-strategy arm            -> StrategyReasoner (self-consistency / refine / verify)
+        # The two strategy namespaces are disjoint, so one classification routes unambiguously.
         tier = ctx.plan.chosen.model_tier
         model = self.models.get(tier) or next(iter(self.models.values()))
-        strategy = next((s.params.get("strategy", "single_shot")
-                         for s in ctx.plan.chosen.steps if s.type == "reason"), "single_shot")
-        reasoner = reasoner_for(strategy, model)
+        _rstep = next((s for s in ctx.plan.chosen.steps if s.type == "reason"), None)
+        strategy = (_rstep.params.get("strategy") if _rstep else None) or "single_shot"
+        if strategy == "single_shot":
+            reasoner = SingleShotReasoner(model)
+        elif strategy in ("plan_worker_critic", "debate", "tool_loop"):
+            reasoner = reasoner_for(strategy, model)
+        else:
+            from ..reasoner.strategy_reasoner import StrategyReasoner
+            reasoner = StrategyReasoner(model, strategy,
+                                        verify=bool(_rstep and _rstep.params.get("verify")),
+                                        samples=int(_rstep.params.get("self_consistency") or 0) if _rstep else 0)
         t1 = traces.now()
         result = reasoner.reason(ReasonRequest(context=ctx, capability="synthesis",
                                                constraints=(goal.constraints if goal else Constraints())))

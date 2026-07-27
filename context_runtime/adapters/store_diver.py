@@ -47,11 +47,18 @@ class DiverTemporalRetriever:
                  db_path: str = ":memory:") -> None:
         # Lazy imports: redevops-rag (sentence-transformers/torch) is an opt-in [rag] extra,
         # so importing this module must not require it — only constructing the arm does.
-        from redevops_rag.embed import Embedder
+        import os
+
+        from redevops_rag.embed import make_embedder
         from redevops_rag.store import Store
         from redevops_rag.temporal import TemporalReasoningRetriever
 
-        self._embedder = Embedder(embed_model)          # bge-small-en by default
+        # Encoder is backend-selectable (REDEVOPS_RAG_EMBED_BACKEND, or CR_NEMOTRON=1 → nemotron): bge
+        # by default, Nemotron-3-Embed-8B when flagged — so DIVER can be benched over either encoder.
+        # embed_model only overrides the bge model name (Nemotron is picked by URL/env, not model path).
+        _backend = os.environ.get("REDEVOPS_RAG_EMBED_BACKEND", "bge").strip().lower()
+        self._embedder = (make_embedder("bge", model_name=embed_model)
+                          if _backend == "bge" and embed_model else make_embedder(_backend))
         self._store = Store(self._embedder, db_path)
         self._plug = TemporalReasoningRetriever(reason_llm, pool=pool, n_subqueries=n_subqueries)
 
@@ -59,6 +66,12 @@ class DiverTemporalRetriever:
     def index(self, path: str) -> dict[str, Any]:
         from redevops_rag.ingest import ingest as _ingest
 
+        # A persisted DuckDB store (db_path is a file) survives restarts: skip the expensive bge
+        # embed when it is already populated, and only rebuild the (cheap) in-process FTS index.
+        # This is what keeps a warm, pre-built index from re-embedding a large corpus every boot.
+        if self._store.count() > 0:
+            self._store.reindex_fts()
+            return {"reused_chunks": self._store.count()}
         res = _ingest(self._store, self._embedder, path)
         self._store.reindex_fts()
         n = self._store.count()
