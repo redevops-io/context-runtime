@@ -21,7 +21,10 @@ from ..types import IntentBucket, KnowledgeRepresentation, Retrieval
 # method → the knowledge representation it operates over
 REPRESENTATION_OF: dict[Retrieval, KnowledgeRepresentation] = {
     "vector": "document", "bm25": "document", "hybrid": "document", "file": "document",
-    "graph": "graph",
+    # the graph representation. `graph` = the LLM-extracted reasoning graph (HippoRAG/SimGraph);
+    # `cypher`/`gremlin` = deterministic traversal against a curated property-graph DB (ownership
+    # chains, UBOs, entity links). A deployment binds whichever it has; both coexist under `graph`.
+    "graph": "graph", "cypher": "graph", "gremlin": "graph",
     "community": "community",
     "temporal": "temporal",
     "code": "code",
@@ -78,7 +81,13 @@ HINT_RULES: list[tuple[re.Pattern, KnowledgeRepresentation]] = [
     (re.compile(r"\b(as\s+of|point[- ]in[- ]time|what\s+changed|history\s+of|superseded|"
                 r"no\s+longer|used\s+to\s+be|previously|valid\s+(from|until))\b", re.I), "temporal"),
     (re.compile(r"\b(related\s+to|connected\s+to|depend(s|ency|encies)?\s+on|graph\s+of|"
-                r"network\s+of|linked\s+to|relationship\s+between|traverse|multi[- ]hop)\b",
+                r"network\s+of|linked\s+to|relationship\s+between|traverse|multi[- ]hop|"
+                # dependency / impact traversal (service graphs, blast radius)
+                r"blast\s+radius|dependency\s+(of|around)|what\s+breaks\s+if|impact\s+if\s+\w+\s+fails?|"
+                # ownership / hierarchy / control chains — property-graph traversal (KYC/UBO, org trees)
+                r"owns?|owners?|owned\s+by|ownership|(ultimate|beneficial)\s+owners?|\bubo\b|"
+                r"parent\s+(company|of)|subsidiar(y|ies)|controls?|controlled\s+by|"
+                r"upstream|downstream|reports?\s+to|hierarchy|who\s+owns)\b",
                 re.I), "graph"),
 ]
 
