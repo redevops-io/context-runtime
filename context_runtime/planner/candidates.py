@@ -6,6 +6,7 @@ the survivors.
 """
 from __future__ import annotations
 
+from ..reasoner import strategies as genstrat
 from ..types import Candidate, Goal, Intent, PluginInfo, StepSpec
 from . import representations, rules
 
@@ -41,24 +42,52 @@ class RuleCandidateGenerator:
         bucket_methods, strategy, want_verify = rules.BUCKET_DEFAULTS[intent.bucket]
         methods = self._methods_for_intent(intent, bucket_methods)
         tiers = rules.BUCKET_TIERS[intent.bucket]
+        # Effort-up vs model-up (B): also offer the ladder at the premium tier, so the bandit weighs
+        # "more effort, same model" against "bigger model". Restricted/sensitive stays local.
+        if genstrat.effort_vs_model() and "premium" not in tiers and intent.bucket != "sensitive":
+            tiers = tiers + ("premium",)
         c = goal.constraints
         # citations are checked by the verify step, so requiring them implies verify
         require_verify = want_verify or c.require_verification or c.require_citations
 
+        # Generation-strategy layer (CR_GENSTRATEGY): the `reason` step becomes a bandit arm too — one
+        # candidate per (method × tier × generation strategy), the strategies seeded per intent bucket.
+        # Off → the single legacy strategy from BUCKET_DEFAULTS, so plans are byte-identical to before.
+        gen_strats = genstrat.strategies_for(intent.bucket) if genstrat.enabled() else (strategy,)
+
+        # Verification Optimizer: correctness-sensitive classes ALSO get a self-checked variant of each
+        # strategy (a distinct arm) so the bandit can learn whether the self-check earns its cost here.
+        verify_opts = (False, True) if genstrat.offers_verify(intent.bucket) else (False,)
+        # Self-consistency arm (A): a +sc variant samples K reasoning traces → consensus. Off → 0.
+        sc_k = genstrat.self_consistency_k() if genstrat.offers_self_consistency(intent.bucket) else 0
+
         out: list[Candidate] = []
         for method in methods:
             for tier in tiers:
-                steps: list[StepSpec] = [
-                    StepSpec("retrieve", {"method": method, "top_k": self.default_top_k}),
-                ]
-                if method in ("hybrid", "vector", "code"):
-                    steps.append(StepSpec("rerank", {"final_k": self.final_k}))
-                steps.append(StepSpec("compress", {"target_tokens": self.target_tokens}))
-                steps.append(StepSpec("route", {"tier": tier}))
-                steps.append(StepSpec("reason", {"strategy": strategy, "capability": "synthesis"}))
-                if require_verify:
-                    steps.append(StepSpec("verify", {"method": "citation"}))
-                out.append(Candidate(steps=tuple(steps), model_tier=tier))
+                for gstrat in gen_strats:
+                    # sc only on thinking strategies — sampling a terse no-think answer buys nothing.
+                    sc_opts = (0, sc_k) if (sc_k >= 2 and genstrat.enabled() and genstrat.get(gstrat).thinking) else (0,)
+                    for do_verify in verify_opts:
+                        for sc in sc_opts:
+                            steps: list[StepSpec] = [
+                                StepSpec("retrieve", {"method": method, "top_k": self.default_top_k}),
+                            ]
+                            if method in ("hybrid", "vector", "code"):
+                                steps.append(StepSpec("rerank", {"final_k": self.final_k}))
+                            steps.append(StepSpec("compress", {"target_tokens": self.target_tokens}))
+                            steps.append(StepSpec("route", {"tier": tier}))
+                            reason_params = {"strategy": gstrat, "capability": "synthesis"}
+                            if genstrat.enabled():
+                                gs = genstrat.get(gstrat)
+                                reason_params.update(thinking=gs.thinking, max_tokens=gs.max_tokens)
+                                if do_verify:
+                                    reason_params["verify"] = True
+                                if sc >= 2:
+                                    reason_params["self_consistency"] = sc
+                            steps.append(StepSpec("reason", reason_params))
+                            if require_verify:
+                                steps.append(StepSpec("verify", {"method": "citation"}))
+                            out.append(Candidate(steps=tuple(steps), model_tier=tier))
         return out
 
     def prune(self, candidates: list[Candidate], goal: Goal) -> list[Candidate]:

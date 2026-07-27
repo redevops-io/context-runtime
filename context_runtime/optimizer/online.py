@@ -37,8 +37,22 @@ class _Arm:
 
 
 def plan_key(candidate: Candidate) -> str:
-    """The bandit arm for a candidate: its retrieval method × model tier — the decision that matters."""
+    """The bandit arm for a candidate: retrieval method × generation strategy × model tier — the
+    decisions that matter. The generation strategy is folded in only when the layer selected one
+    (anything but the legacy ``single_shot``), so existing arms keep their exact keys and learned
+    values when CR_GENSTRATEGY is off."""
     method = next((s.params.get("method", "") for s in candidate.steps if s.type == "retrieve"), "")
+    rstep = next((s for s in candidate.steps if s.type == "reason"), None)
+    strat = (rstep.params.get("strategy", "") if rstep else "")
+    if strat and strat != "single_shot":
+        # +sc (self-consistency) and +v (self-check) are distinct arms, so the bandit learns per class
+        # where Best@k and where verification pay off.
+        seg = strat
+        if rstep and (rstep.params.get("self_consistency") or 0) > 1:
+            seg += "+sc"
+        if rstep and rstep.params.get("verify"):
+            seg += "+v"
+        return f"{method}:{seg}:{candidate.model_tier}"
     return f"{method}:{candidate.model_tier}"
 
 

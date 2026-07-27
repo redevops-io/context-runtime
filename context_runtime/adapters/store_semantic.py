@@ -21,11 +21,41 @@ _embedder = None
 _embedder_tried = False
 
 
+def _nemotron_selected() -> bool:
+    """Nemotron-3-Embed-8B chosen as the vector encoder — via CR_NEMOTRON=1 or
+    REDEVOPS_RAG_EMBED_BACKEND=nemotron. Opt-in; the default stays the cheap ONNX model."""
+    if os.getenv("CR_NEMOTRON", "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    return os.getenv("REDEVOPS_RAG_EMBED_BACKEND", "").strip().lower() in ("nemotron", "nemo", "nemotron-embed")
+
+
+class _NemotronONNXShim:
+    """Adapts redevops-rag's :class:`NemotronEmbedder` (``.encode`` over an HTTP /v1/embeddings
+    endpoint) to the fastembed ``.embed(texts) -> iterable[vector]`` interface this module expects, so
+    the vector/hybrid arm can run on Nemotron with no other change. Queries get Nemotron's instruction
+    prefix; documents are embedded raw (``_embed`` is called per-chunk at index time and per-query at
+    search time — both symmetric here, matching how the ONNX path treats them)."""
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def embed(self, texts):
+        return self._inner.encode(list(texts))
+
+
 def _get_embedder():
-    """Lazily load the ONNX embedder once; None if fastembed/model is unavailable."""
+    """Lazily load the embedder once; None if unavailable (→ pure BM25). The Nemotron HTTP arm is
+    picked when flagged, else the cheap fastembed ONNX model."""
     global _embedder, _embedder_tried
     if not _embedder_tried:
         _embedder_tried = True
+        if _nemotron_selected():
+            try:
+                from redevops_rag.embed import NemotronEmbedder
+                _embedder = _NemotronONNXShim(NemotronEmbedder())
+            except Exception:
+                _embedder = None
+            return _embedder
         try:
             from fastembed import TextEmbedding
             _embedder = TextEmbedding(_MODEL_NAME)

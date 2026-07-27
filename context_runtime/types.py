@@ -191,6 +191,8 @@ class ModelRequest:
     max_tokens: int = 1024
     system: str | None = None
     tools: tuple[dict, ...] | None = None
+    thinking: bool | None = None   # None = model default; True/False toggles a reasoning model's think mode
+    temperature: float | None = None   # None = adapter default; the +sc arm sets >0 so its K samples diverge
 
 
 @dataclass(frozen=True)
@@ -205,7 +207,13 @@ class ModelResult:
     models_used: tuple[str, ...] = ()   # rolls up Reasoner sub-calls (SPEC §4.4)
 
 
-ReasoningStrategy = Literal["single_shot", "plan_worker_critic", "debate", "tool_loop"]
+# Reasoning/generation strategies. `single_shot` is the legacy default (one cite-based call). The
+# generation-strategy layer (CR_GENSTRATEGY) adds the answer-plane arms the bandit selects per intent:
+#   terse (extractive, no-think) · reason (think+CoT) · decompose (multi-hop) · mapreduce (aggregation).
+ReasoningStrategy = Literal[
+    "single_shot", "plan_worker_critic", "debate", "tool_loop",
+    "terse", "reason", "decompose", "mapreduce",
+]
 
 
 @dataclass(frozen=True)
