@@ -145,6 +145,10 @@ class Plan:
 
 Retrieval = Literal[
     "vector", "bm25", "hybrid", "graph", "community", "image", "colpali", "video",
+    # property-graph methods (the `graph` representation): deterministic traversal against a
+    # graph DB — `cypher` (Neo4j/openCypher), `gremlin` (Neptune/TinkerPop). Distinct from the
+    # LLM-extracted `graph` (HippoRAG/SimGraph) reasoning graph; a deployment binds whichever it has.
+    "cypher", "gremlin",
     # structured-store methods (the `analytical` representation): relational + the NoSQL/search
     # backends a deployment may plug in where SQL is not applicable.
     "sql", "mongo", "elastic", "api", "logs", "file", "code", "temporal",

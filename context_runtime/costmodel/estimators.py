@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..planner import rules
+from ..planner import representations, rules
 from ..types import Candidate, CostModelStatistics, Goal, Plan, PlanScore, Trace
 from . import score as score_mod
 from .statistics import StatisticsStore
@@ -46,18 +46,37 @@ class HeuristicEstimator:
         reranked = "rerank" in steps
         verified = "verify" in steps
 
-        # Intent-aware retrieval: for a multi-hop question the answer lives in the
-        # connections between documents — graph retrieval reaches it, single-hop
-        # structurally cannot. For a single-hop question, graph is just pricier with no
-        # recall edge, so hybrid wins. This is how the planner routes HippoRAG vs redevops-rag.
+        # Intent-aware retrieval: the answer to some questions lives in a representation that plain
+        # document retrieval structurally can't reach, so the estimator gives the matching engine a
+        # recall edge (and discounts the mismatched methods). This is *how the planner routes* — the
+        # optimizer then picks the boosted specialist. Each branch mirrors a real engine choice.
         bucket, _risk = rules.classify(goal.text)
+        want = representations.classify(bucket, goal.text)   # the representation the query needs
         if bucket == "multi_hop":
+            # multi-hop reasoning: the answer is in the connections — HippoRAG reaches it. (vs redevops-rag)
             recall = 0.93 if method == "graph" else recall * 0.55
         elif bucket == "temporal":
-            # temporal questions (point-in-time state, what-changed, provenance) need the
-            # bi-temporal store; single-hop retrieval returns the latest chunk and misses the
-            # time dimension. This is how the planner routes Graphiti vs document retrieval.
+            # point-in-time / what-changed / provenance: needs the bi-temporal store. (Graphiti vs document)
             recall = 0.9 if method == "temporal" else recall * 0.6
+        elif want == "analytical":
+            # aggregates / structured filters ("how many … per …"): only the DB retriever can compute
+            # them; document retrieval returns prose about the topic, not the number. (SQL/Mongo/Elastic)
+            recall = 0.9 if method in ("sql", "mongo", "elastic") else recall * 0.6
+        elif want == "graph":
+            # a graph-representation query that is NOT multi-hop reasoning = a deterministic ownership /
+            # entity-link lookup → the property-graph traversal is exact where document retrieval only
+            # finds mentions of the entity. This is how the planner routes Neo4j/Neptune vs HippoRAG.
+            recall = 0.92 if method in ("cypher", "gremlin") else recall * 0.6
+        elif bucket == "exact_lookup":
+            # exact identifiers (an LEI, a sanctions/case reference): lexical exact match beats dense,
+            # which returns semantically-near but wrong entities. (BM25 vs vectors)
+            recall = 0.9 if method == "bm25" else (recall * 0.75 if method == "hybrid" else recall)
+        elif bucket == "conceptual":
+            # semantic/conceptual questions ("what kind of …", "similar to …"): dense embeddings are
+            # the point; lexical overlap misses paraphrase. (dense vectors)
+            recall = 0.88 if method == "vector" else (recall * 0.9 if method == "hybrid" else recall)
+        # property-graph traversal (cypher/gremlin) is a bounded pointer-walk in a DB — fast, unlike
+        # HippoRAG's KG-build + Personalized PageRank; only `graph` pays that price.
         is_graph = method == "graph"
 
         base_acc = TIER_ACCURACY.get(tier, 0.7)

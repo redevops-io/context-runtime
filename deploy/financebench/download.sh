@@ -2,7 +2,7 @@
 # Download the FinanceBench demo data: the open-source Q&A + a subset of SEC filing PDFs.
 # FinanceBench (Patronus AI, https://github.com/patronus-ai/financebench) — real 10-K/10-Q
 # filings + expert Q&A; a recognized "RAG is hard here" benchmark (dense tables, numerical,
-# multi-hop). Data lands in ../../.financebench/ (gitignored).
+# multi-hop). License: CC-BY-4.0 (Patronus AI). Data lands in ../../.financebench/ (gitignored).
 set -euo pipefail
 DEST="$(cd "$(dirname "$0")/../.." && pwd)/.financebench"
 RAW="https://raw.githubusercontent.com/patronus-ai/financebench/main"
