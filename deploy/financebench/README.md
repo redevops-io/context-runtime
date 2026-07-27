@@ -2,8 +2,8 @@
 
 The "crown jewel" demo: Context Runtime + the LibreChat **Libre Query Board** on data that
 is genuinely **hard to ingest and query** — real SEC 10-K/10-Q filings from
-[FinanceBench](https://github.com/patronus-ai/financebench) (Patronus AI), a recognized
-"RAG fails here" benchmark.
+[FinanceBench](https://github.com/patronus-ai/financebench) (Patronus AI, licensed
+CC-BY-4.0), a recognized "RAG fails here" benchmark.
 
 It shows the thesis directly: **no single retrieval method is enough**, and the runtime
 serves the best one while the Query Board makes every method's answer visible next to the
