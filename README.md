@@ -11,8 +11,8 @@ replayable plan, and **learns from the outcome**. It does for AI context what qu
 planners did for SQL. See [POSITIONING.md](./POSITIONING.md) for the thesis.
 
 It optimizes any app with (a) a decision point about what context/config to use and
-(b) a measurable outcome. Eleven tenants are built and green (each number is the
-learned-vs-baseline reward its offline example in `examples/` prints):
+(b) a measurable outcome. The eleven tenants in the reward-table slice below are built and
+green (each number is the learned-vs-baseline reward its offline example in `examples/` prints):
 
 | Tenant | Context Runtime tunes | Result |
 |---|---|---|
@@ -67,7 +67,7 @@ while the core does the domain work:
 | lifecycle | Listmonk | guide | redevops-rag |
 
 Plus **outreach-engine** (Twenty CRM), and **growth-assistant** + **agentic-privacy** (both on ERPNext — leads / contacts, not books), and the **control plane**
-(`agentic_os`: deploy / observe / approve, `/m/<app>` proxy + a module catalog). Most have the offline
+(`context_runtime.control_plane`: deploy / observe / approve, `/m/<app>` proxy + a module catalog). Most have the offline
 reward examples shown above (`examples/<app>.py`); the rest are native realizations without a
 standalone tuner.
 
@@ -182,5 +182,5 @@ The decision layer is thin; the substrate is reused. See:
 ## Test
 
 ```bash
-pip install -e ".[dev]" && pytest      # 325 tests; test_conformance.py == SPEC §10
+pip install -e ".[dev]" && pytest      # the full conformance suite (test_conformance.py == SPEC §10)
 ```
