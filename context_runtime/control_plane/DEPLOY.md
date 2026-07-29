@@ -1,6 +1,6 @@
 # Deploying the Context Runtime control plane
 
-This replaces the retired `agentic-os` control-plane image. It serves the **same HTTP
+This is the Context Runtime control-plane image. It serves the **HTTP
 API** the demo + cloudflared depend on (`/`, `/health`, `/status`, `/modules`,
 `/m/<name>`, `/dispatch`, `/approvals`, `/agent/run`) on port **8080**, but the brain is
 Context Runtime's `ModuleTenant` fleet — so `/status` reflects real tenants, and every
@@ -17,11 +17,10 @@ uvicorn context_runtime.control_plane.app:app --host 0.0.0.0 --port 8080
 `CONTEXT_RUNTIME_API_KEY` gates the POST routes (falls back to `AGENTIC_OS_API_KEY` for
 compatibility). `CONTEXT_RUNTIME_HOME` holds the approvals/audit log.
 
-## Drop-in for `agentic-os-stack/integrated.compose.yml`
+## The `control-plane:` service in `agentic-os-stack/integrated.compose.yml`
 
-Replace the `control-plane:` service (which built from the now-gone
-`/projects/agentic-os-src`) with this — same port mapping, network, volume, and
-`depends_on`, only the build context + command change:
+The `control-plane:` service builds from Context Runtime as below — same port mapping,
+network, volume, and `depends_on`, with this build context + command:
 
 ```yaml
   control-plane:

@@ -1,9 +1,9 @@
-# Context Runtime — Final Benchmark Report
+# Context Runtime — Benchmark Report
 
 _Full `examples/` suite run end-to-end on the v3 engine. Every number is produced by a runnable
 script (`PYTHONPATH=. python examples/<name>.py`) — no invented figures._
 
-**Run status: 30 / 30 benchmarks passed** (seeded, deterministic simulations; the consolidated
+**Run status (a benchmark run on the v3 engine): 30 / 30 benchmarks passed** (seeded, deterministic simulations; the consolidated
 headline is cross-checked in the independent Go re-implementation).
 
 **Judge change in this cycle:** the LLM-as-judge default moved from **OpenAI GPT-5.5 → Grok 4.5**
@@ -55,7 +55,7 @@ Served true-precision, 40 seeds, coverage-biased judge:
 
 ## 6. Fleet / tenants (`fleet_tenants` + per-app demos)
 
-**17 tenants**, one pattern: each module = one goal, one metric, a learned *cheapest-sufficient source*
+**17 benchmarked tenants**, one pattern: each module = one goal, one metric, a learned *cheapest-sufficient source*
 policy — replacing hand-wired controllers with one data-driven Context Runtime tenant pattern. The
 per-app tenant demos all ran green: `agentic_billing, agentic_books, agentic_compliance,
 agentic_support, control_tower, market_radar, growth_engine, social_autopilot, outreach_engine,
@@ -63,7 +63,7 @@ outreach_pipeline, incident_review, soc_triage, sidekick_learning, vibexgen_lear
 
 ## Full run table
 
-All 30 scripts exited 0. Slowest: `consolidated_benchmark` (14s, runs the Go twin), `dspark_calibration_bench` (12s). One pre-existing example bug fixed this cycle: `fleet_tenants` was missing an `outreach` probe (added).
+All 30 scripts exited 0. Slowest: `consolidated_benchmark` (14s, runs the Go twin), `dspark_calibration_bench` (12s).
 
 _Reproduce any line: `PYTHONPATH=. python examples/<name>.py`. Headline card:
 `PYTHONPATH=. python examples/consolidated_benchmark.py --html out.html`._
