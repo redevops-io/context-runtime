@@ -13,7 +13,7 @@ Most evals/examples in this repo use small synthetic, self-authored corpora (no 
 - Citation: Jin et al., "PubMedQA: A Dataset for Biomedical Research Question Answering," EMNLP 2019.
 
 ## Synthetic / self-authored (no external data)
-- eval/context_runtime_eval.py and most examples/ build small hand-written corpora inline. The Russian medical-lab PDFs referenced in eval/context_runtime_eval.md are a private/personal corpus, not a public dataset, and are not redistributed.
+- eval/context_runtime_eval.py and most examples/ build small hand-written corpora inline. The Russian medical-lab PDFs referenced in eval/context_runtime_eval.py are a private/personal corpus, not a public dataset, and are not redistributed.
 
 ## How this data is used
 These datasets are used solely to develop and benchmark the Context Runtime software itself (internal R&D and regression testing of stack improvements). They are NOT redistributed, NOT embedded in or shipped with the product, and NOT part of any customer deployment. Context Runtime customers apply the software to their own data under their own data licenses.

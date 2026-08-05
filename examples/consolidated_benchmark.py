@@ -188,7 +188,7 @@ def v3_document(v3: dict) -> str:
         "> **Preliminary.** This is a forward-looking axis distinct from — and not a replacement for — the\n"
         "> shipped v1→v2 calibration results in [`BENCHMARKS.md`](../BENCHMARKS.md). It is kept in its own\n"
         "> file until promoted. Reproduce with "
-        "`PYTHONPATH=. python examples/consolidated_benchmark.py --v3-doc docs/BENCHMARKS-v3-preliminary.md`.\n\n"
+        "`PYTHONPATH=. python examples/consolidated_benchmark.py --v3-doc BENCHMARKS.md`.\n\n"
         "## Online optimization under drift (Generation 4)\n\n"
         "The best plan drifts mid-run (a model upgrade, a corpus shift). A **static** v1/v2 planner is pinned\n"
         "to the now-stale plan; the **v3 online** planner re-explores, and recency-weighted (discounted)\n"
