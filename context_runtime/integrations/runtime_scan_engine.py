@@ -15,9 +15,11 @@ import re
 import shutil
 import subprocess
 import urllib.parse
+import uuid
 from dataclasses import dataclass, field
 
-from ..types import Hit
+# NB: ``Hit`` is imported lazily inside ``Finding.as_hit`` (not at module top) so this engine
+# runs standalone in the slim deploy-scan scanner image without the full context_runtime package.
 
 _SEV_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 
@@ -73,7 +75,8 @@ class Finding:
     evidence: str = ""
     ref: str = ""            # CVE / template-id / plugin-id
 
-    def as_hit(self, idx: int) -> Hit:
+    def as_hit(self, idx: int):
+        from ..types import Hit   # lazy: only needed by the CR tenant, not the standalone scanner
         return Hit(chunk_id=f"{self.tool}::{idx}", filename=self.tool, source=self.tool,
                    text=f"[{self.severity.upper()}] {self.name} @ {self.target}"
                         + (f" ({self.ref})" if self.ref else ""),
@@ -180,8 +183,11 @@ class DeploymentScanner:
         self._guard(target)
         if not (self.live and shutil.which("nuclei")):
             return self._sim(target, "nuclei")
-        rc, out, err = self._run(["nuclei", "-u", _as_url(target), "-severity", severity,
-                                  "-jsonl", "-silent", "-duc"])
+        cmd = ["nuclei", "-u", _as_url(target), "-severity", severity, "-jsonl", "-silent", "-duc"]
+        tdir = os.getenv("SCAN_NUCLEI_TEMPLATES")   # pin templates dir (container bakes a fixed path)
+        if tdir:
+            cmd += ["-t", tdir]
+        rc, out, err = self._run(cmd)
         if rc != 0:
             return ScanReport(False, target, ["nuclei"], note=f"nuclei rc={rc}: {err[:140]}")
         return ScanReport(True, target, ["nuclei"], findings=_parse_nuclei(out, target))
@@ -201,13 +207,16 @@ class DeploymentScanner:
         zap_timeout = max(self.timeout, float(os.getenv("SCAN_ZAP_TIMEOUT", "600")))
         if not self.live:
             return self._sim(target, tool)
-        # 1) native ZAP scripts on PATH
+        # 1) native ZAP scripts on PATH. zap-baseline.py writes -J RELATIVE to the ZAP
+        #    working dir (/zap/wrk in the ZAP image), not an absolute path — so pass a
+        #    basename and read it back from that working dir.
         if shutil.which(script):
-            import tempfile
-            report = tempfile.NamedTemporaryFile("r", suffix=".json", delete=False).name
-            rc, _, _ = self._run([script, "-t", url, "-J", report, "-I"], timeout=zap_timeout)
-            return ScanReport(True, target, ["zap"], findings=_parse_zap(_read(report), target),
-                              note=f"{kind} native (rc={rc})")
+            workdir = os.getenv("SCAN_ZAP_WORKDIR", "/zap/wrk")
+            name = f"zap_{uuid.uuid4().hex[:8]}.json"
+            rc, _, _ = self._run([script, "-t", url, "-J", name, "-I"], timeout=zap_timeout)
+            raw = _read(os.path.join(workdir, name)) or _read(name)   # fallback: process cwd
+            return ScanReport(bool(raw) or rc == 0, target, ["zap"],
+                              findings=_parse_zap(raw, target), note=f"{kind} native (rc={rc})")
         # 2) containerized ZAP (zaproxy/zap-stable) — report lands in the mounted /zap/wrk
         image = self._docker_image()
         if image:

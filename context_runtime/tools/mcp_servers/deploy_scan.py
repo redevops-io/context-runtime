@@ -28,10 +28,16 @@ import threading
 import time
 import uuid
 
-from ...integrations.runtime_scan_engine import (
-    ACTIVE_PROFILES, PROFILES, DeploymentScanner, OutOfScopeError, ScanReport,
-    Finding, host_of, in_scope,
-)
+try:  # in-package (context_runtime) …
+    from ...integrations.runtime_scan_engine import (
+        ACTIVE_PROFILES, PROFILES, DeploymentScanner, OutOfScopeError, ScanReport,
+        Finding, host_of, in_scope,
+    )
+except ImportError:  # … or vendored flat next to this file in the deploy-scan image
+    from runtime_scan_engine import (  # type: ignore
+        ACTIVE_PROFILES, PROFILES, DeploymentScanner, OutOfScopeError, ScanReport,
+        Finding, host_of, in_scope,
+    )
 
 _JOBS: dict[str, dict] = {}
 _LOCK = threading.Lock()
@@ -193,6 +199,7 @@ def _handle(req: dict) -> dict | None:
 
 
 def main() -> None:
+    """stdio transport (default) — one JSON-RPC message per line."""
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -207,5 +214,45 @@ def main() -> None:
             sys.stdout.flush()
 
 
+def serve_http(host: str = "0.0.0.0", port: int = 8770) -> None:
+    """HTTP transport — one JSON-RPC request per POST, matching MCPClient.http. Used when the
+    scanner runs as a networked compose/k8s service reached over the shared network."""
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def _send(self, code: int, payload: dict | None) -> None:
+            body = (json.dumps(payload) if payload is not None else "").encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if body:
+                self.wfile.write(body)
+
+        def do_GET(self):  # lightweight health/readiness probe
+            self._send(200, {"ok": True, "server": "deploy-scan", "tools": [t["name"] for t in _TOOLS]})
+
+        def do_POST(self):
+            try:
+                n = int(self.headers.get("Content-Length", 0))
+                req = json.loads(self.rfile.read(n) or b"{}")
+            except Exception:  # noqa: BLE001
+                self._send(400, {"jsonrpc": "2.0", "error": {"code": -32700, "message": "parse error"}})
+                return
+            resp = _handle(req)
+            self._send(200, resp if resp is not None else {})
+
+        def log_message(self, *a):  # keep the JSON-RPC stream / logs quiet
+            pass
+
+    ThreadingHTTPServer((host, port), Handler).serve_forever()
+
+
 if __name__ == "__main__":
-    main()
+    if "--http" in sys.argv:
+        i = sys.argv.index("--http")
+        bind = sys.argv[i + 1] if i + 1 < len(sys.argv) else "0.0.0.0:8770"
+        h, _, p = bind.rpartition(":")
+        serve_http(h or "0.0.0.0", int(p or "8770"))
+    else:
+        main()
