@@ -35,6 +35,19 @@ def host_of(target: str) -> str:
     return t.split("/")[0].split(":")[0].lower()
 
 
+def port_of(target: str) -> str | None:
+    """Explicit port from a URL / host:port, else None."""
+    t = (target or "").strip()
+    if "://" in t:
+        p = urllib.parse.urlparse(t).port
+        return str(p) if p else None
+    seg = t.split("/")[0]
+    if ":" in seg:
+        pt = seg.rsplit(":", 1)[1]
+        return pt if pt.isdigit() else None
+    return None
+
+
 def load_allowlist(env: str | None = None) -> list[str]:
     raw = env if env is not None else os.getenv("SCAN_ALLOWLIST", "")
     return [h.strip().lower() for h in raw.split(",") if h.strip()]
@@ -173,7 +186,19 @@ class DeploymentScanner:
         self._guard(target)
         if not (self.live and shutil.which("nmap")):
             return self._sim(target, "nmap")
-        rc, out, err = self._run(["nmap", "-Pn", "-T4", "--top-ports", "100", "-sV",
+        # Port selection: default the top 1000 (covers the common service range). SCAN_NMAP_PORTS
+        # overrides — a raw nmap flag ("--top-ports 3000", "-p-") or a port spec ("1-10000",
+        # "22,80,8230"). An explicit target port (host:PORT / URL) is always included, so services
+        # on high ports (e.g. an agent on :8230, outside the top-1000) aren't missed.
+        env_ports = os.getenv("SCAN_NMAP_PORTS", "").strip()
+        explicit = port_of(target)
+        if env_ports:
+            port_args = env_ports.split() if env_ports.startswith("-") else ["-p", env_ports]
+        elif explicit:
+            port_args = ["-p", f"1-1000,{explicit}"]
+        else:
+            port_args = ["--top-ports", "1000"]
+        rc, out, err = self._run(["nmap", "-Pn", "-T4", *port_args, "-sV",
                                   "--script", "ssl-enum-ciphers", host_of(target)])
         if rc != 0:
             return ScanReport(False, target, ["nmap"], note=f"nmap rc={rc}: {err[:140]}")
