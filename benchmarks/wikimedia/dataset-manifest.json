@@ -1,0 +1,63 @@
+{
+  "benchmark": "evidence-native-runtime/wikimedia",
+  "stage": "small",
+  "frozen_at": "2026-08-21",
+  "corpus": {
+    "project": "strategywiki",
+    "project_name": "Strategic Planning (strategy.wikimedia.org)",
+    "dump_date": "20260801",
+    "source_base_url": "https://dumps.wikimedia.org/strategywiki/20260801/",
+    "mediawiki_export_schema": "0.11",
+    "generator": "MediaWiki 1.46.0-wmf.26",
+    "files": [
+      {
+        "role": "pages-meta-history",
+        "filename": "strategywiki-20260801-pages-meta-history.xml.bz2",
+        "url": "https://dumps.wikimedia.org/strategywiki/20260801/strategywiki-20260801-pages-meta-history.xml.bz2",
+        "sha256": "310b125c835dfb011b91d7f257354f2095fe7739f3e0c19eaa827c349bd8c873",
+        "bytes": 25560000,
+        "note": "full revision history incl. wikitext + sha1 content digests"
+      },
+      {
+        "role": "stub-meta-history",
+        "filename": "strategywiki-20260801-stub-meta-history.xml.gz",
+        "url": "https://dumps.wikimedia.org/strategywiki/20260801/strategywiki-20260801-stub-meta-history.xml.gz",
+        "sha256": "3c442396f22be2da19a1faf62661a6ca24cebe32baaa72fa9e42209217be6aa2",
+        "bytes": 6510000,
+        "note": "revision-graph metadata (no wikitext) for fast profiling"
+      },
+      {
+        "role": "pages-logging",
+        "filename": "strategywiki-20260801-pages-logging.xml.gz",
+        "url": "https://dumps.wikimedia.org/strategywiki/20260801/strategywiki-20260801-pages-logging.xml.gz",
+        "sha256": "7d45e608f6eeb2d7ce5d8cb84e47f3ac59504a11a0f5df3c69c5f4c20b22b94d",
+        "bytes": 490000,
+        "note": "moderation/log events incl. page protections (Tests E/F external labels)"
+      }
+    ]
+  },
+  "profile": {
+    "pages": 24038,
+    "revisions": 80092,
+    "revisions_per_page_mean": 3.332,
+    "revisions_per_page_max": 565,
+    "changed_pages_gt1_rev": 8411,
+    "reverts_sha1_match": 4788,
+    "pages_with_revert": 2676,
+    "protection_events": 171,
+    "distinct_protected_pages": 158,
+    "temporal_span": ["2001-10-10T03:44:11Z", "2026-08-02T15:29:30Z"],
+    "profiler": "harness/profile.py"
+  },
+  "runtime_pins": {
+    "runtime-contracts": {"sha": "396b68e", "version": "0.3.0"},
+    "redevops-rag": {"sha": "6da3d8f", "version": "0.2.0"},
+    "discovery-runtime": {"sha": "e6a2936", "version": "0.1.10"},
+    "contextos": {"sha": "727ef62", "version": "0.2.0"},
+    "agentic-os": {"sha": "551e643", "version": "0.2.4"},
+    "context-runtime-bench": {"sha": "21e0294"}
+  },
+  "canonicalization_version": "rcv1",
+  "python": "3.14.4",
+  "notes": "Frozen public corpus is the benchmark input fixture. Raw dumps are gitignored (data/); their identity is pinned here by sha256. Do not benchmark against a moving API response."
+}

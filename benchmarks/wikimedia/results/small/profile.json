@@ -1,0 +1,38 @@
+{
+  "pages": 24038,
+  "revisions": 80092,
+  "revisions_per_page_mean": 3.332,
+  "revisions_per_page_max": 565,
+  "changed_pages_gt1_rev": 8411,
+  "reverts_sha1_match": 4788,
+  "pages_with_revert": 2676,
+  "namespaces_top": {
+    "90": 9649,
+    "3": 5750,
+    "0": 2127,
+    "2": 1449,
+    "106": 1012,
+    "10": 845,
+    "8": 775,
+    "107": 769
+  },
+  "temporal_span": {
+    "first_revision": "2001-10-10T03:44:11Z",
+    "last_revision": "2026-08-02T15:29:30Z"
+  },
+  "log_events_total": 12419,
+  "log_types_top": {
+    "delete": 3802,
+    "move": 2851,
+    "newusers": 2586,
+    "massmessage": 720,
+    "renameuser": 587,
+    "block": 524,
+    "rights": 371,
+    "upload": 321,
+    "protect": 200,
+    "patrol": 193
+  },
+  "protection_events": 171,
+  "distinct_protected_pages": 158
+}
