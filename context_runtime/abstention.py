@@ -20,13 +20,20 @@ from .types import Goal, PlanScore
 
 @dataclass(frozen=True)
 class AbstentionVerdict:
-    action: str          # "serve" | "escalate" | "abstain"
+    action: str          # "serve" | "escalate" | "abstain" | "refresh"
     confidence: float    # calibrated confidence of the evaluated plan, in [0, 1]
     reason: str
+    freshness: float = 1.0   # evidence freshness of the evaluated plan, in [0, 1]
 
     @property
     def abstained(self) -> bool:
         return self.action == "abstain"
+
+    @property
+    def refresh(self) -> bool:
+        """The plan is confident enough, but its evidence is too stale to serve — refresh first.
+        Distinct from abstain (unsure) and escalate (need a stronger tier)."""
+        return self.action == "refresh"
 
 
 class AbstentionGate:
@@ -45,10 +52,14 @@ class AbstentionGate:
         *,
         calibrate: Callable[[float], float] | None = None,
         can_escalate: Callable[[PlanScore, Goal | None], bool] | None = None,
+        min_freshness: float = 0.0,
     ):
         self.min_confidence = min_confidence
         self.calibrate = calibrate
         self.can_escalate = can_escalate
+        # min_freshness=0.0 (default) disables the freshness gate → no behavior change; set it >0 to make
+        # the gate return REFRESH when a confident plan is backed by evidence staler than the bar.
+        self.min_freshness = min_freshness
 
     def confidence(self, score: PlanScore) -> float:
         """Plan-time confidence = the estimator's expected accuracy, calibrated if a map is provided."""
@@ -57,12 +68,15 @@ class AbstentionGate:
 
     def evaluate(self, score: PlanScore, goal: Goal | None = None) -> AbstentionVerdict:
         c = self.confidence(score)
+        f = score.freshness
+        # Freshness gate first: even a confident plan should not serve stale evidence — refresh it.
+        if self.min_freshness > 0.0 and f < self.min_freshness:
+            return AbstentionVerdict(
+                "refresh", c, f"freshness {f:.2f} < {self.min_freshness:.2f} — refresh evidence before serving", f)
         if c >= self.min_confidence:
-            return AbstentionVerdict("serve", c, f"confidence {c:.2f} ≥ {self.min_confidence:.2f}")
+            return AbstentionVerdict("serve", c, f"confidence {c:.2f} ≥ {self.min_confidence:.2f}", f)
         if self.can_escalate is not None and self.can_escalate(score, goal):
             return AbstentionVerdict(
-                "escalate", c, f"confidence {c:.2f} < {self.min_confidence:.2f} — escalate to a stronger tier"
-            )
+                "escalate", c, f"confidence {c:.2f} < {self.min_confidence:.2f} — escalate to a stronger tier", f)
         return AbstentionVerdict(
-            "abstain", c, f"confidence {c:.2f} < {self.min_confidence:.2f} — abstain (honest, protects trust)"
-        )
+            "abstain", c, f"confidence {c:.2f} < {self.min_confidence:.2f} — abstain (honest, protects trust)", f)

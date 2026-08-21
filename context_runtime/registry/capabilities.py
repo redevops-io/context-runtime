@@ -30,7 +30,8 @@ class Capability:
     value: str                                      # the token used in a StepSpec / model_tier
     buckets: frozenset[str] = frozenset({"*"})      # intent buckets served
     cost_prior: float = 0.5                         # relative $ prior [0,1] (higher = pricier)
-    quality_prior: float = 0.5                      # relative quality prior [0,1] (higher = better)
+    quality_prior: float = 0.5                      # relative quality/confidence prior [0,1] (higher = better)
+    freshness_prior: float = 1.0                    # evidence-freshness prior [0,1] (v0.2.x Slice 5; 1=fresh)
     local: bool = False                             # served by an in-house / local resource
     tags: frozenset[str] = frozenset()
     meta: dict = field(default_factory=dict)

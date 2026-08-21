@@ -13,6 +13,10 @@ from ..types import PlanScore
 DEFAULT_WEIGHTS: dict[str, float] = {
     "acc": 1.0, "cache": 0.2, "vrf": 0.5,
     "cost": 0.6, "lat": 0.3, "risk": 0.8, "hall": 0.9, "loss": 0.4,
+    # Freshness as a first-class scored dimension (v0.2.x Slice 5): a STALENESS penalty, so a fully
+    # fresh plan (freshness=1.0, the default) contributes 0 and existing scores are unchanged; a plan
+    # backed by stale evidence is penalized, letting the optimizer prefer a fresher alternative.
+    "stale": 0.4,
 }
 
 # scales for raw-valued terms (min–max fallback when a candidate set is degenerate)
@@ -35,6 +39,7 @@ def total(score: PlanScore, weights: dict[str, float] | None = None) -> float:
         - w["risk"] * score.risk
         - w["hall"] * score.hallucination_probability
         - w["loss"] * score.context_loss
+        - w["stale"] * (1.0 - score.freshness)   # 0 when fresh (default) → no change to existing scores
     )
 
 
