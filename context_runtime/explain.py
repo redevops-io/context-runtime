@@ -78,15 +78,45 @@ def render_explain(exp: dict) -> str:
             flag = ""
             if prel is not None and float(h.get("score", 0)) > 1.5 and prel < 0.4:
                 flag = "   ← high raw score, low calibrated relevance"
+            # v0.2.x Slice 5 — surface the exact evidence revision behind the hit, when known.
+            ver, ch = h.get("version"), h.get("content_hash")
+            lin = ((f"@{ver}" if ver else "") + (f" #{ch[:12]}" if ch else "")).strip()
+            lin = f"  ⟨{lin}⟩" if lin else ""
             head = f"{method}" if i == 0 else ""
-            out.append(f"  {head:<10}{served} [{i+1}] {name:<28} score {float(h.get('score',0)):.2f}{ptxt}{flag}")
+            out.append(f"  {head:<10}{served} [{i+1}] {name:<28} score {float(h.get('score',0)):.2f}{ptxt}{lin}{flag}")
+
+    # ── evidence lineage (versioned refs) ──
+    lineage = exp.get("lineage")
+    if lineage:
+        out.append(_section("evidence lineage — versioned refs"))
+        for L in lineage:
+            pin = str(L.get("ref", "?"))
+            if L.get("version"):
+                pin += f"@{L['version']}"
+            if L.get("content_hash"):
+                pin += f" #{str(L['content_hash'])[:16]}"
+            meta = []
+            if L.get("source"):
+                meta.append(f"source={L['source']}")
+            if L.get("capability_version"):
+                meta.append(f"cap={L['capability_version']}")
+            if L.get("freshness") is not None:
+                meta.append(f"fresh={float(L['freshness']):.2f}")
+            tail = ("  (" + ", ".join(meta) + ")") if meta else ""
+            out.append(f"  {pin}{tail}")
 
     # ── served + abstain ──
     out.append(_section("served"))
     s = exp["served"]
     mp = f" · max P(rel) {s['max_p_rel']:.2f}" if s.get("max_p_rel") is not None else ""
-    ab = "ABSTAIN — " + s["abstain_reason"] if s.get("abstain") else "answered"
-    out.append(f"  {s['n']} passage(s) via {s['method']}{mp} · {ab}")
+    fr = f" · freshness {s['freshness']:.2f}" if s.get("freshness") is not None else ""
+    if s.get("refresh"):
+        ab = "REFRESH — " + s.get("refresh_reason", "evidence too stale to serve")
+    elif s.get("abstain"):
+        ab = "ABSTAIN — " + s["abstain_reason"]
+    else:
+        ab = "answered"
+    out.append(f"  {s['n']} passage(s) via {s['method']}{mp}{fr} · {ab}")
     if s.get("citations"):
         out.append(f"  citations: {', '.join(s['citations'][:8])}")
 

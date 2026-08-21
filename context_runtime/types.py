@@ -125,6 +125,7 @@ class PlanScore:
     risk: float = 0.0
     hallucination_probability: float = 0.0
     context_loss: float = 0.0
+    freshness: float = 1.0         # evidence freshness in [0,1] (1=fresh, 0=stale); staleness penalized
     total: float = 0.0             # the weighted PlanScore — what's maximized
     feasible: bool = True
 
