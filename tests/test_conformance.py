@@ -131,9 +131,14 @@ def test_rejects_higher_major_spec_version():
         jsonio.loads(Trace, json.dumps({"plan_id": "p", "goal_text": "x", "spec_version": "9.0"}))
 
 
-def test_v01_requires_no_v02_subsystems(rt):
-    # Plan Cache is the null/always-miss stub in v0.1
-    from context_runtime.plancache.cache import NullPlanCache
-    assert isinstance(rt.plan_cache, NullPlanCache)
-    plan = rt.plan("Explain why deployment X failed")
-    assert plan.cache in ("miss", "hit", "bypass")
+def test_plan_cache_is_deterministic_replay_by_default(rt):
+    # v0.2: the default plan cache is the real deterministic-replay store (keyed on source_fingerprint =
+    # pinned evidence identity), not the v0.1 always-miss stub. The v0.1 NullPlanCache stays available.
+    from context_runtime.plancache.cache import SnapshotPlanCache, NullPlanCache
+    assert isinstance(rt.plan_cache, SnapshotPlanCache)
+    p1 = rt.plan("Explain why deployment X failed")
+    assert p1.cache in ("miss", "bypass")
+    p2 = rt.plan("Explain why deployment X failed")   # same intent + same pinned sources → replay HIT
+    assert p2.cache == "hit"
+    # the v0.1 stub is still a valid injected cache (always miss)
+    assert NullPlanCache().get(object()) is None       # type: ignore[arg-type]

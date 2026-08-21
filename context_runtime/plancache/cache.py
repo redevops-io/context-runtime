@@ -1,8 +1,10 @@
-"""Plan Cache — v0.2 subsystem, stubbed in v0.1 (SPEC §7).
+"""Plan Cache — deterministic replay keyed on versioned evidence (SPEC §7, principle #7).
 
-The contract and key are defined now so the runtime can call it; v0.1 is a no-op that
-always misses. It can only be made *correct* once the v0.2 Knowledge graph supplies
-versioned sources to key/invalidate on (deterministic replay, principle #7).
+The key includes ``source_fingerprint`` — the hash of the pinned source *versions* (each source's
+content fingerprint, ``SourceRef.version``). So a plan is reused only for the SAME intent against the
+SAME pinned evidence identity under the SAME policy/constraints (exact replay); mutating a source's
+version changes ``source_fingerprint`` and misses (re-plan = re-evaluation). ``NullPlanCache`` is the
+v0.1 always-miss stub; :class:`SnapshotPlanCache` is the v0.2 store that makes the key load-bearing.
 """
 from __future__ import annotations
 
@@ -39,10 +41,30 @@ def build_key(intent: Intent, goal: Goal) -> PlanCacheKey:
 
 
 class NullPlanCache:
-    """v0.1: always misses. v0.2 replaces this with a semantic-match store."""
+    """v0.1: always misses. Kept for the v0.1 conformance profile and for callers that opt out of
+    caching (e.g. an online optimizer that must re-select every call)."""
 
     def get(self, key: PlanCacheKey) -> Plan | None:
         return None
 
     def put(self, key: PlanCacheKey, plan: Plan) -> None:
         return None
+
+
+class SnapshotPlanCache:
+    """v0.2 deterministic-replay cache: an exact-match store keyed on :class:`PlanCacheKey` (whose
+    ``source_fingerprint`` pins the evidence identity). Same intent + same pinned sources + same
+    policy/constraints ⇒ HIT (replay reuses the sealed plan); a mutated source version ⇒ new
+    ``source_fingerprint`` ⇒ MISS (re-plan). Principle #7 made load-bearing rather than a stub.
+
+    In-memory and process-local; a durable backend (keyed identically) can drop in behind this contract.
+    """
+
+    def __init__(self) -> None:
+        self._store: dict[PlanCacheKey, Plan] = {}
+
+    def get(self, key: PlanCacheKey) -> Plan | None:
+        return self._store.get(key)
+
+    def put(self, key: PlanCacheKey, plan: Plan) -> None:
+        self._store[key] = plan

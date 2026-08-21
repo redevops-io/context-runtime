@@ -17,7 +17,7 @@ from ..execution import graph as graphmod
 from ..observability import traces
 from ..learning.reward import DefaultReward
 from ..optimizer.knapsack import KnapsackOptimizer
-from ..plancache.cache import NullPlanCache, build_key
+from ..plancache.cache import NullPlanCache, SnapshotPlanCache, build_key
 from ..planner.candidates import RuleCandidateGenerator
 from ..planner.intent import RuleIntentAnalyzer
 from ..reasoner.single_shot import SingleShotReasoner
@@ -75,7 +75,10 @@ class ContextRuntime:
         self.compressor = compressor or StructuralCompressor()
         self.scheduler = scheduler or TopoScheduler()
         self.verifier = verifier or CitationVerifier()
-        self.plan_cache = plan_cache or NullPlanCache()
+        # Deterministic-replay plan cache by default (keyed on source_fingerprint = pinned evidence
+        # identity). Under online learning the optimizer must re-select every call, so caching is off
+        # (NullPlanCache) unless the caller injects one explicitly.
+        self.plan_cache = plan_cache or (NullPlanCache() if learning else SnapshotPlanCache())
         self.exporter = exporter        # optional TraceExporter (Langfuse/OTel/JSONL)
 
     # ──────────────────────────── construction ────────────────────────────
