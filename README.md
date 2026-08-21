@@ -142,7 +142,7 @@ The six plugin seams and their initial slice; several "real bindings" below are 
 | **Compression** | sidekick `clip` structural pack | LLMLingua-2 semantic (v0.1 optional) |
 | **Verifier** | citation/grounding check | RAGAS / Instructor |
 | **Observability** | in-process `Trace` + JSON | OpenLLMetry → Langfuse |
-| **Plan Cache** | null/always-miss stub | semantic cache (v0.2) |
+| **Plan Cache** | `SnapshotPlanCache` — deterministic replay keyed on source fingerprint (default) | semantic (embedding-match) cache |
 
 ## Also shipped
 
@@ -161,6 +161,16 @@ Beyond the initial slice, in both the Python source-of-truth and the Go port (wh
   the DB EXPLAIN-ANALYZE analogue for the retrieval decision: every candidate arm ranked with its
   quality/cost decomposition, the per-method trace with calibrated `P(relevant)`, served/abstain,
   and reward provenance. Read-only. Visualized at [redevops.io/planner](https://redevops.io/planner).
+- **Freshness-aware routing** — evidence **freshness** is a scored optimizer dimension (a staleness
+  penalty; a fully-fresh plan is unchanged) with a per-capability `freshness_prior`, and a **`REFRESH`**
+  abstention verdict: a confident plan on stale evidence returns REFRESH (distinct from abstain/escalate)
+  rather than serving stale context.
+- **Deterministic-replay Plan Cache** — `SnapshotPlanCache` is the default, keyed on
+  `source_fingerprint` (the pinned source versions): same intent + same pinned evidence ⇒ replay hit; a
+  mutated source version ⇒ miss (re-plan). `NullPlanCache` remains the opt-out (and the online-learning
+  default, so the bandit re-selects every call).
+- **Evidence lineage in EXPLAIN** — the EXPLAIN surface now cites the exact evidence revision behind a
+  hit (content-hash / source-version) plus the capability version and freshness.
 - **LiteLLM model binding** + native cost-tiered routing; **DuckDB** and **Postgres** stores.
 
 ## Benchmarks

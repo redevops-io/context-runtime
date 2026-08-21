@@ -591,8 +591,11 @@ MUST persist `(Plan, Trace)` pairs even though the learner ships in v0.3.
 
 ## 7. Plan-Cache key (seam 4)
 
-The Plan Cache (v0.2) caches `Intent → ExecutionGraph → PlanScore`. Correctness
-depends entirely on the key. A hit reuses the *plan*; it does NOT skip execution.
+The Plan Cache caches `Intent → ExecutionGraph → PlanScore`. Correctness depends
+entirely on the key. A hit reuses the *plan*; it does NOT skip execution.
+`SnapshotPlanCache` is the default (deterministic replay keyed on `source_fingerprint`);
+`NullPlanCache` is the always-miss opt-out (and the default under online learning, where
+the optimizer must re-select every call).
 
 ```python
 @dataclass(frozen=True)
@@ -614,8 +617,9 @@ class PlanCacheKey:
   changes (→ `source_fingerprint`), policy/permission changes, a model's
   `ModelCapabilities` change, the analyzer/planner version changes, or TTL expires.
 - **Soundness.** Rests on deterministic replay (principle #7): equal key ⇒ identical
-  `ExecutionGraph`. This is why the Plan Cache cannot predate the v0.2 Knowledge graph
-  that supplies versioned sources.
+  `ExecutionGraph`. This is why the load-bearing cache is keyed on versioned sources
+  (`source_fingerprint`): with `SourceRef.version` supplying each source's content
+  fingerprint, a mutated source misses and re-plans rather than replaying a stale plan.
 
 ---
 
