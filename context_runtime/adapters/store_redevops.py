@@ -39,11 +39,18 @@ class RedevopsRagRetriever:
         out: list[Hit] = []
         for r in rows:
             score = r.get("rerank_score", r.get("boosted_score", r.get("rrf_score", 0.0)))
+            meta = {kk: r[kk] for kk in ("rrf_score", "boosted_score") if kk in r}
+            # Carry the canonical evidence identity redevops-rag now emits (source revision + strict
+            # rcv1 content hash + source timestamp) so freshness can be sourced from real evidence and
+            # EXPLAIN can name the exact ref/version/hash. Absent on a legacy corpus → fields stay None.
+            if r.get("source_ref"):
+                meta["source_ref"] = r["source_ref"]
             out.append(Hit(
                 chunk_id=r.get("chunk_id") or f"{r.get('filename')}::{r.get('chunk_index')}",
                 filename=r.get("filename", "?"), text=r.get("text", ""),
-                score=float(score), created_at=r.get("created_at"), source=self.source,
-                meta={kk: r[kk] for kk in ("rrf_score", "boosted_score") if kk in r},
+                score=float(score), created_at=r.get("created_at"), source=self.source, meta=meta,
+                version=r.get("source_version"), content_hash=r.get("source_content_hash"),
+                observed_at=r.get("observed_at"),
             ))
         return out
 

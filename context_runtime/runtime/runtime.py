@@ -47,7 +47,7 @@ class ContextRuntime:
     def __init__(self, *, models, retriever, estimator=None, config: Config | None = None,
                  intent=None, candidates=None, optimizer=None, compressor=None,
                  scheduler=None, verifier=None, plan_cache=None, exporter=None,
-                 learning: bool = False, reward=None):
+                 learning: bool = False, reward=None, freshness_policy=None):
         self.config = config or Config()
         # models: a dict tier->ModelPlugin, or a single ModelPlugin used for all tiers
         if not isinstance(models, dict):
@@ -80,6 +80,10 @@ class ContextRuntime:
         # (NullPlanCache) unless the caller injects one explicitly.
         self.plan_cache = plan_cache or (NullPlanCache() if learning else SnapshotPlanCache())
         self.exporter = exporter        # optional TraceExporter (Langfuse/OTel/JSONL)
+        # Evidence-sourced freshness on the DEFAULT serving path (v0.2.x freshness-from-evidence).
+        # None / disabled → freshness stays 1.0 and execute() is byte-for-byte the legacy path; set a
+        # FreshnessPolicy to derive freshness from retrieved evidence and gate REFRESH at serve time.
+        self.freshness_policy = freshness_policy
 
     # ──────────────────────────── construction ────────────────────────────
 
@@ -169,7 +173,7 @@ class ContextRuntime:
 
     # ──────────────────────────── execution ────────────────────────────
 
-    def execute(self, ctx: BuiltContext, goal: Goal | None = None) -> RunResult:
+    def execute(self, ctx: BuiltContext, goal: Goal | None = None, *, as_of=None) -> RunResult:
         tb = traces.TraceBuilder(ctx.plan.id, goal.text if goal else ctx.plan.intent.normalized)
 
         # schedule (decides when/where; recorded for inspection)
@@ -180,6 +184,26 @@ class ContextRuntime:
         # retrieve span (work done in build_context; record the outcome)
         tb.span("retrieve", "retrieve", {"hits": len(ctx.hits), "tokens": ctx.token_budget.get("compress", 0)},
                 t0, traces.now())
+
+        # freshness gate (v0.2.x freshness-from-evidence). Derive freshness from the retrieved
+        # evidence's source timestamps, record it on the plan score, and — if a policy is configured
+        # and the evidence is staler than its bar — REFRESH instead of serving. Disabled (no policy)
+        # ⇒ this whole block is skipped and the path is byte-for-byte the legacy one.
+        if self.freshness_policy is not None and getattr(self.freshness_policy, "enabled", False):
+            from .. import freshness as _fresh
+            from ..abstention import AbstentionGate
+            fr = _fresh.score_hits(ctx.hits, as_of=as_of, policy=self.freshness_policy)
+            ctx = replace(ctx, plan=replace(ctx.plan, score=replace(ctx.plan.score, freshness=fr)))
+            gate = AbstentionGate(min_confidence=self.freshness_policy.min_confidence,
+                                  min_freshness=self.freshness_policy.min_freshness)
+            verdict = gate.evaluate(ctx.plan.score, goal)
+            if verdict.refresh:
+                tb.span("freshness", "freshness", {"freshness": round(fr, 4), "action": "refresh"},
+                        t0, traces.now())
+                return RunResult(
+                    answer="", plan=ctx.plan, trace=tb.finalize(), citations=(),
+                    freshness=fr, refresh=True, refresh_reason=verdict.reason,
+                )
 
         # reason (Reasoner -> Router -> Model). Unified dispatch over both reasoning lines, keyed by the
         # plan's chosen strategy (SPEC 4.4):
@@ -237,7 +261,7 @@ class ContextRuntime:
 
         return RunResult(
             answer=result.text, plan=ctx.plan, trace=trace, citations=citations,
-            cost_usd=trace.actual_cost_usd, verdict=verdict,
+            cost_usd=trace.actual_cost_usd, verdict=verdict, freshness=ctx.plan.score.freshness,
         )
 
     def verify(self, result: RunResult) -> RunResult:
@@ -246,11 +270,11 @@ class ContextRuntime:
 
     # ──────────────────────────── the core command ────────────────────────────
 
-    def run(self, goal, *, sources=None, constraints=None) -> RunResult:
+    def run(self, goal, *, sources=None, constraints=None, as_of=None) -> RunResult:
         g = self._coerce_goal(goal, sources, constraints)
         plan = self.plan(g)
         ctx = self.build_context(plan, g)
-        return self.verify(self.execute(ctx, g))
+        return self.verify(self.execute(ctx, g, as_of=as_of))
 
     # ──────────────────────────── explain / simulate (no execution) ────────────────────────────
 

@@ -10,6 +10,7 @@ The core abstraction is ``run``, not ``ask``. See SPEC.md for the contracts.
 from __future__ import annotations
 
 from .runtime.runtime import ContextRuntime
+from .freshness import FreshnessPolicy
 from .types import (
     Constraints,
     Explanation,
@@ -20,7 +21,7 @@ from .types import (
     SourceRef,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
     "ContextRuntime",
     "Goal",
@@ -30,4 +31,5 @@ __all__ = [
     "RunResult",
     "Explanation",
     "Simulation",
+    "FreshnessPolicy",
 ]
