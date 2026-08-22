@@ -35,14 +35,29 @@ def _runtime_pins() -> dict:
     return pins
 
 
+def _governance_available() -> bool:
+    try:
+        import agentic_os_enterprise.governance  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
 def _run_once(pairs, workdir: str) -> list[dict]:
-    return [
+    out = [
         arm_a_replay.run(pairs, workdir),
         arm_b_incremental.run(pairs),
         arm_c_lineage.run(pairs),
         arm_d_freshness.run(pairs),
         arm_g_deterministic.run(pairs),
     ]
+    # Arms E/F need the v0.3.0 governance engine (agentic_os_enterprise.governance, PopulationRule +
+    # CrossSeriesRule + OBSERVE/ENFORCE). Run them when it is importable; otherwise they stay deferred.
+    if _governance_available():
+        from harness import governance_arms
+        out.append(governance_arms.run_arm_e())
+        out.append(governance_arms.run_arm_f())
+    return out
 
 
 def _semantic_key(arm_result: dict) -> tuple:
@@ -88,9 +103,9 @@ def main() -> int:
         "runtime_pins": pins, "n_pairs": len(pairs), "runs": args.runs,
         "reproducible_across_runs": reproducible,
         "arms_pass": arms_pass, "exit_gate_passed": all_pass and reproducible,
-        "arms_present": ["A", "B", "C", "D", "G"],
-        "arms_deferred": {"E": "cross-series governance engine not in v0.2.x (v0.3.0)",
-                          "F": "OBSERVE→ENFORCE depends on E (v0.3.0)"},
+        "arms_present": [a["arm"] for a in all_runs[-1]],
+        "governance_engine": ("agentic_os_enterprise.governance (v0.3.0)"
+                              if _governance_available() else "not installed — E/F deferred"),
         "last_run_metrics": {a["arm"]: a["metrics"] for a in all_runs[-1]},
     }
     (RESULTS / "summary.json").write_text(json.dumps(summary, indent=2))

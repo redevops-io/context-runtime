@@ -22,7 +22,7 @@
         "fingerprint_reproduced": 12,
         "epoch_reproduced": 12,
         "reevaluation_resolved_B": 12,
-        "replay_latency_ms_p50": 0.439
+        "replay_latency_ms_p50": 0.466
       }
     },
     {
@@ -88,6 +88,39 @@
         "deterministic_resolution_rate": 1.0,
         "content_hash_facts": 12,
         "ordering_facts": 12
+      }
+    },
+    {
+      "arm": "E",
+      "name": "evidence/action trajectory governance",
+      "passed": true,
+      "n_cases": 87,
+      "metrics": {
+        "protected_pages": 27,
+        "control_pages": 60,
+        "trajectory_recall_vs_label": 0.333,
+        "trajectory_false_positive_rate": 0.217,
+        "per_event_baseline_false_positive_rate": 1.0,
+        "cross_series_findings_protected": 10,
+        "cross_series_findings_control": 0,
+        "lead_time_days_p50": 0.0
+      }
+    },
+    {
+      "arm": "F",
+      "name": "OBSERVE\u2192ENFORCE lifecycle",
+      "passed": true,
+      "n_cases": 9,
+      "metrics": {
+        "detection_identical_observe_vs_enforce": 9,
+        "observe_decision_allow": 9,
+        "enforce_decision_require_review": 9,
+        "negative_controls_clean": true,
+        "negative_controls": {
+          "wrong_correlation_key": 0,
+          "outside_window": 0,
+          "below_threshold": 0
+        }
       }
     }
   ]
