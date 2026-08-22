@@ -7,8 +7,8 @@ under NO_OUTREACH while allowing a draft.
 from __future__ import annotations
 
 from context_runtime.integrations.revenue_intelligence import (
-    DEFAULT_BUNDLES, DECISIVE_PROVIDER, Fixture, ProviderBundle, RevenueIntelligenceTenant,
-    _gtm_bandit, gtm_bucket, outcome_for, reward_enrich,
+    DEFAULT_BUNDLES, DEFAULT_POPULATION_RULES, DECISIVE_PROVIDER, Fixture, GtmPopulationGovernor,
+    ProviderBundle, RevenueIntelligenceTenant, _gtm_bandit, gtm_bucket, outcome_for, reward_enrich,
 )
 
 
@@ -27,7 +27,41 @@ def test_bucket_classifier():
     assert gtm_bucket("verify this email is deliverable") == "contact_verify"
     assert gtm_bucket("what tech stack does the platform use") == "tech_signal"
     assert gtm_bucket("resolve the canonical company / dedupe") == "company_identity"
-    assert gtm_bucket("employee count and funding stage") == "firmographics"
+    assert gtm_bucket("employee count and industry") == "firmographics"
+    assert gtm_bucket("what series did they raise, and which investors") == "funding_signal"
+    assert gtm_bucket("something mentioned on a niche forum / open web") == "niche_signal"
+
+
+def _segmented_fixtures() -> dict[str, Fixture]:
+    """person_role and firmographics have a segment-dependent decisive provider — so a need-only policy
+    can't be optimal but a need×segment policy can."""
+    return {f.account_id: f for f in [
+        Fixture("s1", "EntA", "enta.com", "person_role", "apollo", "VP", segment="enterprise"),
+        Fixture("s2", "EntB", "entb.com", "person_role", "apollo", "CTO", segment="enterprise"),
+        Fixture("s3", "SmbA", "smba.io", "person_role", "pdl", "Founder", segment="smb"),
+        Fixture("s4", "SmbB", "smbb.io", "person_role", "pdl", "Eng", segment="smb"),
+        Fixture("s5", "PubA", "puba.com", "funding_signal", "sec", "10-K", segment="public"),
+        Fixture("s6", "PrivA", "priva.io", "funding_signal", "crunchbase", "Series C", segment="private"),
+    ]}
+
+
+def _train(fixtures, segmented, rounds=400) -> RevenueIntelligenceTenant:
+    t = RevenueIntelligenceTenant(fixtures, bandit=_gtm_bandit(0.1), approver=lambda spec: False,
+                                  segmented=segmented)
+    ids = list(fixtures)
+    for i in range(rounds):
+        t.record_outcome(ids[i % len(ids)], t.enrich(ids[i % len(ids)]).outcome)
+    return t
+
+
+def _eval(t, fixtures) -> tuple[int, float]:
+    correct = 0
+    cost = 0.0
+    for fx in fixtures.values():
+        bundle = next(b for b in DEFAULT_BUNDLES if b.key == t.policy()[t._ctx(fx, fx.need)])
+        correct += int(outcome_for(bundle, fx) == "correct")
+        cost += bundle.cost
+    return correct, cost
 
 
 def test_wrong_entity_penalised_below_missing():
@@ -89,3 +123,39 @@ def test_adaptive_beats_fixed_pipeline():
     assert adaptive_correct >= fixed_correct
     assert adaptive_correct == n
     assert adaptive_cost / n <= fixed.cost
+
+
+def test_learned_arm_f_cheaper_than_e_at_equal_quality():
+    """Phase 3: conditioning on segment (arm F) resolves every need at strictly lower cost than the
+    need-only policy (arm E), because E must buy a segment-covering bundle where F buys the cheap single."""
+    fx = _segmented_fixtures()
+    e_correct, e_cost = _eval(_train(fx, segmented=False), fx)
+    f_correct, f_cost = _eval(_train(fx, segmented=True), fx)
+    assert f_correct == e_correct == len(fx)      # both fully correct
+    assert f_cost < e_cost                         # F strictly cheaper
+
+
+def test_population_governor_detects_regression_and_is_observe_enforce_equivalent():
+    """Phase 4 (arm G): a healthy stream is clean; a batch escalating to the expensive fallback trips the
+    provider-storm + cost-runaway rules; OBSERVE and ENFORCE detect identically."""
+    healthy = [{"account_id": f"h{i}", "need": "person_role", "segment": "smb",
+                "bundle": "pdl", "providers": ("pdl",), "cost": 0.05, "outcome": "correct"} for i in range(20)]
+    assert GtmPopulationGovernor(mode="OBSERVE").evaluate(healthy) == []
+
+    regression = [{"account_id": f"r{i}", "need": "firmographics", "segment": "smb",
+                   "bundle": "apollo+web_research", "providers": ("apollo", "web_research"),
+                   "cost": 0.32, "outcome": "correct"} for i in range(8)]
+    observe = GtmPopulationGovernor(DEFAULT_POPULATION_RULES, mode="OBSERVE").evaluate(regression)
+    enforce = GtmPopulationGovernor(DEFAULT_POPULATION_RULES, mode="ENFORCE").evaluate(regression)
+    rules = {f.rule for f in observe}
+    assert "expensive-provider storm" in rules and "cost runaway" in rules
+    assert [(f.rule, f.disposition) for f in observe] == [(f.rule, f.disposition) for f in enforce]
+
+
+def test_governor_provider_storm_counts_distinct_accounts():
+    """distinct_on=account_id: one account escalating many times is not a storm."""
+    spammy_one = [{"account_id": "a1", "need": "niche_signal", "segment": "default",
+                   "bundle": "web_research", "providers": ("web_research",), "cost": 0.30,
+                   "outcome": "correct"} for _ in range(20)]
+    findings = GtmPopulationGovernor(DEFAULT_POPULATION_RULES, mode="OBSERVE").evaluate(spammy_one)
+    assert "expensive-provider storm" not in {f.rule for f in findings}
