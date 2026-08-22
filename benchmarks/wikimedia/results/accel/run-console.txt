@@ -1,0 +1,36 @@
+GPU: NVIDIA RTX PRO 5000 Blackwell cc12.0 44.4/50.8 GB free
+
+arm H (cuDF): incremental==full=True; equivalence 6/6 sizes
+  n=    5000 (real)  cpu=    1.04ms  gpu=   3.16ms  speedup=0.33x  ok=True
+  n=   36828 (real)  cpu=    1.85ms  gpu=   3.37ms  speedup=0.55x  ok=True
+  n=   50000 (scaled) cpu=    2.06ms  gpu=   3.17ms  speedup=0.65x  ok=True
+  n=  200000 (scaled) cpu=    3.86ms  gpu=   4.15ms  speedup=0.93x  ok=True
+  n= 1000000 (scaled) cpu=   22.90ms  gpu=   6.64ms  speedup=3.45x  ok=True
+  n= 2000000 (scaled) cpu=   52.11ms  gpu=   9.10ms  speedup=5.73x  ok=True
+
+arm I (cuVS): identity recall>= 0.95 on real sizes 3/3  (query-only = amortised prebuilt index; scaled recall informational)
+  n=   1000[ real ] exact_q=    0.83ms hnsw_q=3.627ms(r=0.9627)  cuvs_build= 210.35ms cuvs_q=  1.94ms(r=0.9697)  q_speedup_vs_exact=0.43x  ok=True
+  n=   5000[ real ] exact_q=    3.06ms hnsw_q=5.261ms(r=0.859)  cuvs_build= 181.35ms cuvs_q=  3.43ms(r=0.964)  q_speedup_vs_exact=0.89x  ok=True
+  n=  12000[ real ] exact_q=   13.37ms hnsw_q=5.688ms(r=0.8827)  cuvs_build= 241.57ms cuvs_q=  3.30ms(r=0.967)  q_speedup_vs_exact=4.06x  ok=True
+  n=  50000[scaled] exact_q=   39.99ms hnsw_q=10.016ms(r=0.9857)  cuvs_build= 269.13ms cuvs_q=  3.88ms(r=0.9933)  q_speedup_vs_exact=10.3x  ok=True
+  n= 200000[scaled] exact_q=  144.78ms hnsw_q=13.243ms(r=0.9793)  cuvs_build= 626.37ms cuvs_q=  3.98ms(r=0.9567)  q_speedup_vs_exact=36.38x  ok=True
+
+arm J (cuOpt): objective-match 10/10; scaled GPU-wins crossover at n=None
+  (a) fixed 8k-token context window — CPU expected to win:
+    n=   20 budget=   8000  cpu_dp=    0.07ms  cuopt= 103.67ms  obj_match=True  gpu_wins=False
+    n=   50 budget=   8000  cpu_dp=    0.20ms  cuopt=  97.65ms  obj_match=True  gpu_wins=False
+    n=  100 budget=   8000  cpu_dp=    0.52ms  cuopt= 403.45ms  obj_match=True  gpu_wins=False
+    n=  200 budget=   8000  cpu_dp=    0.73ms  cuopt= 110.28ms  obj_match=True  gpu_wins=False
+    n=  500 budget=   8000  cpu_dp=    2.57ms  cuopt= 978.69ms  obj_match=True  gpu_wins=False
+  (b) capacity-scaled (budget=50% of candidate tokens) — crossover:
+    n=   20 budget=   7098  cpu_dp=    0.07ms  cuopt= 120.31ms  speedup=0.001x  obj_match=True  gpu_wins=False
+    n=   50 budget=  15678  cpu_dp=    0.37ms  cuopt= 107.83ms  speedup=0.003x  obj_match=True  gpu_wins=False
+    n=  100 budget=  41942  cpu_dp=    2.20ms  cuopt= 121.26ms  speedup=0.018x  obj_match=True  gpu_wins=False
+    n=  200 budget=  83288  cpu_dp=   10.06ms  cuopt= 368.50ms  speedup=0.027x  obj_match=True  gpu_wins=False
+    n=  500 budget= 212439  cpu_dp=   49.81ms  cuopt= 431.74ms  speedup=0.115x  obj_match=True  gpu_wins=False
+
+=== ACCELERATOR SUMMARY ===
+  arm H: PASS — cuDF evidence/temporal processing (incremental-Discovery change-set)
+  arm I: PASS — cuVS RAG ANN retrieval (identity-preserving, query-throughput crossover)
+  arm J: PASS — cuOpt context-assembly token-budget packing (objective-equivalent, latency crossover)
+  wrote /root/results/accel/summary.json
