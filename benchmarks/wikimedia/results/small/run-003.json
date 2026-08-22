@@ -1,0 +1,94 @@
+{
+  "run": 3,
+  "runtime_pins": {
+    "runtime-contracts": "0.3.0",
+    "redevops-rag": "0.2.1",
+    "context-runtime": "0.2.0",
+    "agentic-os": "0.2.4",
+    "discovery-runtime": "0.1.10"
+  },
+  "n_pairs": 12,
+  "arms": [
+    {
+      "arm": "A",
+      "name": "point-in-time context + exact replay",
+      "passed": true,
+      "n_cases": 12,
+      "metrics": {
+        "replay_success": 12,
+        "exact_revision_recovery": 12,
+        "wrong_version_substitution": 0,
+        "silent_replay_divergence": 0,
+        "fingerprint_reproduced": 12,
+        "epoch_reproduced": 12,
+        "reevaluation_resolved_B": 12,
+        "replay_latency_ms_p50": 0.453
+      }
+    },
+    {
+      "arm": "B",
+      "name": "incremental Discovery vs full rescan",
+      "passed": true,
+      "n_cases": 12,
+      "metrics": {
+        "valid_state_equivalent": true,
+        "pages_changed": 6,
+        "full_conclusions_recomputed": 12,
+        "incremental_conclusions_recomputed": 6,
+        "full_model_calls": 12,
+        "incremental_model_calls": 6,
+        "full_examined": 12,
+        "incremental_examined": 12,
+        "recompute_reduction_ratio": 2.0
+      }
+    },
+    {
+      "arm": "C",
+      "name": "evidence lineage integrity",
+      "passed": true,
+      "n_cases": 12,
+      "metrics": {
+        "hits_checked": 14,
+        "authoritative_hash_mismatch": 0,
+        "wrong_revision_lineage": 0,
+        "stale_served_as_current": 0,
+        "missing_lineage_rate": 0,
+        "prior_revision_resolvable": 12
+      }
+    },
+    {
+      "arm": "D",
+      "name": "freshness and REFRESH",
+      "passed": true,
+      "n_cases": 48,
+      "metrics": {
+        "stale_evaluations": 24,
+        "fresh_evaluations": 24,
+        "refresh_when_stale": 24,
+        "served_when_fresh": 24,
+        "unnecessary_refresh": 0,
+        "stale_not_refreshed": 0,
+        "retrieval_miss": 0,
+        "legacy_disabled_unchanged": 24,
+        "stale_detection_recall": 1.0
+      }
+    },
+    {
+      "arm": "G",
+      "name": "deterministic-first",
+      "passed": true,
+      "n_cases": 12,
+      "metrics": {
+        "deterministic_verdicts": 12,
+        "model_calls_in_classification": 0,
+        "stale_recomputed": 4,
+        "invalidated_not_recomputed": 4,
+        "unchanged_not_recomputed": 4,
+        "model_calls_avoided": 8,
+        "deterministic_resolution_rate": 1.0,
+        "content_hash_facts": 12,
+        "ordering_facts": 12
+      }
+    }
+  ]
+}

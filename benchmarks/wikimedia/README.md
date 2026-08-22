@@ -31,21 +31,24 @@ claims what the code actually exercises.
 
 | Test | What it proves | Status | Basis |
 |---|---|---|---|
-| **A** point-in-time context + exact replay | mission bound to state A survives evidence advancing to B; `rehydrate` reproduces or fails closed; `re_evaluate` is distinct | ✅ **shipped** | agentic-os `ContextView`/`epoch_from_refs`, `plan_fingerprint`, `rehydrate`→`ReplayError`/`ReplayDivergence`/`UnrecoverableAuthority`, `re_evaluate`; real restart via `EventStore(path)` |
-| **B** incremental vs full Discovery | `discover_incremental` reaches the same valid state as a full rescan, examining less | ✅ **shipped** | discovery-runtime `discover_incremental`/`discover_full`, `DiscoveryCheckpoint`, `classify`, `IncrementalReport` |
-| **G** deterministic-first | deterministic facts resolve without a model call | ✅ **shipped (structural)** | no `deterministic` flag exists; measured via plan shape (no `reason` step ⇒ no model call) + `classify` + `IncrementalReport.model_calls` |
-| **C** evidence lineage integrity | derived artifacts trace back to the exact revision identity | ⚠️ **needs runtime wiring** | rc `EvidenceRef`/lineage + mission `evidence_refs` are real, but **redevops-rag does not consume runtime-contracts** (chunk id = bare sha256, no version). Wiring RAG→`EvidenceRef` is a prerequisite PR |
-| **D** freshness / REFRESH | stale evidence is penalized and can produce REFRESH | ⚠️ **needs runtime wiring** | contextos `PlanScore.freshness` is scored + `AbstentionGate(min_freshness)`→`"refresh"`, but nothing derives freshness from evidence (`freshness_prior` unused). Wiring evidence-`observed_at`→freshness is a prerequisite PR |
-| **E** evidence/action governance trajectories | cross-series rule (K revs / R reverts / window) flags trajectories a per-event baseline misses | ⛔ **engine does not exist** | no cross-series trajectory engine in Python (agentic-os: enterprise overlay, out of repo) **or Go** (CR-enterprise/go is policy+trust, not trajectory; no K/R/window, no dispositions, no OBSERVE→ENFORCE). Must be built before it can be benchmarked |
-| **F** OBSERVE→ENFORCE lifecycle | promotion changes disposition, not detection | ⛔ **depends on E** | same missing engine; there is no shadow→enforce rule lifecycle in either runtime |
+| **A** point-in-time context + exact replay | mission bound to state A survives evidence advancing to B; `rehydrate` reproduces or fails closed; `re_evaluate` is distinct | ✅ **shipped + validated** | agentic-os `ContextView`/`epoch_from_refs`, `plan_fingerprint`, `rehydrate`→`ReplayError`/`ReplayDivergence`/`UnrecoverableAuthority`, `re_evaluate`; real restart via `EventStore(path)` |
+| **B** incremental vs full Discovery | `discover_incremental` reaches the same valid state as a full rescan, examining less | ✅ **shipped + validated** | discovery-runtime `discover_incremental`/`discover_full`, `DiscoveryCheckpoint`, `classify`, `IncrementalReport` |
+| **G** deterministic-first | deterministic facts resolve without a model call | ✅ **shipped + validated** | measured via plan shape (no `reason` step ⇒ no model call) + `classify` + `IncrementalReport.model_calls` |
+| **C** evidence lineage integrity | derived artifacts trace back to the exact revision identity | ✅ **wired in v0.2.x + validated** | redevops-rag **0.2.1** now emits canonical `EvidenceRef`s (source ref/version/rcv1 hash) with version-aware retention; hits carry the identity into Discovery/Mission |
+| **D** freshness / REFRESH | stale evidence is penalized and can produce REFRESH | ✅ **wired in v0.2.x + validated** | context-runtime **0.2.0** derives `PlanScore.freshness` from the retrieved evidence's `observed_at`/version and REFRESHes on the normal serving path |
+| **E** evidence/action governance trajectories | cross-series rule (K revs / R reverts / window) flags trajectories a per-event baseline misses | ⛔ **deferred to v0.3.0** | no cross-series trajectory engine in Python or Go (CR-enterprise/go is policy+trust, not trajectory). Corpus selection wired (`select_protected_page_trajectories`); engine is v0.3.0 private work |
+| **F** OBSERVE→ENFORCE lifecycle | promotion changes disposition, not detection | ⛔ **deferred to v0.3.0** | depends on E; no shadow→enforce rule lifecycle in either runtime yet |
 
-**Decisions taken (Phase 0):** Stage-1 corpus = strategywiki; suite lives here in
-`context-runtime-bench` (no benchmark-only code added to production runtimes — the
-harness bridges via public APIs only).
+**Stage-1 result (v0.2.x, small corpus):** ✅ **EXIT GATE PASSED** — all five arms (A, B, C, D, G) pass
+across 3 reproducible runs on 12 real revision pairs, every hard gate = 0, no runtime bugs. Full
+numbers: [`reports/FINDINGS_v0.2.x_small.md`](reports/FINDINGS_v0.2.x_small.md); raw bundles:
+`results/small/`.
 
-**Open:** E/F require a real cross-series trajectory governance engine that neither the
-Python nor the Go runtime currently ships. Building it (vs deferring E/F) is a pending
-go/no-go. C/D require small real wiring PRs to redevops-rag and contextos.
+**Decisions taken (Phase 0):** Stage-1 corpus = strategywiki; suite lives here in `context-runtime-bench`
+(no benchmark-only code added to production runtimes — the harness drives public APIs only). C/D were
+closed as v0.2.x runtime stabilization PRs (redevops-rag #11 → v0.2.1, context-runtime #27 → v0.2.0),
+so the benchmark now validates the *frozen* foundation rather than building it. E/F await the v0.3.0
+governance engine.
 
 ## Layout
 
