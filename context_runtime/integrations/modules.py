@@ -80,6 +80,12 @@ CATALOG: dict[str, ModuleSpec] = {
                                  ("filings", "earnings_calls", "macro", "analyst", "news"), "thesis_support", ()),
     "personal":       ModuleSpec("personal", "Personal data", "personal AI",
                                  ("calendar", "email", "docs", "tasks", "memories"), "task_completed", ()),
+    # GTM revenue intelligence — the rich tenant lives in revenue_intelligence.py (providers as tools +
+    # NO_OUTREACH gate); this row registers it in the fleet. Metric: correct enrichment at min data cost.
+    "revenue_intelligence": ModuleSpec("revenue_intelligence", "Apollo/PDL/Hunter/BuiltWith",
+                                 "GTM revenue intelligence",
+                                 ("crm", "apollo", "pdl", "hunter", "builtwith"),
+                                 "correct_enrichment", ("outreach_send",)),
 }
 
 COST_LAMBDA = 0.2   # efficiency penalty per source in a bundle (cheapest-sufficient frontier)
