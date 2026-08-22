@@ -11,7 +11,7 @@ replayable plan, and **learns from the outcome**. It does for AI context what qu
 planners did for SQL. See [POSITIONING.md](./POSITIONING.md) for the thesis.
 
 It optimizes any app with (a) a decision point about what context/config to use and
-(b) a measurable outcome. The eleven tenants in the reward-table slice below are built and
+(b) a measurable outcome. The twelve tenants in the reward-table slice below are built and
 green (each number is the learned-vs-baseline reward its offline example in `examples/` prints):
 
 | Tenant | Context Runtime tunes | Result |
@@ -19,6 +19,7 @@ green (each number is the learned-vs-baseline reward its offline example in `exa
 | **sidekick** | which skills to recall · budget | drop-in for `SkillStore`; **67% vs 33%** naive baseline acceptance |
 | **redevops-rag** | `pool · limit · threshold · rerank …` per query | `ContextRuntimeRetrieverTuner`; **0.780 vs 0.428** vs fixed default |
 | **edge-sentinel (SOC)** | which sources to pull per alert (CrowdSec · threat-intel · EDR) | tool-using + approval-gated; **0.900 vs 0.800** always-full baseline |
+| **video-ad** | which generation chain (provider · detail · best-of-N) per shot-complexity bucket | learns the cheapest creative path to an *accepted* segment; **0.853 vs 0.777** premium baseline at **4.5× cheaper spend** |
 | **growth-engine** | which attribution window + source bundle per lead-source query | **7.851 vs 5.282** vs fixed window |
 | **control-tower** | which Metabase query set per "ask anything" question | **5.326 vs 1.643** vs core query set |
 | **agentic-billing** | which usage/invoice/dunning signals to pull per account | **4.122 vs 2.442** vs full-stack |
@@ -28,12 +29,13 @@ green (each number is the learned-vs-baseline reward its offline example in `exa
 | **market-radar** | which competitor watches to sweep per intel question | **3.611 vs 0.403** vs full-sweep |
 | **agentic-compliance** | which rule-family evidence to pull per finding | **3.562 vs 2.463** vs full-evidence |
 
-> Reward numbers are single-run outputs of each tenant's `examples/` script — re-run to reproduce (they drift with model/data changes). The **sidekick** and **redevops-rag** rows are current; the others may need a refresh.
+> Reward numbers are single-run outputs of each tenant's `examples/` script — re-run to reproduce (they drift with model/data changes). The **sidekick**, **redevops-rag**, and **video-ad** rows are current; the others may need a refresh.
 
 ```bash
 PYTHONPATH=. python examples/sidekick_learning.py   # discrete-strategy bandit
 PYTHONPATH=. python examples/rag_tuning.py          # numeric-knob tuning
 PYTHONPATH=. python examples/soc_triage.py          # tool-using cybersecurity tenant
+PYTHONPATH=. python examples/video_ad.py            # creative-workflow chain optimization
 ```
 
 Plus the **ToolPlugin** seam (`context_runtime/tools/` — how plans reach external systems,
@@ -161,16 +163,22 @@ Beyond the initial slice, in both the Python source-of-truth and the Go port (wh
   the DB EXPLAIN-ANALYZE analogue for the retrieval decision: every candidate arm ranked with its
   quality/cost decomposition, the per-method trace with calibrated `P(relevant)`, served/abstain,
   and reward provenance. Read-only. Visualized at [redevops.io/planner](https://redevops.io/planner).
-- **Freshness-aware routing** — evidence **freshness** is a scored optimizer dimension (a staleness
-  penalty; a fully-fresh plan is unchanged) with a per-capability `freshness_prior`, and a **`REFRESH`**
-  abstention verdict: a confident plan on stale evidence returns REFRESH (distinct from abstain/escalate)
-  rather than serving stale context.
+- **Freshness-aware routing (sourced from evidence)** — evidence **freshness** is a scored optimizer
+  dimension (a staleness penalty; a fully-fresh plan is unchanged), and — as of v0.2.0 — it is
+  **derived from the retrieved evidence's own source timestamp/version** (via a `FreshnessPolicy`),
+  not a static prior. On the normal `run` serving path a confident plan backed by evidence staler than
+  the policy's bar returns a **`REFRESH`** verdict (distinct from abstain/escalate) instead of serving
+  stale context. Entirely opt-in: with no `FreshnessPolicy` configured, freshness is `1.0` and the
+  path is byte-for-byte the legacy one.
 - **Deterministic-replay Plan Cache** — `SnapshotPlanCache` is the default, keyed on
   `source_fingerprint` (the pinned source versions): same intent + same pinned evidence ⇒ replay hit; a
   mutated source version ⇒ miss (re-plan). `NullPlanCache` remains the opt-out (and the online-learning
   default, so the bandit re-selects every call).
-- **Evidence lineage in EXPLAIN** — the EXPLAIN surface now cites the exact evidence revision behind a
-  hit (content-hash / source-version) plus the capability version and freshness.
+- **Evidence lineage in EXPLAIN** — the EXPLAIN surface cites the exact evidence revision behind a
+  hit (content-hash / source-version) plus the capability version and freshness. As of v0.2.0 a
+  `Hit` carries that identity from the retriever (the redevops-rag binding supplies it), and
+  `freshness.lineage_from_hits(...)` populates the section from the actual served evidence — the
+  renderer no longer relies on a caller hand-filling the lineage.
 - **LiteLLM model binding** + native cost-tiered routing; **DuckDB** and **Postgres** stores.
 
 ## Benchmarks
@@ -183,6 +191,10 @@ medical corpus** (coverage routing cuts cross-domain pollution 22→0 with recal
 (5.8× fan-out). Every number is produced by an example in [`examples/`](./examples).
 
 ## Architecture
+
+The runtimes use a **functional-core / imperative-shell** design: canonical artifacts and
+deterministic transformations stay value-oriented and side-effect free, while runtime actors, stores,
+and providers sit behind explicit `Protocol` interfaces — see [ARCHITECTURE.md](./ARCHITECTURE.md) §0.
 
 The decision layer is thin; the substrate is reused. See:
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — the layered design and the cost-based optimizer loop

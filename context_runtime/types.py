@@ -174,6 +174,12 @@ class Hit:
     created_at: str | None = None
     source: str | None = None
     meta: dict[str, Any] = field(default_factory=dict)
+    # Evidence identity carried from the retriever (v0.2.x freshness-from-evidence): the source
+    # revision `version`, its strict-rcv1 `content_hash`, and the source `observed_at` timestamp.
+    # None on retrievers that don't supply them → freshness stays 1.0 (unchanged legacy behavior).
+    version: str | None = None
+    content_hash: str | None = None
+    observed_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -403,6 +409,12 @@ class RunResult:
     citations: tuple[str, ...] = ()
     cost_usd: float = 0.0
     verdict: Verdict | None = None
+    # Freshness of the retrieved evidence at serve time (v0.2.x freshness-from-evidence). Default
+    # 1.0/False → unchanged when no freshness policy is configured. On REFRESH the runtime declines
+    # to serve stale evidence (answer left empty) and records the reason.
+    freshness: float = 1.0
+    refresh: bool = False
+    refresh_reason: str = ""
 
 
 @dataclass(frozen=True)

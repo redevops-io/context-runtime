@@ -106,7 +106,12 @@ class InMemoryStore:
             scored.append((score, d))
         scored.sort(key=lambda x: (-x[0], x[1]["filename"], x[1]["chunk_id"]))
         return [Hit(chunk_id=d["chunk_id"], filename=d["filename"], text=d["text"],
-                    score=float(s), created_at=d.get("created_at"), source=self.source)
+                    score=float(s), created_at=d.get("created_at"), source=self.source,
+                    # carry evidence identity when the corpus supplies it (offline freshness path);
+                    # absent → None, so a plain doc corpus is unchanged.
+                    version=d.get("version"), content_hash=d.get("content_hash"),
+                    observed_at=d.get("observed_at"),
+                    meta={"source_ref": d["source_ref"]} if d.get("source_ref") else {})
                 for s, d in scored[:k]]
 
     def info(self) -> PluginInfo:
