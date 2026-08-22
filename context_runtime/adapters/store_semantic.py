@@ -88,6 +88,9 @@ class SemanticRetriever:
         self.docs: list[dict] = list(docs or [])
         self._emb = None      # numpy matrix [n_docs, dim]
         self._emb_n = -1
+        self._ann = None      # optional cuVS index over self._emb (built on demand, past the crossover)
+        self._ann_n = -1
+        self.last_backend = "cpu"   # which retrieval backend the last search used (for EXPLAIN)
 
     @property
     def available(self) -> bool:
@@ -102,6 +105,7 @@ class SemanticRetriever:
                                   "text": fp.read_text(errors="ignore"), "created_at": None})
                 n += 1
         self._emb = None  # invalidate
+        self._ann = None  # invalidate any cuVS index built over the old matrix
         return {"files": n, "chunks": n}
 
     def _matrix(self):
@@ -120,16 +124,41 @@ class SemanticRetriever:
         mat = self._matrix()
         if mat is None:
             return []
-        import numpy as np
         qv = _embed([query])[0]
+        # Accelerator-aware retrieval: past the ~12k crossover an opt-in cuVS index answers the ANN on the
+        # GPU (36× query speedup at 200k); below it, or with the accelerator off / no GPU, the exact numpy
+        # path runs unchanged. A top-all query (k<=0) and any GPU error both fall back to the CPU path.
+        if k and k > 0:
+            from ..accel import decide
+            d = decide("ann", int(mat.shape[0]))
+            if d.use_gpu:
+                try:
+                    hits = self._search_cuvs(mat, qv, k)
+                    self.last_backend = d.backend
+                    return hits
+                except Exception:
+                    pass  # fall through to the CPU reference — never fail because of the accelerator
+        self.last_backend = "cpu"
+        return self._search_cpu(mat, qv, k)
+
+    def _hit(self, i: int, score: float) -> Hit:
+        d = self.docs[i]
+        return Hit(chunk_id=d["chunk_id"], filename=d["filename"], text=d["text"],
+                   score=score, created_at=d.get("created_at"), source=self.source)
+
+    def _search_cpu(self, mat, qv, k: int) -> list[Hit]:
+        import numpy as np
         sims = mat @ qv  # cosine (both normalized)
         order = np.argsort(-sims)[: max(k, 0) or len(sims)]
-        out: list[Hit] = []
-        for i in order:
-            d = self.docs[int(i)]
-            out.append(Hit(chunk_id=d["chunk_id"], filename=d["filename"], text=d["text"],
-                           score=float(sims[int(i)]), created_at=d.get("created_at"), source=self.source))
-        return out
+        return [self._hit(int(i), float(sims[int(i)])) for i in order]
+
+    def _search_cuvs(self, mat, qv, k: int) -> list[Hit]:
+        from ..accel.cuvs_ann import CuvsAnnIndex
+        if self._ann is None or self._ann_n != int(mat.shape[0]):
+            self._ann = CuvsAnnIndex(mat)          # build once; rebuild only when the matrix changes
+            self._ann_n = int(mat.shape[0])
+        idx, scores = self._ann.query(qv, k)
+        return [self._hit(int(i), float(s)) for i, s in zip(idx, scores)]
 
     def info(self):
         from ..types import PluginInfo
