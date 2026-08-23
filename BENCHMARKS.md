@@ -61,6 +61,31 @@ per-app tenant demos all ran green: `agentic_billing, agentic_books, agentic_com
 agentic_support, control_tower, market_radar, growth_engine, social_autopilot, outreach_engine,
 outreach_pipeline, incident_review, soc_triage, sidekick_learning, vibexgen_learning`.
 
+## 6a. Zoning intelligence — the geospatial reference benchmark (`examples/zoning_intelligence.py`)
+
+Given a parcel and a target use, the Runtime concludes the land-use disposition (PERMITTED / CONDITIONAL /
+PROHIBITED / UNKNOWN) from heterogeneous evidence (Regrid · ATTOM · official municipal GIS · zoning
+ordinance) and learns *which evidence to acquire* per use-difficulty bucket. Deterministic geometry and
+structured constraints are reconciled by the CPU spatial engine before any ordinance/LLM interpretation,
+and PERMITTED is only ever concluded when the evidence is sufficient to confirm it — so a single stale
+provider can never produce a "verified permitted" (the blocking SLO `false-permitted = 0`, plan §16).
+
+Measured (single run, `PYTHONPATH=. python examples/zoning_intelligence.py`):
+
+| arm | reward | avg evidence cost | false-permits |
+|---|---|---|---|
+| **C · Context Runtime (learned bundle/bucket)** | **+0.894** | **5.67u** | **0** |
+| A · single provider (Regrid only) | +0.080 | 1.00u | **1 ← violates SLO** |
+| B · fixed thorough (all sources) | +0.850 | 8.00u | 0 |
+
+The learned policy uses the official GIS for residential/commercial but reserves the expensive ordinance
+for the industrial (conditional-use) bucket — matching B's correctness at **1.4× lower evidence cost**,
+and beating single-provider by **+0.814 reward with 0 SLO violations vs 1**. The same run demonstrates the
+deterministic-first constraint (a data center on an undersized lot is PROHIBITED before interpretation),
+use-first land search (spatial prefilter + learned evidence), dependency-scoped incremental recomputation
+(a new overlay recomputes 1 of 9 parcels), and population-governance drift detection (a provider drifting
+CONDITIONAL→PERMITTED across the population → REQUIRE_REVIEW).
+
 ## Full run table
 
 All 30 scripts exited 0. Slowest: `consolidated_benchmark` (14s, runs the Go twin), `dspark_calibration_bench` (12s).

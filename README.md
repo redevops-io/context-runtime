@@ -20,6 +20,7 @@ green (each number is the learned-vs-baseline reward its offline example in `exa
 | **redevops-rag** | `pool · limit · threshold · rerank …` per query | `ContextRuntimeRetrieverTuner`; **0.780 vs 0.428** vs fixed default |
 | **edge-sentinel (SOC)** | which sources to pull per alert (CrowdSec · threat-intel · EDR) | tool-using + approval-gated; **0.900 vs 0.800** always-full baseline |
 | **video-ad** | which generation chain (provider · detail · best-of-N) per shot-complexity bucket | learns the cheapest creative path to an *accepted* segment; **0.853 vs 0.777** premium baseline at **4.5× cheaper spend** |
+| **zoning-intelligence** (geospatial) | which evidence bundle (Regrid · ATTOM · official GIS · ordinance) per use-difficulty bucket | deterministic-first + reconciliation; **0.894 vs 0.850** always-thorough at **1.4× cheaper**, and **0 false-permits vs 1** for single-provider (the blocking SLO) |
 | **growth-engine** | which attribution window + source bundle per lead-source query | **7.851 vs 5.282** vs fixed window |
 | **control-tower** | which Metabase query set per "ask anything" question | **5.326 vs 1.643** vs core query set |
 | **agentic-billing** | which usage/invoice/dunning signals to pull per account | **4.122 vs 2.442** vs full-stack |
@@ -36,6 +37,7 @@ PYTHONPATH=. python examples/sidekick_learning.py   # discrete-strategy bandit
 PYTHONPATH=. python examples/rag_tuning.py          # numeric-knob tuning
 PYTHONPATH=. python examples/soc_triage.py          # tool-using cybersecurity tenant
 PYTHONPATH=. python examples/video_ad.py            # creative-workflow chain optimization
+PYTHONPATH=. python examples/zoning_intelligence.py # geospatial: deterministic-first spatial evidence
 ```
 
 Plus the **ToolPlugin** seam (`context_runtime/tools/` — how plans reach external systems,

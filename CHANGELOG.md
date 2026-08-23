@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.3.x — geospatial capabilities + zoning intelligence (unreleased)
+
+Geospatial support as a **Runtime capability, not a separate Geospatial Runtime**: a parcel's geometry,
+CRS, jurisdiction and temporal state become typed evidence, and spatial operations become capabilities
+the planner selects, composes, verifies and governs. Fully additive and offline; no existing path changes.
+
+**What is now true**
+
+- **Typed spatial evidence** (`context_runtime.geospatial.contracts`): `GeoRef` (geometry identity via a
+  canonical, hashable `geometry_hash`; explicit CRS; jurisdiction; valid/observed time) extends — never
+  replaces — the evidence-native model. Domain vocabulary: `ParcelEntity`, `UseDisposition`
+  (PERMITTED / CONDITIONAL / SPECIAL_EXCEPTION / PROHIBITED / **UNKNOWN**), `LandUseConstraint`, a
+  normalized use ontology.
+- **CPU-authoritative spatial engine** (`context_runtime.geospatial.engine`): pure-Python, exact,
+  dependency-free point-in-polygon, polygon intersection, area, centroid, distance, and centroid spatial
+  join. Binary ops **refuse a silent CRS mismatch** (raise so the planner inserts an explicit REPROJECT).
+  Heavier backends (shapely/PostGIS/DuckDB-Spatial/GPU) are planner-selectable on measured crossover —
+  the accelerator changes latency, never the answer.
+- **Zoning-intelligence tenant** (`context_runtime.integrations.zoning_intelligence` +
+  `examples/zoning_intelligence.py`): the geospatial reference benchmark. The Runtime learns *which
+  evidence to acquire* (Regrid · ATTOM · official GIS · ordinance) per use-difficulty bucket. A
+  deterministic-first, fail-safe resolver reconciles evidence and only concludes PERMITTED when the
+  evidence is sufficient — making **false-permitted a structural impossibility** for reconciled bundles
+  (the blocking SLO). Measured: learned **+0.894 reward at 1.4× lower evidence cost** than
+  always-thorough, **0 false-permits vs 1** for single-provider. Includes use-first land search,
+  dependency-scoped incremental recomputation, and population-governance drift detection.
+
 ## 0.2.0 — freshness sourced from evidence (v0.2.x final stabilization)
 
 Correctness/completeness fix to functionality v0.2.x already advertised. The freshness *scoring*, the
