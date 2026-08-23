@@ -174,8 +174,14 @@ class HybridRetriever:
         if method == "vector":
             return self.semantic.search(query, k)
         pool = max(k * 3, 30)  # graph is handled upstream by the HopRouter
-        return _rrf_fuse(self.lexical.search(query, pool, "bm25"),
-                         self.semantic.search(query, pool), k=k)
+        # BM25 and semantic are independent legs (semantic doesn't consume BM25) — overlap them when
+        # CR_RETRIEVAL_CONCURRENCY>1; order preserved so the RRF fusion is identical to the serial path.
+        from .._parallel import run_parallel
+        lexical_hits, semantic_hits = run_parallel([
+            lambda: self.lexical.search(query, pool, "bm25"),
+            lambda: self.semantic.search(query, pool),
+        ])
+        return _rrf_fuse(lexical_hits, semantic_hits, k=k)
 
     def info(self):
         from ..types import PluginInfo

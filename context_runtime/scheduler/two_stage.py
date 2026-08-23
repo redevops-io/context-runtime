@@ -99,12 +99,18 @@ class TwoStageRetriever:
     def retrieve(self, query: str, k: int = 5, *, load_band: str = "lo",
                  rerank: bool = True, max_latency_seconds: float | None = None) -> TwoStageResult:
         # ── stage 1: broad recall, RRF-fused ──
-        runs: list[list[Hit]] = []
-        for m in self.stage1_methods:
+        # Each stage-1 method is an independent recall pass — overlap them when CR_RETRIEVAL_CONCURRENCY>1;
+        # a failing method drops out (None), order preserved, so the RRF fusion is identical to serial.
+        from .._parallel import run_parallel
+
+        def _recall(m):
             try:
-                runs.append(list(self.base.search(query, self.fanout_k, m)))
+                return list(self.base.search(query, self.fanout_k, m))
             except Exception:
-                continue
+                return None
+
+        results = run_parallel([lambda m=m: _recall(m) for m in self.stage1_methods])
+        runs: list[list[Hit]] = [r for r in results if r is not None]
         fused = rrf_fuse(runs, k=self.fanout_k)
         stage1_n = len(fused)
         if not fused:
