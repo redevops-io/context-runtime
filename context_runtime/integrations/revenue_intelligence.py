@@ -253,13 +253,21 @@ class RevenueIntelligenceTenant:
     @staticmethod
     def _default_registry(fixtures, approver, crm_tool=None) -> ToolRegistry:
         reg = ToolRegistry(ApprovalPolicy(mode="deny_side_effects", approver=approver))
-        # Live CRM is explicit opt-in (CR_CRM_LIVE=1 + a HubSpot key), so a key in the environment never
-        # silently makes the reproducible offline benchmark hit the network. Or pass crm_tool= directly.
+        # Live CRM is explicit opt-in (CR_CRM_LIVE=1 + a backend's credentials), so credentials sitting in
+        # the environment never silently make the reproducible offline benchmark hit the network. Pick the
+        # backend with CR_CRM_BACKEND=hubspot|salesforce, else auto-detect from which creds are present.
+        # Or pass crm_tool= directly.
         if crm_tool is None and os.getenv("CR_CRM_LIVE", "").strip().lower() in ("1", "true", "yes", "on"):
+            backend = os.getenv("CR_CRM_BACKEND", "").strip().lower()
             try:
-                from .hubspot_crm import HubSpotCRMTool, token_present
-                if token_present():
+                from .hubspot_crm import HubSpotCRMTool, token_present as _hs_present
+                from .salesforce_crm import SalesforceCRMTool, token_present as _sf_present
+                if backend == "salesforce" or (backend == "" and _sf_present() and not _hs_present()):
+                    crm_tool = SalesforceCRMTool(fixtures) if _sf_present() else None
+                elif _hs_present():
                     crm_tool = HubSpotCRMTool(fixtures)
+                elif _sf_present():
+                    crm_tool = SalesforceCRMTool(fixtures)
             except Exception:
                 crm_tool = None
         for name in ("crm", "sec", "apollo", "pdl", "hunter", "builtwith", "crunchbase", "web_research"):
