@@ -130,6 +130,13 @@ the graph informs selection; CP-SAT finds feasible plans where greedy knapsack f
 **Goal:** the cost model *learns* from observed outcomes. This is where Context Runtime
 stops being a clever static planner and becomes a runtime that improves.
 
+> **Also landed in 0.3.x (additive):** *Geospatial capabilities* — typed spatial evidence
+> (`GeoRef`) + a CPU-authoritative spatial engine + the **zoning-intelligence** tenant
+> (deterministic-first evidence acquisition; see [CHANGELOG](CHANGELOG.md) and
+> [BENCHMARKS §6a](BENCHMARKS.md)). *Opt-in reasoner/retrieval concurrency* — independent
+> reasoning passes and retrieval legs overlap (default-serial; `CR_REASONER_CONCURRENCY` /
+> `CR_RETRIEVAL_CONCURRENCY`).
+
 - Memory (the lifecycle sub-concern of the Knowledge Layer) → migrate mem0 →
   **Graphiti (Zep)** bi-temporal KG: versioned, auditable, contradiction detection,
   expiration, promotion, compaction.
