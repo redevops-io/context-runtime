@@ -29,21 +29,30 @@ def run() -> None:
     for aid, cid in ids.items():
         print(f"  {aid}  {seed[aid].company:<22} {seed[aid].domain:<20} → company {cid}")
 
-    # resolve one via the tool the tenant uses (crm_enrich)
+    # resolve one via the tool the tenant uses (crm_enrich). HubSpot's search index is eventually
+    # consistent, so a just-seeded record can take a few seconds to appear — retry briefly. (Real
+    # accounts are already indexed; this lag only affects freshly-created ones.)
+    import time
     aid = next(iter(seed))
     tool = HubSpotCRMTool(seed, client)
-    res = tool.run({"account_id": aid, "need": seed[aid].need})
-    print(f"\nresolve {aid} via crm_enrich → status={res.data.get('status')}: {res.text}")
+    for attempt in range(6):
+        res = tool.run({"account_id": aid, "need": seed[aid].need})
+        if res.data.get("status") == "correct":
+            break
+        time.sleep(3)
+    print(f"\nresolve {aid} via crm_enrich → status={res.data.get('status')} "
+          f"(after {attempt + 1} tries): {res.text}")
 
     # read back the raw record
     cid = ids[aid]
     company = client.get_company(cid)
     print(f"read company {cid}: {company.get('properties', {})}")
 
-    # governed write: update a property, through the approval gate (approver says yes here)
+    # governed write: update a property, through the approval gate (approver says yes here).
+    # industry is a HubSpot picklist — use a valid option.
     reg = ToolRegistry(ApprovalPolicy(mode="deny_side_effects", approver=lambda spec: True))
     reg.register(HubSpotUpdateTool(client))
-    upd = reg.run("crm_update", {"company_id": cid, "properties": {"industry": "SOFTWARE_DATA_INTERNET"}})
+    upd = reg.run("crm_update", {"company_id": cid, "properties": {"industry": "COMPUTER_SOFTWARE"}})
     print(f"\ngoverned crm_update → ok={upd.ok}: {upd.text}")
     print(f"audit: {reg.audit[-1]}")
 
