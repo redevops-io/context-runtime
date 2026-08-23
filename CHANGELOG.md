@@ -1,12 +1,18 @@
 # Changelog
 
-## 0.3.x — geospatial capabilities + zoning intelligence (unreleased)
+## 0.3.x — unreleased
+
+The 0.3.x line is additive and default-serial throughout: each new path is opt-in and
+byte-for-byte the previous behavior unless enabled. This "Unreleased" section accumulates
+the v0.3.x work staged across the coordinated-release feature branches, so both the
+geospatial and the concurrency entries appear here on every 0.3.x branch (which is also
+what keeps this file merge-clean).
+
+### Geospatial capabilities + zoning intelligence
 
 Geospatial support as a **Runtime capability, not a separate Geospatial Runtime**: a parcel's geometry,
 CRS, jurisdiction and temporal state become typed evidence, and spatial operations become capabilities
 the planner selects, composes, verifies and governs. Fully additive and offline; no existing path changes.
-
-**What is now true**
 
 - **Typed spatial evidence** (`context_runtime.geospatial.contracts`): `GeoRef` (geometry identity via a
   canonical, hashable `geometry_hash`; explicit CRS; jurisdiction; valid/observed time) extends — never
@@ -26,6 +32,19 @@ the planner selects, composes, verifies and governs. Fully additive and offline;
   (the blocking SLO). Measured: learned **+0.894 reward at 1.4× lower evidence cost** than
   always-thorough, **0 false-permits vs 1** for single-provider. Includes use-first land search,
   dependency-scoped incremental recomputation, and population-governance drift detection.
+
+### Opt-in reasoner + retrieval concurrency
+
+The independent calls a plan already makes now overlap instead of running strictly one after another.
+
+- **Reasoner fork/join** (`context_runtime/reasoner/_concurrency.py`): a mixture strategy's independent
+  model calls — `debate` passes, `plan_worker_critic` workers, self-consistency samples — fan out
+  concurrently when `CR_REASONER_CONCURRENCY>1` (default 1 = serial). Order-preserving, so the
+  judge/critic/vote reconciliation sees identical inputs in identical order — the answer is unchanged,
+  only wall-clock. Concurrency is *how* a strategy's calls run, never *which* calls it makes.
+- **Retrieval overlap** (`context_runtime/_parallel.py`): the hybrid BM25 ∥ vector legs and the
+  two-stage stage-1 recalls overlap when `CR_RETRIEVAL_CONCURRENCY>1` (default 1 = serial),
+  order-preserved so RRF fusion is deterministic regardless of the setting.
 
 ## 0.2.0 — freshness sourced from evidence (v0.2.x final stabilization)
 
