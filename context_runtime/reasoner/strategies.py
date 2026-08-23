@@ -76,12 +76,15 @@ class PlanWorkerCriticReasoner:
         if not subqs:
             subqs = [q]
 
-        sub_answers = []
-        for sub in subqs:
-            prompt = f"Context:\n{ctx.assembled_text}\n\nSub-question: {sub}"
-            w = _ask(self.model, prompt, _ANSWER_SYSTEM, req.capability, max_tokens=512)
-            calls.append(w)
-            sub_answers.append(f"Q: {sub}\nA: {w.text}")
+        from ._concurrency import fanout
+        # Workers are independent (same context, different sub-question) — overlap them when opted in; the
+        # plan (above) and critic (below) are the true fork/join boundaries and stay serial. Order preserved.
+        workers = fanout(
+            lambda sub: _ask(self.model, f"Context:\n{ctx.assembled_text}\n\nSub-question: {sub}",
+                             _ANSWER_SYSTEM, req.capability, max_tokens=512),
+            subqs)
+        calls.extend(workers)
+        sub_answers = [f"Q: {sub}\nA: {w.text}" for sub, w in zip(subqs, workers)]
 
         synth_prompt = (f"Context:\n{ctx.assembled_text}\n\nQuestion: {q}\n\n"
                         f"Sub-answers:\n" + "\n\n".join(sub_answers))
@@ -116,13 +119,15 @@ class DebateReasoner:
         ctx = req.context
         q = _question(ctx)
         prompt = f"Context:\n{ctx.assembled_text}\n\nQuestion: {q}"
-        calls: list[ModelResult] = []
-        answers = []
-        for i in range(self.rounds):
-            system = _DEBATER_SYSTEMS[i % len(_DEBATER_SYSTEMS)]
-            r = _ask(self.model, prompt, system, req.capability, max_tokens=768)
-            calls.append(r)
-            answers.append(f"Answer {i + 1}: {r.text}")
+        from ._concurrency import fanout
+        # The N debaters are independent (same prompt, different system persona) — overlap them when opted
+        # in; the judge below is the join. Order preserved so the judge sees the same answers.
+        debaters = fanout(
+            lambda i: _ask(self.model, prompt, _DEBATER_SYSTEMS[i % len(_DEBATER_SYSTEMS)],
+                           req.capability, max_tokens=768),
+            range(self.rounds))
+        calls: list[ModelResult] = list(debaters)
+        answers = [f"Answer {i + 1}: {r.text}" for i, r in enumerate(debaters)]
         judge_prompt = f"Context:\n{ctx.assembled_text}\n\nQuestion: {q}\n\n" + "\n\n".join(answers)
         judge = _ask(self.model, judge_prompt, _JUDGE_SYSTEM, req.capability, max_tokens=1024)
         calls.append(judge)

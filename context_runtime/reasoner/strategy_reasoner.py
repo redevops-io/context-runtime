@@ -71,8 +71,11 @@ class StrategyReasoner:
         agreement cluster, faithfulness tiebreak), rolling up the K-sample cost so the arm's cost prior
         reflects the extra compute — the bandit still learns whether Best@k pays for this class."""
         from .verify import consensus_index
+        from ._concurrency import fanout
         temp = strategies.self_consistency_temp()
-        results = [self._one(req, temperature=temp) for _ in range(self.samples)]
+        # K independent samples — overlap them when CR_REASONER_CONCURRENCY>1; order-preserved so the
+        # consensus pick is identical to the serial path.
+        results = fanout(lambda _: self._one(req, temperature=temp), range(self.samples))
         if not results:
             return self._one(req)
         chosen = results[consensus_index([r.text for r in results], req.context.assembled_text)]
