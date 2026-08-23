@@ -232,7 +232,7 @@ class RevenueIntelligenceTenant:
 
     def __init__(self, fixtures: dict[str, Fixture], *, runtime: ContextRuntime | None = None,
                  registry: ToolRegistry | None = None, bandit: EpsilonGreedyBandit | None = None,
-                 approver=None, no_outreach: bool = True, segmented: bool = False):
+                 approver=None, no_outreach: bool = True, segmented: bool = False, crm_tool=None):
         self.fixtures = fixtures
         self.runtime = runtime or ContextRuntime.default([])
         self.bandit = bandit or _gtm_bandit()
@@ -240,7 +240,9 @@ class RevenueIntelligenceTenant:
         # arm E keys the policy on the need alone; arm F on need×segment — the learned, empirical policy that
         # discovers a provider is authoritative for enterprise but not SMB, public but not private, etc.
         self.segmented = segmented
-        self.registry = registry or self._default_registry(fixtures, approver)
+        # ``crm_tool`` (e.g. HubSpotCRMTool) makes the ``crm`` provider a LIVE backend; None keeps the offline
+        # fixture. Auto-enabled when a HubSpot Service Key is in the environment.
+        self.registry = registry or self._default_registry(fixtures, approver, crm_tool)
         self.external_spend = 0.0
         self.events: list[dict] = []   # per-enrichment trace, for the population governor (arm G)
         self._pending: dict[str, tuple[Plan, ProviderBundle, str]] = {}
@@ -249,10 +251,22 @@ class RevenueIntelligenceTenant:
         return f"{bucket}|{fx.segment}" if self.segmented else bucket
 
     @staticmethod
-    def _default_registry(fixtures, approver) -> ToolRegistry:
+    def _default_registry(fixtures, approver, crm_tool=None) -> ToolRegistry:
         reg = ToolRegistry(ApprovalPolicy(mode="deny_side_effects", approver=approver))
+        # Live CRM is explicit opt-in (CR_CRM_LIVE=1 + a HubSpot key), so a key in the environment never
+        # silently makes the reproducible offline benchmark hit the network. Or pass crm_tool= directly.
+        if crm_tool is None and os.getenv("CR_CRM_LIVE", "").strip().lower() in ("1", "true", "yes", "on"):
+            try:
+                from .hubspot_crm import HubSpotCRMTool, token_present
+                if token_present():
+                    crm_tool = HubSpotCRMTool(fixtures)
+            except Exception:
+                crm_tool = None
         for name in ("crm", "sec", "apollo", "pdl", "hunter", "builtwith", "crunchbase", "web_research"):
-            reg.register(ProviderTool(name, fixtures))
+            if name == "crm" and crm_tool is not None:
+                reg.register(crm_tool)                       # live HubSpot backend for the crm capability
+            else:
+                reg.register(ProviderTool(name, fixtures))
         reg.register(PrepareOutreachTool())
         reg.register(SendOutreachTool())
         return reg
