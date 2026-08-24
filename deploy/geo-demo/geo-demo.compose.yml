@@ -1,0 +1,18 @@
+# geo.redevops.io — the geospatial / zoning-intelligence capability, live.
+#
+#   geo-api :8098 (FastAPI) computes land-use dispositions with the deterministic-first, fail-safe resolver
+#   over REAL parcels harvested from official ArcGIS sources, and runs the dependency-free geometry engine.
+#   cloudflared: geo.redevops.io -> 192.168.40.105:8098
+#
+# No datastore — the resolver + engine are deterministic Python; nothing is faked. Deployed by ./deploy.sh.
+services:
+  geo-api:
+    build: .
+    image: ${GEO_API_IMAGE:-geo-demo:latest}
+    container_name: geo-api
+    restart: unless-stopped
+    ports:
+      - "${GEO_EDGE_PORT:-8098}:8098"
+    # AppArmor 4.1 breaks AF_UNIX socketpair() under docker-default (same fix as grc/chat/gov).
+    security_opt:
+      - apparmor=docker-contextos

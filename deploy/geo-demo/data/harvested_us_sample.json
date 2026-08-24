@@ -1,0 +1,674 @@
+[
+  {
+    "parcel_id": "geo:c2b34427fb375214e06cb08e4e60aa2f",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -112.05407972079,
+      33.5074013583273,
+      -112.049712149907,
+      33.5085440186763
+    ],
+    "centroid": [
+      -112.05153236952849,
+      33.50781043890153
+    ],
+    "apn": "",
+    "zoning_code": "C-2",
+    "jurisdiction": "Zoning Districts of Phoenix, Arizona",
+    "dataset": "Zoning Districts of Phoenix, Arizona",
+    "source_url": "https://services6.arcgis.com/u2Q4oAfciDZpDAD8/arcgis/rest/services/Zoning_PhoenixAZ/FeatureServer/0",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:503e28638400f2385027a0c84587cb89",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -112.004212783897,
+      33.4822430275962,
+      -112.003114820393,
+      33.4848633530091
+    ],
+    "centroid": [
+      -112.00349351783005,
+      33.48372481103293
+    ],
+    "apn": "",
+    "zoning_code": "R-4",
+    "jurisdiction": "Phoenix Zoning",
+    "dataset": "Phoenix Zoning",
+    "source_url": "https://services1.arcgis.com/Ezk9fcjSUkeadg6u/arcgis/rest/services/Phoenix_Zoning/FeatureServer/0",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:3507038d42a2a07634d4cbf58eeb3b42",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -110.97617382912071,
+      32.206774512151675,
+      -110.97544720830021,
+      32.20742142421647
+    ],
+    "centroid": [
+      -110.97562652168736,
+      32.207168372383904
+    ],
+    "apn": "",
+    "zoning_code": "C-3",
+    "jurisdiction": "Zoning - Tucson - Open Data",
+    "dataset": "Zoning - Tucson - Open Data",
+    "source_url": "https://gis.tucsonaz.gov/arcgis/rest/services/PublicMaps/OpenData_PropertyPlanning/MapServer/19",
+    "ordinance_url": "https://codelibrary.amlegal.com/codes/tucson/latest/tucson_az_udc/0-0-0-2056"
+  },
+  {
+    "parcel_id": "geo:3241f599b7df89dbd6a2c45f287563ed",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -122.394627629925,
+      37.6747447786103,
+      -122.389619539096,
+      37.6826315833868
+    ],
+    "centroid": [
+      -122.39196813159664,
+      37.67825098669623
+    ],
+    "apn": "",
+    "zoning_code": "TC-2",
+    "jurisdiction": "Zoning Districts",
+    "dataset": "Zoning Districts",
+    "source_url": "https://services9.arcgis.com/UGpGSV1ugL0pHSgX/arcgis/rest/services/Zoning_Districts_NAD83_20251110/FeatureServer/3",
+    "ordinance_url": "https://www.brisbaneca.org/cd/page/tc-2-southeast-bayshore-trade-commercial-district"
+  },
+  {
+    "parcel_id": "geo:0abb6b6eabd061b2e39aecdad8a5e888",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -118.343670693527,
+      33.8775579976029,
+      -118.326695692823,
+      33.8872600766874
+    ],
+    "centroid": [
+      -118.33442260999912,
+      33.88234581140915
+    ],
+    "apn": "",
+    "zoning_code": "A-1",
+    "jurisdiction": "Zoning (Los Angeles County Unincorporated)",
+    "dataset": "Zoning (Los Angeles County Unincorporated)",
+    "source_url": "https://services2.arcgis.com/j80Jz20at6Bi0thr/arcgis/rest/services/Zoning/FeatureServer/0",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:fc07165025b732fef0df38bf8156cc2d",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -117.129838402482,
+      33.0464268464181,
+      -117.129488004187,
+      33.0466530377507
+    ],
+    "centroid": [
+      -117.12969391914535,
+      33.04650359683874
+    ],
+    "apn": "",
+    "zoning_code": "AG-1-1",
+    "jurisdiction": "San Diego Zoning",
+    "dataset": "San Diego Zoning",
+    "source_url": "https://services1.arcgis.com/eGSDp8lpKe5izqVc/arcgis/rest/services/San_Diego_Zoning/FeatureServer/0",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:583c3bee1bbc12cb3b6597c3fb1360e7",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -122.392141091338,
+      37.7324368513406,
+      -122.388685921403,
+      37.7394268830786
+    ],
+    "centroid": [
+      -122.39047021724119,
+      37.735546757989944
+    ],
+    "apn": "",
+    "zoning_code": "NCD",
+    "jurisdiction": "Bayview Hunters Point/Southeast San Francisco - Zoning",
+    "dataset": "Bayview Hunters Point/Southeast San Francisco - Zoning",
+    "source_url": "https://services3.arcgis.com/i2dkYWmb4wHvYPda/arcgis/rest/services/BVHP_San_Francisco_Zoning/FeatureServer/0",
+    "ordinance_url": "https://codelibrary.amlegal.com/codes/san_francisco/latest/sf_planning/0-0-0-25360#rid-0-0-0-62678"
+  },
+  {
+    "parcel_id": "geo:273146260547fe207247e58aedb58b9d",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -122.274616674234,
+      37.788327713849,
+      -122.266998009311,
+      37.7934790337588
+    ],
+    "centroid": [
+      -122.27204011583963,
+      37.791919452591145
+    ],
+    "apn": "",
+    "zoning_code": "Residential",
+    "jurisdiction": "West Oakland and Downtown Oakland Zoning",
+    "dataset": "West Oakland and Downtown Oakland Zoning",
+    "source_url": "https://services6.arcgis.com/HJzJQeO8rbTv2jiF/arcgis/rest/services/West_Oakland_and_Downtown_Oakland_Zoning/FeatureServer/0",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:3cd9cb6a981165d6f0bad1721e57a2bd",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -122.226890215718,
+      37.7743784311914,
+      -122.2196580743,
+      37.7784642991023
+    ],
+    "centroid": [
+      -122.22309800457766,
+      37.77636479817354
+    ],
+    "apn": "",
+    "zoning_code": "CN-2",
+    "jurisdiction": "Oakland Business Zones CR",
+    "dataset": "Oakland Business Zones CR",
+    "source_url": "https://services.arcgis.com/9tC74aDHuml0x5Yz/arcgis/rest/services/Oakland_Business_Zones_CR/FeatureServer/0",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:609a71d487eabe687faa7dbd2dac6eea",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -105.007232957,
+      39.763230519,
+      -105.006442104,
+      39.7644295480001
+    ],
+    "centroid": [
+      -105.00692858192858,
+      39.763942804285776
+    ],
+    "apn": "",
+    "zoning_code": "Former Chapter 59 Zone",
+    "jurisdiction": "Denver Zoning",
+    "dataset": "Denver Zoning",
+    "source_url": "https://services1.arcgis.com/PybKzo48QGbyiuCh/arcgis/rest/services/Denver_Zoning/FeatureServer/0",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:e157a84617c4a4c0daf7d3098952be50",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -104.950055784656,
+      39.7428438087847,
+      -104.948258871151,
+      39.7437905492397
+    ],
+    "centroid": [
+      -104.94894381991068,
+      39.74307714639082
+    ],
+    "apn": "",
+    "zoning_code": "Two Unit  (TU)",
+    "jurisdiction": "CCD Zoning",
+    "dataset": "CCD Zoning",
+    "source_url": "https://services1.arcgis.com/zdB7qR0BtYrg0Xpl/arcgis/rest/services/CCD_Zoning/FeatureServer/27",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:100fc128becbf39c764b3ace4e902a9b",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -80.1777685208928,
+      25.8393537785387,
+      -80.1756280513227,
+      25.8406285913717
+    ],
+    "centroid": [
+      -80.17668551967735,
+      25.840163783703165
+    ],
+    "apn": "",
+    "zoning_code": "CS",
+    "jurisdiction": "Miami 21 Zoning",
+    "dataset": "Miami 21 Zoning",
+    "source_url": "https://services1.arcgis.com/CvuPhqcTQpZPT9qY/arcgis/rest/services/M21_Zoning/FeatureServer/0",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:3c07147b40dcf06591b4654cb8f37887",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -81.3814032760608,
+      28.5188323224889,
+      -81.3796582475575,
+      28.5201939067988
+    ],
+    "centroid": [
+      -81.38029478726521,
+      28.519411292876963
+    ],
+    "apn": "",
+    "zoning_code": "P/T/SP",
+    "jurisdiction": "Orlando Land Use Zoning",
+    "dataset": "Orlando Land Use Zoning",
+    "source_url": "https://services5.arcgis.com/mMuoPCaIYD4wEgDl/arcgis/rest/services/OrlandoLUZoning/FeatureServer/0",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:e2b92c3596bdf8d79a1cce62caebb3a5",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -72.9291854807887,
+      42.7652471851512,
+      -72.8633662586008,
+      42.8298145156015
+    ],
+    "centroid": [
+      -72.89981066583162,
+      42.79030540202182
+    ],
+    "apn": "",
+    "zoning_code": "Conservation",
+    "jurisdiction": "VT Data - Whitingham Zoning",
+    "dataset": "VT Data - Whitingham Zoning",
+    "source_url": "https://services2.arcgis.com/3xVssd0FD416APnB/arcgis/rest/services/VT_Data_Zoning_20141119_Whitingham/FeatureServer/0",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:97a8bb50cabfa4286b850b7f20aae1e4",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -90.224363606474,
+      39.7325372025223,
+      -90.2225835992194,
+      39.7332820343494
+    ],
+    "centroid": [
+      -90.22340953993341,
+      39.7329113922587
+    ],
+    "apn": "",
+    "zoning_code": "B-4",
+    "jurisdiction": "Zoning",
+    "dataset": "Zoning",
+    "source_url": "https://services3.arcgis.com/95PFahBF8eyGEfuc/arcgis/rest/services/Zoning/FeatureServer/0",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:bc1d5d945d06e6af61ff14eb130212db",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -85.62316129621549,
+      38.36207623349315,
+      -85.61677145058336,
+      38.36607221177001
+    ],
+    "centroid": [
+      -85.62023659241557,
+      38.36391746047157
+    ],
+    "apn": "",
+    "zoning_code": "R1",
+    "jurisdiction": "Jefferson County KY Zoning",
+    "dataset": "Jefferson County KY Zoning",
+    "source_url": "https://gis.lojic.org/maps/rest/services/LojicSolutions/OpenDataDevelopment/MapServer/15",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:e80c515a100c8e7f81101706c1a8310c",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -71.0708197263695,
+      42.3613878082517,
+      -71.0671303715488,
+      42.3658373392046
+    ],
+    "centroid": [
+      -71.06908688976101,
+      42.363554274297755
+    ],
+    "apn": "",
+    "zoning_code": "Business",
+    "jurisdiction": "Boston Zoning Districts 1924",
+    "dataset": "Boston Zoning Districts 1924",
+    "source_url": "https://services.arcgis.com/kbDdtKcFi2adamXa/arcgis/rest/services/Boston_Zoning_Districts_1924/FeatureServer/0",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:b6431de5b4e1028b6d1f22fd2b3f481b",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -71.0809873563304,
+      42.36892672770226,
+      -71.05295019431384,
+      42.38797519150351
+    ],
+    "centroid": [
+      -71.06470364046166,
+      42.376416523177305
+    ],
+    "apn": "2E",
+    "zoning_code": "Charlestown Neighborhood",
+    "jurisdiction": "Boston Zoning Districts",
+    "dataset": "Boston Zoning Districts",
+    "source_url": "https://gis.bostonplans.org/hosting/rest/services/Zoning_Districts/FeatureServer/0",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:7a552082be5360fe7100cbe3962fff69",
+    "crs": "EPSG:4326",
+    "geometry_type": "MultiPolygon",
+    "bbox": [
+      -93.7247685050237,
+      38.741787657821824,
+      -93.71021446285707,
+      38.76817578260518
+    ],
+    "centroid": [
+      -93.72231449031969,
+      38.764245190894066
+    ],
+    "apn": "",
+    "zoning_code": "BO",
+    "jurisdiction": "Zoning Districts Current",
+    "dataset": "Zoning Districts Current",
+    "source_url": "https://gis.warrensburg-mo.com/arcgis/rest/services/Planning/Zoning_Districts_Current/MapServer/7",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:2a2e5c3761d1133f7899d1c9fbb1b6f5",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -115.14387233880126,
+      36.240499167160344,
+      -115.14263297475837,
+      36.24324442587928
+    ],
+    "centroid": [
+      -115.14369332311628,
+      36.24205595228052
+    ],
+    "apn": "",
+    "zoning_code": "PUD",
+    "jurisdiction": "North Las Vegas Zoning",
+    "dataset": "North Las Vegas Zoning",
+    "source_url": "https://maps.clarkcountynv.gov/arcgis/rest/services/GISMO/Zoning/MapServer/9",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:8722bb8868fa60ad0cf990d76b1c1aba",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -73.3079785726401,
+      44.3072036646568,
+      -73.3073421493176,
+      44.3080340186304
+    ],
+    "centroid": [
+      -73.30761874647366,
+      44.3075996111811
+    ],
+    "apn": "",
+    "zoning_code": "CONSERVATION",
+    "jurisdiction": "VT Data - Charlotte Zoning",
+    "dataset": "VT Data - Charlotte Zoning",
+    "source_url": "https://services1.arcgis.com/KVHZNprt62ZdIujN/arcgis/rest/services/VTZONING_Charlotte_poly_zones/FeatureServer/0",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:5a21e64a1f682581e070750d96092df7",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -78.52602765114494,
+      35.86817492086648,
+      -78.52169071375363,
+      35.872177588099454
+    ],
+    "centroid": [
+      -78.52393705499465,
+      35.87030920632838
+    ],
+    "apn": "",
+    "zoning_code": "R-4",
+    "jurisdiction": "Raleigh Zoning",
+    "dataset": "Raleigh Zoning",
+    "source_url": "https://maps.raleighnc.gov/arcgis/rest/services/Planning/Zoning/MapServer/0",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:85bb43ec8900b2b231e233e3ff29ad7a",
+    "crs": "EPSG:4326",
+    "geometry_type": "MultiPolygon",
+    "bbox": [
+      -84.41653068405967,
+      39.17322457723663,
+      -84.40196794006641,
+      39.17949193567281
+    ],
+    "centroid": [
+      -84.40879939730489,
+      39.17512439082521
+    ],
+    "apn": "",
+    "zoning_code": "SF-20",
+    "jurisdiction": "Zoning Designation (Cincinnati Only)",
+    "dataset": "Zoning Designation (Cincinnati Only)",
+    "source_url": "https://cagisonline.hamilton-co.org/arcgis/rest/services/Countywide_Layers/Zoning/MapServer/4",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:c22507d8d4b5037ae661b821b4447070",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -82.99396463378785,
+      40.01682035818044,
+      -82.99337777476133,
+      40.018644091438645
+    ],
+    "centroid": [
+      -82.9938172839729,
+      40.01769259679763
+    ],
+    "apn": "",
+    "zoning_code": "Residential",
+    "jurisdiction": "Columbus Base Zoning Districts",
+    "dataset": "Columbus Base Zoning Districts",
+    "source_url": "https://maps2.columbus.gov/arcgis/rest/services/Schemas/BuildingZoning/MapServer/4",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:bbd9852038250f035c128bcffc79c8b0",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -81.6288437132975,
+      41.4784383502341,
+      -81.627723475345,
+      41.4811838651349
+    ],
+    "centroid": [
+      -81.6285870341144,
+      41.479283507425365
+    ],
+    "apn": "",
+    "zoning_code": "GI-B1",
+    "jurisdiction": "Cleveland OH Zoning",
+    "dataset": "Cleveland OH Zoning",
+    "source_url": "https://services7.arcgis.com/ZodPOMBKsdAsTqF4/arcgis/rest/services/Cleveland_OH_Zoning/FeatureServer/32",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:1c1a9c8ee11d204d8d07d3e8fded76a6",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -151.126522915356,
+      60.4741869203623,
+      -151.118929124638,
+      60.4748844909437
+    ],
+    "centroid": [
+      -151.12238749639,
+      60.474500459511205
+    ],
+    "apn": "",
+    "zoning_code": "RR",
+    "jurisdiction": "City of Soldotna Zoning Districts",
+    "dataset": "City of Soldotna Zoning Districts",
+    "source_url": "https://services1.arcgis.com/OYA21y8obYlVqfbj/arcgis/rest/services/zoningdistricts/FeatureServer/0",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:5c4035d280cfd75fda14055803cfba27",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -75.2169956333104,
+      39.9529516867447,
+      -75.2162556550783,
+      39.9533814765754
+    ],
+    "centroid": [
+      -75.21657809644805,
+      39.95315507427571
+    ],
+    "apn": "",
+    "zoning_code": "SP-PO-A",
+    "jurisdiction": "Philadelphia PA Zoning",
+    "dataset": "Philadelphia PA Zoning",
+    "source_url": "https://services7.arcgis.com/ZodPOMBKsdAsTqF4/arcgis/rest/services/Philadelphia_PA_Zoning/FeatureServer/18",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:fb1386f7c8d70db6a27adc52e0cea062",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -75.1544167452959,
+      39.9653668194054,
+      -75.1536309499564,
+      39.9663771770489
+    ],
+    "centroid": [
+      -75.15406764358988,
+      39.965762080121436
+    ],
+    "apn": "",
+    "zoning_code": "Residential/Residential Mixed-Use",
+    "jurisdiction": "zoning base philadelphia 2012 08",
+    "dataset": "zoning base philadelphia 2012 08",
+    "source_url": "https://services3.arcgis.com/9nfxWATFamVUTTGb/arcgis/rest/services/zoning_base_philadelphia_2012_08/FeatureServer/0",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:ce33d5c267798947f6f6beefec70c86e",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -98.4652136215359,
+      29.4820856192137,
+      -98.4637636265813,
+      29.4824906887448
+    ],
+    "centroid": [
+      -98.46451537546292,
+      29.482304870277975
+    ],
+    "apn": "",
+    "zoning_code": "2F-C",
+    "jurisdiction": "San Antonio Area Zoning",
+    "dataset": "San Antonio Area Zoning",
+    "source_url": "https://services7.arcgis.com/ZodPOMBKsdAsTqF4/arcgis/rest/services/San_Antonio_Area_Zoning/FeatureServer/102",
+    "ordinance_url": ""
+  },
+  {
+    "parcel_id": "geo:5168947d10edf60d37bdf1dc4c1c7383",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -111.648320459423,
+      40.5853559830913,
+      -111.646077879708,
+      40.5870759687974
+    ],
+    "centroid": [
+      -111.64739365992983,
+      40.58647514108409
+    ],
+    "apn": "",
+    "zoning_code": "Blackjack Village Subdivision",
+    "jurisdiction": "Salt Lake County Municipal Zoning Map",
+    "dataset": "Salt Lake County Municipal Zoning Map",
+    "source_url": "https://services1.arcgis.com/DJP723NX3ukQ2LtF/ArcGIS/rest/services/Salt_Lake_County_Zoning_2023_WFL1/FeatureServer/2",
+    "ordinance_url": "https://townofalta.com/docs/22.7.Forest&Rec.pdf"
+  },
+  {
+    "parcel_id": "geo:3058fe6341361ff94950219639193ebb",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -89.40836932467988,
+      43.041230230375014,
+      -89.40397042678669,
+      43.04229670436338
+    ],
+    "centroid": [
+      -89.40610086514448,
+      43.04203792792073
+    ],
+    "apn": "",
+    "zoning_code": "IL",
+    "jurisdiction": "Zoning Districts - current",
+    "dataset": "Zoning Districts - current",
+    "source_url": "https://maps.cityofmadison.com/arcgis/rest/services/Public/OPEN_DATA/MapServer/9",
+    "ordinance_url": "https://library.municode.com/wi/madison/codes/code_of_ordinances?nodeId=COORMAWIVOIICH11--19_CH28ZOCOOR"
+  },
+  {
+    "parcel_id": "geo:ca455b38e319c75b20f7523217f2f66f",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -79.04268114817914,
+      35.93377764488627,
+      -79.03142082562083,
+      35.940291093470385
+    ],
+    "centroid": [
+      -79.03486371150233,
+      35.93541235747515
+    ],
+    "apn": "",
+    "zoning_code": "Neighborhood Conservation",
+    "jurisdiction": "Overlay Zoning Districts",
+    "dataset": "Overlay Zoning Districts",
+    "source_url": "https://gis-portal.townofchapelhill.org/server/rest/services/OpenData/Overlay_Zoning_Districts/MapServer/0",
+    "ordinance_url": ""
+  }
+]
