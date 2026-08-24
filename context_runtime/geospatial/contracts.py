@@ -7,60 +7,69 @@ is explicit and auditable (never a silent CRS mismatch).
 """
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass, field
 from enum import Enum
 
-Coord = tuple[float, float]                    # (lon, lat) or (x, y) in the ring's CRS
-Ring = list[Coord]                             # a closed ring (first==last not required; we close it)
+# The typed spatial-evidence primitive (GeoRef, geometry_hash, SpatialOp) is a canonical, cross-runtime
+# contract, promoted to the shared `runtime-contracts` package (0.3.x). Import it from there when it is
+# installed alongside — that package is the single source of truth. When Context Runtime runs standalone
+# (runtime-contracts not on the path), fall back to a byte-identical local definition so nothing breaks;
+# the local geometry_hash reproduces the shared one exactly (proven by the shared golden vectors).
+try:
+    from runtime_contracts.protocol.geospatial import (   # noqa: F401 — re-exported for local callers
+        Coord,
+        Ring,
+        SpatialOp,
+        GeoRef,
+        geometry_hash,
+        GEOMETRY_PRECISION,
+    )
+except ImportError:  # pragma: no cover - exercised only where runtime-contracts is absent
+    import hashlib
+    import json
 
+    Coord = tuple[float, float]                # (lon, lat) or (x, y) in the ring's CRS
+    Ring = list[Coord]                         # a ring (first==last not required; we close it)
+    GEOMETRY_PRECISION = 7
 
-# ──────────────────────────── spatial operations (the capabilities) ────────────────────────────
+    class SpatialOp(str, Enum):
+        POINT_IN_POLYGON = "POINT_IN_POLYGON"
+        INTERSECTS = "INTERSECTS"
+        WITHIN = "WITHIN"
+        CONTAINS = "CONTAINS"
+        OVERLAPS = "OVERLAPS"
+        TOUCHES = "TOUCHES"
+        DISTANCE = "DISTANCE"
+        NEAREST = "NEAREST"
+        BUFFER = "BUFFER"
+        CENTROID = "CENTROID"
+        SPATIAL_JOIN = "SPATIAL_JOIN"
+        BBOX_QUERY = "BBOX_QUERY"
+        REPROJECT = "REPROJECT"
+        AREA = "AREA"
 
-class SpatialOp(str, Enum):
-    POINT_IN_POLYGON = "POINT_IN_POLYGON"
-    INTERSECTS = "INTERSECTS"
-    WITHIN = "WITHIN"
-    CONTAINS = "CONTAINS"
-    OVERLAPS = "OVERLAPS"
-    TOUCHES = "TOUCHES"
-    DISTANCE = "DISTANCE"
-    NEAREST = "NEAREST"
-    BUFFER = "BUFFER"
-    CENTROID = "CENTROID"
-    SPATIAL_JOIN = "SPATIAL_JOIN"
-    BBOX_QUERY = "BBOX_QUERY"
-    REPROJECT = "REPROJECT"
-    AREA = "AREA"
+    def geometry_hash(rings: list[Ring], crs: str) -> str:
+        """Canonical geometry identity — byte-identical to runtime_contracts.protocol.geospatial."""
+        norm = [[[round(float(x), GEOMETRY_PRECISION), round(float(y), GEOMETRY_PRECISION)]
+                 for x, y in ring] for ring in rings]
+        payload = json.dumps({"crs": crs, "rings": norm}, sort_keys=True, separators=(",", ":"))
+        return "geo:" + hashlib.blake2b(payload.encode(), digest_size=16).hexdigest()
 
-
-# ──────────────────────────── typed spatial evidence ────────────────────────────
-
-def geometry_hash(rings: list[Ring], crs: str) -> str:
-    """Canonical, stable identity for a geometry — rounded coords + CRS, hashed. Same boundary in the same
-    CRS → same id across providers, so parcel identity is not provider-specific."""
-    # normalise to float so an int coord (0) and its float twin (0.0) hash identically
-    norm = [[[round(float(x), 7), round(float(y), 7)] for x, y in ring] for ring in rings]
-    payload = json.dumps({"crs": crs, "rings": norm}, sort_keys=True, separators=(",", ":"))
-    return "geo:" + hashlib.blake2b(payload.encode(), digest_size=16).hexdigest()
-
-
-@dataclass(frozen=True)
-class GeoRef:
-    """A typed geospatial reference carried with evidence (plan §2). Extends, not replaces, EvidenceRef."""
-    geometry_type: str                         # "Polygon" | "Point" | "MultiPolygon"
-    geometry_hash: str                         # canonical hashable identity (from geometry_hash())
-    crs: str                                   # explicit CRS/SRID, e.g. "EPSG:4326"
-    bbox: tuple[float, float, float, float]    # (minx, miny, maxx, maxy)
-    centroid: Coord
-    jurisdiction: str = ""
-    spatial_resolution: float | None = None
-    horizontal_accuracy: float | None = None
-    valid_time: str = ""                       # world-time validity (ISO); "" = -inf
-    observed_at: str = ""                      # when observed/recorded (transaction time)
-    source: str = ""
-    source_version: str = ""
+    @dataclass(frozen=True)
+    class GeoRef:
+        """A typed geospatial reference carried with evidence. Extends, not replaces, EvidenceRef."""
+        geometry_type: str
+        geometry_hash: str
+        crs: str
+        bbox: tuple[float, float, float, float]
+        centroid: Coord
+        jurisdiction: str = ""
+        spatial_resolution: float | None = None
+        horizontal_accuracy: float | None = None
+        valid_time: str = ""
+        observed_at: str = ""
+        source: str = ""
+        source_version: str = ""
 
 
 # ──────────────────────────── zoning / parcel domain (plan §8-10) ────────────────────────────
