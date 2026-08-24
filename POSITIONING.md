@@ -51,17 +51,18 @@ the *arms* (what to choose) and the *reward* (how to score it) are app-specific.
 
 ## The tenants (all redevops repos)
 
-| Tenant | Decision point Context Runtime optimizes | Reward (the app's own metric) | Status |
-|---|---|---|---|
-| **sidekick** (coding agent) | which skills to recall · bundle size · token budget | acceptance rate · first-try · tokens | **built, green** — drop-in for `SkillStore`; 67% vs 33% naive baseline |
-| **redevops-rag** (retrieval) | `pool · limit · vector_threshold · recency · keyword priors · rerank` per query intent | retrieval quality − efficiency penalty | **built, green** — `ContextRuntimeRetrieverTuner`; 0.780 vs 0.428 fixed default |
-| **edge-sentinel** (SOC) | which sources to pull per alert (CrowdSec · threat-intel · EDR) | correct verdict − source cost | **built, green** — tool-using + approval-gated; 0.900 vs 0.800 always-full |
-| **business modules** (billing · support · BI · compliance …) | which sources/cores to query · which model tier | task success · cost-per-good-answer | **now built** — each is a tenant with a goal + a metric (see the full fleet) |
+The full, current fleet table — each tenant's decision point, reward, and measured
+learned-vs-baseline delta — lives in the [README](./README.md) and
+[BENCHMARKS.md](./BENCHMARKS.md), which are the single source for those numbers; this
+doc does not restate them, so they cannot drift out of sync. What matters *for
+positioning* is the spread of decision types the fleet already covers:
 
 These prove the pattern generalizes across very different decision types: sidekick
 chooses among **discrete strategies**, redevops-rag tunes **numeric knobs**,
-edge-sentinel selects **sources/tools with side effects**. Same bandit, same
-cost-model, same wrap. That is the whole bet.
+edge-sentinel selects **sources/tools with side effects**, and zoning-intelligence
+does **deterministic-first spatial evidence acquisition** (geometry reconciled before
+any LLM, abstaining to `UNKNOWN` rather than risk a false conclusion). Same bandit,
+same cost-model, same wrap. That is the whole bet.
 
 **Context Runtime *is* the control plane.** It absorbs the earlier `agentic-os` fleet-controller logic — the routing, approval/safety,
 and audit-log capabilities prototyped there now live natively in Context Runtime (agentic-os

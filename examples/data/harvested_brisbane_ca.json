@@ -1,0 +1,104 @@
+[
+  {
+    "parcel_id": "geo:72e3659d569820abb75e2af56f2c5574",
+    "crs": "EPSG:4326",
+    "geometry_type": "MultiPolygon",
+    "bbox": [
+      -122.40997549679,
+      37.6771392211434,
+      -122.396739844052,
+      37.6865635558845
+    ],
+    "centroid": [
+      -122.40121542874883,
+      37.68110430452543
+    ],
+    "apn": "",
+    "zoning_code": "R-1",
+    "jurisdiction": "Brisbane, CA",
+    "source_url": "https://services9.arcgis.com/UGpGSV1ugL0pHSgX/arcgis/rest/services/Zoning_Districts_NAD83_20251110/FeatureServer/3",
+    "ordinance_url": "https://www.brisbaneca.org/cd/page/r-1-residential-district",
+    "attributes": {
+      "FID": 9,
+      "FID_": 0,
+      "Descriptio": "Residential District",
+      "Abbreviati": "R-1",
+      "Hyperlink": "<a href=\"https://www.brisbaneca.org/cd/page/r-1-residential-district\" target=\"_top\">R-1 RESIDENTIAL DISTRICT</a>",
+      "Shape_Leng": 20585.7377594,
+      "Shape__Are": 974144.664542,
+      "Shape__Len": 7936.87359478,
+      "GlobalID": "{D933797A-63F5-4161-AD4A-65614165D343}",
+      "Shape__Area": 6555480.564453125,
+      "Shape__Length": 20585.737759332977,
+      "GlobalID_2": "01120069-b17e-4080-9cf8-bd80a3304e53"
+    }
+  },
+  {
+    "parcel_id": "geo:5e60b9289cee6525e84ac4e8ab0a9b7b",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -122.408054088406,
+      37.6732192312766,
+      -122.391499877695,
+      37.6847835974638
+    ],
+    "centroid": [
+      -122.39951946824424,
+      37.67911397291675
+    ],
+    "apn": "",
+    "zoning_code": "R-BA",
+    "jurisdiction": "Brisbane, CA",
+    "source_url": "https://services9.arcgis.com/UGpGSV1ugL0pHSgX/arcgis/rest/services/Zoning_Districts_NAD83_20251110/FeatureServer/3",
+    "ordinance_url": "https://www.brisbaneca.org/cd/page/r-ba-brisbane-acres-residential-district",
+    "attributes": {
+      "FID": 6,
+      "FID_": 0,
+      "Descriptio": "Brisbane Acres Residential District",
+      "Abbreviati": "R-BA",
+      "Hyperlink": "<a href=\"https://www.brisbaneca.org/cd/page/r-ba-brisbane-acres-residential-district\" target=\"_top\">R-BA BRISBANE ACRES RESIDENTIAL DISTRICT</a>",
+      "Shape_Leng": 18745.9545513,
+      "Shape__Are": 886107.046811,
+      "Shape__Len": 7226.14218794,
+      "GlobalID": "{0FBA853A-0B73-452B-91DE-5F18A5CF06B1}",
+      "Shape__Area": 5963731.478515625,
+      "Shape__Length": 18745.95455137053,
+      "GlobalID_2": "2966a6ff-e379-4970-be61-53c0016adf23"
+    }
+  },
+  {
+    "parcel_id": "geo:14fca2b3ed232e678634e03ec6e26721",
+    "crs": "EPSG:4326",
+    "geometry_type": "Polygon",
+    "bbox": [
+      -122.408275749587,
+      37.6834173514796,
+      -122.39115627462,
+      37.7084130085327
+    ],
+    "centroid": [
+      -122.40214726922308,
+      37.69606446978696
+    ],
+    "apn": "",
+    "zoning_code": "C-1",
+    "jurisdiction": "Brisbane, CA",
+    "source_url": "https://services9.arcgis.com/UGpGSV1ugL0pHSgX/arcgis/rest/services/Zoning_Districts_NAD83_20251110/FeatureServer/3",
+    "ordinance_url": "https://www.brisbaneca.org/cd/page/c-1-commercial-mixed-use-district",
+    "attributes": {
+      "FID": 20,
+      "FID_": 0,
+      "Descriptio": "Commercial Mixed-Use District",
+      "Abbreviati": "C-1",
+      "Hyperlink": "<a href=\"https://www.brisbaneca.org/cd/page/c-1-commercial-mixed-use-district\" target=\"_top\">C/P-U NORTHWEST BAYSHORE COMMERCIAL/PUBLIC UTILITIES DISTRICT</a>",
+      "Shape_Leng": 26764.4001461,
+      "Shape__Are": 3656461.13856,
+      "Shape__Len": 10326.9896707,
+      "GlobalID": "{8FADFD5C-A5CE-4C85-BB21-0105BDA8D8FF}",
+      "Shape__Area": 24595615.0859375,
+      "Shape__Length": 26764.400145916617,
+      "GlobalID_2": "50c4ea42-d352-4ef9-9b8c-7337c81102e4"
+    }
+  }
+]

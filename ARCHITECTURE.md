@@ -131,6 +131,7 @@ contracts.
 | **Policy (5.10)** | **Open Policy Agent (Rego)** + **Presidio** (PII) | §5.10 YAML → Rego; `safety.py` stays as fast inline pre-filter. |
 | **Token counting (5.11)** | `tiktoken` + provider tokenizers (LiteLLM) | — |
 | **Observability (5.12)** | **OpenTelemetry + OpenLLMetry** → **Langfuse** | Self-hostable trace/cost/eval + replay (principle #7). Alt: Arize **Phoenix**. |
+| **Geospatial / spatial (§5, v0.3.x)** | CPU engine (`geospatial/engine.py`) · **Shapely/GeoPandas · PostGIS · DuckDB-Spatial** | Typed spatial evidence (`GeoRef`) + spatial ops (point-in-polygon, intersects, spatial-join, distance) as planner-selectable capabilities. The pure-Python engine is the authoritative default; heavier/GPU backends are selected on measured crossover — the accelerator changes latency, not the geometric answer. |
 | **Execution (5.8 / §4)** | **Dagster** | Runs the Execution Graph; Context Runtime *decides* it. |
 | **Optimizer (§6)** | **OR-Tools CP-SAT** · **Optuna** · **River** · (Ray Tune later) | Constrained selection · offline tuning · online contextual bandits. |
 

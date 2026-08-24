@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.3.x — unreleased
+
+The 0.3.x line is additive and default-serial throughout: each new path is opt-in and
+byte-for-byte the previous behavior unless enabled. This "Unreleased" section accumulates
+the v0.3.x work staged across the coordinated-release feature branches, so both the
+geospatial and the concurrency entries appear here on every 0.3.x branch (which is also
+what keeps this file merge-clean).
+
+### Geospatial capabilities + zoning intelligence
+
+Geospatial support as a **Runtime capability, not a separate Geospatial Runtime**: a parcel's geometry,
+CRS, jurisdiction and temporal state become typed evidence, and spatial operations become capabilities
+the planner selects, composes, verifies and governs. Fully additive and offline; no existing path changes.
+
+- **Typed spatial evidence** (`context_runtime.geospatial.contracts`): `GeoRef` (geometry identity via a
+  canonical, hashable `geometry_hash`; explicit CRS; jurisdiction; valid/observed time) extends — never
+  replaces — the evidence-native model. Domain vocabulary: `ParcelEntity`, `UseDisposition`
+  (PERMITTED / CONDITIONAL / SPECIAL_EXCEPTION / PROHIBITED / **UNKNOWN**), `LandUseConstraint`, a
+  normalized use ontology.
+- **CPU-authoritative spatial engine** (`context_runtime.geospatial.engine`): pure-Python, exact,
+  dependency-free point-in-polygon, polygon intersection, area, centroid, distance, and centroid spatial
+  join. Binary ops **refuse a silent CRS mismatch** (raise so the planner inserts an explicit REPROJECT).
+  Heavier backends (shapely/PostGIS/DuckDB-Spatial/GPU) are planner-selectable on measured crossover —
+  the accelerator changes latency, never the answer.
+- **Zoning-intelligence tenant** (`context_runtime.integrations.zoning_intelligence` +
+  `examples/zoning_intelligence.py`): the geospatial reference benchmark. The Runtime learns *which
+  evidence to acquire* (Regrid · ATTOM · official GIS · ordinance) per use-difficulty bucket. A
+  deterministic-first, fail-safe resolver reconciles evidence and only concludes PERMITTED when the
+  evidence is sufficient — making **false-permitted a structural impossibility** for reconciled bundles
+  (the blocking SLO). Measured: learned **+0.894 reward at 1.4× lower evidence cost** than
+  always-thorough, **0 false-permits vs 1** for single-provider. Includes use-first land search,
+  dependency-scoped incremental recomputation, and population-governance drift detection.
+
+### Opt-in reasoner + retrieval concurrency
+
+The independent calls a plan already makes now overlap instead of running strictly one after another.
+
+- **Reasoner fork/join** (`context_runtime/reasoner/_concurrency.py`): a mixture strategy's independent
+  model calls — `debate` passes, `plan_worker_critic` workers, self-consistency samples — fan out
+  concurrently when `CR_REASONER_CONCURRENCY>1` (default 1 = serial). Order-preserving, so the
+  judge/critic/vote reconciliation sees identical inputs in identical order — the answer is unchanged,
+  only wall-clock. Concurrency is *how* a strategy's calls run, never *which* calls it makes.
+- **Retrieval overlap** (`context_runtime/_parallel.py`): the hybrid BM25 ∥ vector legs and the
+  two-stage stage-1 recalls overlap when `CR_RETRIEVAL_CONCURRENCY>1` (default 1 = serial),
+  order-preserved so RRF fusion is deterministic regardless of the setting.
+
 ## 0.2.0 — freshness sourced from evidence (v0.2.x final stabilization)
 
 Correctness/completeness fix to functionality v0.2.x already advertised. The freshness *scoring*, the
