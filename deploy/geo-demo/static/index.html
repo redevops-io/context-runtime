@@ -1,0 +1,98 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Geospatial · Zoning Intelligence — ReDevOps</title>
+<style>
+:root{--bg:#0f0f12;--card:#1f1f23;--line:#2f2f33;--fg:#e7e5ea;--muted:#9b99a1;--teal:#4fd1c5;--amber:#f5b544;--green:#4fd1c5;--red:#f56565}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,sans-serif;line-height:1.55}
+.wrap{max-width:1000px;margin:0 auto;padding:44px 24px 80px}a{color:var(--teal)}
+h1{font-size:32px;margin:0 0 6px}.sub{color:var(--muted);margin:0 0 4px}
+.stat{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:22px 0}
+@media(min-width:720px){.stat{grid-template-columns:repeat(4,1fr)}}
+.stat>div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.stat .n{font-size:24px;font-weight:800;color:var(--teal)}.stat .l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin:20px 0}
+.card h2{font-size:19px;margin:0 0 4px}.card .h{color:var(--muted);font-size:14px;margin:0 0 14px}
+table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid var(--line);padding:7px 9px;text-align:left}
+thead th{color:var(--teal);background:#17171a;position:sticky;top:0}
+.scroll{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+.pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 7px;border-radius:999px}
+.PERMITTED{color:#0f0f12;background:var(--green)}.PROHIBITED{color:#fff;background:var(--red)}.UNKNOWN{color:#0f0f12;background:var(--amber)}
+.slo{font-size:20px;font-weight:800}.ok{color:var(--teal)}.mono{font-family:ui-monospace,monospace;font-size:12px;color:var(--muted)}
+.grid2{display:grid;grid-template-columns:1fr;gap:16px}@media(min-width:760px){.grid2{grid-template-columns:1fr 1fr}}
+.kv{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding:6px 0;font-size:14px}
+.badge{display:inline-block;border:1px solid var(--teal);color:var(--teal);border-radius:999px;font-size:12px;padding:2px 10px}
+</style></head><body><div class="wrap">
+<h1>Geospatial &middot; Zoning Intelligence</h1>
+<p class="sub">Zoning as a Runtime capability: typed spatial evidence, a deterministic geometry engine, and a
+fail-safe land-use resolver — over <b>real</b> parcels harvested from official ArcGIS sources.</p>
+<p class="sub"><span class="badge">never ask an LLM a spatial relation a geometry engine can calculate</span></p>
+
+<div class="stat" id="stat"></div>
+
+<div class="card">
+  <h2>1 &middot; Nationwide land-use, computed</h2>
+  <p class="h">Every target use evaluated against every harvested parcel by the deterministic-first resolver. The
+  official base zoning is authoritative; anything base-incompatible is <b>PROHIBITED</b> with certainty; and
+  wherever the answer needs an ordinance use-table we have not parsed, it returns <b>UNKNOWN</b> and cites the
+  source — never a fabricated "permitted".</p>
+  <p id="slo" class="slo"></p>
+  <div class="scroll"><table id="ev"><thead><tr><th>parcel</th><th>zoning</th><th>jurisdiction</th>
+    <th>single&#8209;family</th><th>office</th><th>retail</th><th>warehouse</th><th>light&#8209;ind.</th></tr></thead>
+    <tbody></tbody></table></div>
+</div>
+
+<div class="grid2">
+  <div class="card">
+    <h2>2 &middot; The geometry engine</h2>
+    <p class="h">Point-in-polygon, area and centroid are exact engine computations (CRS-checked, no silent
+    reprojection) — not an LLM guess.</p>
+    <div id="spatial"></div>
+  </div>
+  <div class="card">
+    <h2>3 &middot; The cheapest sufficient evidence</h2>
+    <p class="h">The zoning tenant learns the minimal evidence bundle per situation that still reaches a correct
+    disposition — measured offline vs baselines (<span class="mono">examples/zoning_intelligence.py</span>).</p>
+    <div id="learned"></div>
+  </div>
+</div>
+
+<p class="sub" style="margin-top:26px">Data: parcels harvested by <b>zoning-sources-mcp</b> from official Census/ArcGIS
+sources (a cross-country sample of the full sweep). Dispositions computed live by the deterministic-first resolver;
+the geometry engine is dependency-free. <a href="/enterprise-plugins">Enterprise plugins</a> &middot;
+<a href="https://redevops.io/architecture">architecture</a>.</p>
+
+<script>
+const D = m => `<span class="pill ${m}">${m}</span>`;
+async function load(){
+  const s = await (await fetch('/api/summary')).json();
+  document.getElementById('stat').innerHTML = `
+    <div><div class="n">${s.harvest.districts.toLocaleString()}</div><div class="l">districts harvested</div></div>
+    <div><div class="n">${s.harvest.services.toLocaleString()}</div><div class="l">official ArcGIS services</div></div>
+    <div><div class="n">${s.harvest.codes.toLocaleString()}</div><div class="l">distinct zoning codes</div></div>
+    <div><div class="n">${s.sample_parcels}</div><div class="l">parcels in this live sample</div></div>`;
+  const L = s.learned;
+  document.getElementById('learned').innerHTML = `
+    <div class="kv"><span>Context Runtime (learned bundle)</span><b class="ok">reward +${L.reward.toFixed(3)} · ${L.false_permits} false-permits</b></div>
+    <div class="kv"><span>single provider</span><span>+${L.vs_single_provider_reward.toFixed(3)} · ${L.vs_single_provider_false_permits} SLO violation</span></div>
+    <div class="kv"><span>fixed-thorough</span><span>+${L.vs_thorough_reward.toFixed(3)} · cost ${L.vs_thorough_cost.toFixed(2)}u</span></div>
+    <div class="kv"><span>learned vs thorough</span><b class="ok">1.4× cheaper at equal correctness</b></div>`;
+
+  const e = await (await fetch('/api/evaluate')).json();
+  document.getElementById('slo').innerHTML =
+    `false-permits: <span class="ok">${e.false_permits}</span> across ${e.parcels} parcels × ${e.uses} uses ` +
+    `&mdash; the SLO holds &nbsp; <span class="mono">${e.tally.PERMITTED} permitted · ${e.tally.PROHIBITED} prohibited · ${e.tally.UNKNOWN} unknown</span>`;
+  document.querySelector('#ev tbody').innerHTML = e.rows.map(r=>{
+    const d=r.dispositions;
+    return `<tr><td class="mono">${r.parcel_id.slice(0,16)}…</td><td>${r.zoning_code}</td><td>${(r.dataset||'').slice(0,26)}</td>
+      <td>${D(d.RESIDENTIAL_SINGLE_FAMILY)}</td><td>${D(d.OFFICE)}</td><td>${D(d.RETAIL)}</td><td>${D(d.WAREHOUSE)}</td><td>${D(d.LIGHT_INDUSTRIAL)}</td></tr>`;
+  }).join('');
+
+  const sp = await (await fetch('/api/spatial')).json();
+  document.getElementById('spatial').innerHTML = `
+    <div class="kv"><span>build point (60, 50) inside parcel?</span><b class="ok">${sp.point_inside_parcel.result}</b></div>
+    <div class="kv"><span>build point (140, 50) inside parcel?</span><b>${sp.point_outside_parcel.result}</b></div>
+    <div class="kv"><span>parcel area</span><span>${sp.area.toLocaleString()} sq units</span></div>
+    <div class="kv"><span>centroid</span><span class="mono">${sp.centroid[0]}, ${sp.centroid[1]}</span></div>
+    <div class="kv"><span>canonical geometry id</span><span class="mono">${sp.geometry_id.slice(0,20)}…</span></div>`;
+}
+load();
+</script></div></body></html>
