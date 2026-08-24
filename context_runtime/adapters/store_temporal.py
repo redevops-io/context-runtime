@@ -115,6 +115,22 @@ class TemporalStore:
 
     def changes(self, query: str = "", *, since: str, until: str, k: int = 20) -> list[dict]:
         """"What changed, and when?" — facts that began or ended validity in ``[since, until)``."""
+        # Accelerator-aware: the pure temporal-window scan (no text filter) is a dataframe reduction, so past
+        # the ~10^6-fact crossover an opt-in cuDF path computes the *identical* change list on the GPU. Below
+        # the crossover, for text-filtered queries, or on any GPU error, the Python reference below runs.
+        if not query:
+            from ..accel import decide
+            d = decide("temporal", len(self._facts))
+            if d.use_gpu:
+                try:
+                    from ..accel.cudf_temporal import changes_gpu
+                    f = self._facts
+                    return changes_gpu([x.valid_from for x in f], [x.valid_to for x in f],
+                                       [x.subject for x in f], [x.predicate for x in f],
+                                       [x.obj for x in f], [x.text() for x in f],
+                                       since=since, until=until, k=k)
+                except Exception:
+                    pass  # fall through to the Python reference — never fail because of the accelerator
         q = _tokens(query)
         out: list[dict] = []
         for f in self._facts:
