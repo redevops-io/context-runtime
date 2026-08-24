@@ -18,10 +18,16 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 
 from context_runtime.geospatial.contracts import GeoRef, ParcelEntity, UseDisposition as D
 
-DATA = os.path.join(os.path.dirname(__file__), "data", "harvested_brisbane_ca.json")
+_HERE = os.path.join(os.path.dirname(__file__), "data")
+# Default = the Brisbane fixture; pass a path (or `nationwide` for the 32-parcel cross-country sample
+# drawn from the 149,624-district nationwide harvest) to run on more real data.
+_ALIASES = {"brisbane": "harvested_brisbane_ca.json", "nationwide": "harvested_us_sample.json"}
+_arg = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("ZONING_DATA", "brisbane")
+DATA = _arg if os.path.isabs(_arg) else os.path.join(_HERE, _ALIASES.get(_arg, _arg))
 
 TARGET_USES = ("RESIDENTIAL_SINGLE_FAMILY", "OFFICE", "RETAIL", "WAREHOUSE", "LIGHT_INDUSTRIAL")
 
@@ -75,25 +81,38 @@ def fam_of(use: str) -> str:
 
 def run() -> None:
     universe = json.load(open(DATA, encoding="utf-8"))
+    datasets = {rec.get("dataset") or rec.get("jurisdiction") or "" for rec in universe}
+    detailed = len(universe) <= 6                     # full per-use detail for a small set; else aggregate
     print(f"Real parcels harvested from official sources: {len(universe)} "
-          f"(jurisdiction: {universe[0]['jurisdiction']})\n")
+          f"across {len(datasets)} dataset(s)/jurisdiction(s)\n")
 
     false_permits = 0
+    tally = {"PERMITTED": 0, "PROHIBITED": 0, "UNKNOWN": 0}
     for rec in universe:
         parcel = as_parcel(rec)                       # proves the drop-in GeoRef/ParcelEntity contract
-        print(f"■ {parcel.zoning_codes[0]:6} parcel {parcel.parcel_id[:22]}  "
-              f"({parcel.geometry_ref.geometry_type}, {parcel.jurisdiction})")
-        if rec.get("ordinance_url"):
-            print(f"    ordinance: {rec['ordinance_url']}")
+        marks = ""
         for use in TARGET_USES:
             disp, why = resolve_real(rec, use)
+            tally[disp.value] = tally.get(disp.value, 0) + 1
             mark = {"PERMITTED": "✓", "PROHIBITED": "✗", "UNKNOWN": "·"}.get(disp.value, "?")
-            print(f"      {mark} {use:26} → {disp.value:11} — {why}")
+            marks += mark
+            if detailed:
+                print(f"      {mark} {use:26} → {disp.value:11} — {why}")
             # A conclusion can never be a confident PERMITTED without base compatibility; assert the SLO.
             if disp == D.PERMITTED and code_family(rec["zoning_code"]) != USE_FAMILY[use]:
                 false_permits += 1
-        print()
+        if detailed:
+            print(f"■ {parcel.zoning_codes[0]:6} parcel {parcel.parcel_id[:22]}  "
+                  f"({parcel.geometry_ref.geometry_type}, {parcel.jurisdiction})")
+            if rec.get("ordinance_url"):
+                print(f"    ordinance: {rec['ordinance_url']}")
+            print()
+        else:
+            juris = (rec.get("dataset") or parcel.jurisdiction or "")[:34]
+            print(f"  {marks}  {(parcel.zoning_codes[0] or '')[:14]:14} {juris}")
 
+    print(f"\ndispositions across {len(universe)} parcels × {len(TARGET_USES)} uses: "
+          f"{tally['PERMITTED']} permitted · {tally['PROHIBITED']} prohibited · {tally['UNKNOWN']} unknown")
     print(f"false-permits (concluded PERMITTED against incompatible base): {false_permits}  "
           f"— the SLO holds on real data")
     print("Wherever the answer depends on the ordinance's use table (the deep wall), the runtime returns "
