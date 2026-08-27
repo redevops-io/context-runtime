@@ -14,6 +14,13 @@ from dataclasses import dataclass
 from ..types import Goal, Intent, Plan
 
 
+# Cache-key schema tag. Bumped whenever the *shape* of the key changes so that any persisted entry
+# written under an older shape can never collide with a new key (explicit invalidation). ``v2-scope``
+# folds tenant + permissions into ``policy_fingerprint`` — pre-fix ``v1`` entries (sensitivity-only) are
+# thereby unreachable and must be re-planned, which is the intended isolation-fix behaviour.
+KEY_SCHEMA = "v2-scope"
+
+
 @dataclass(frozen=True)
 class PlanCacheKey:
     intent_normalized: str
@@ -22,6 +29,7 @@ class PlanCacheKey:
     constraint_envelope: str
     analyzer_version: str = "rule_intent-0.1"
     planner_version: str = "knapsack-0.1"
+    key_schema: str = KEY_SCHEMA
 
 
 def _h(s: str) -> str:
@@ -32,12 +40,27 @@ def build_key(intent: Intent, goal: Goal) -> PlanCacheKey:
     sources = sorted(f"{s.name}:{s.version or '∅'}" for s in goal.sources)
     c = goal.constraints
     envelope = f"{c.max_cost_usd}|{c.max_latency_seconds}|{c.max_tokens}|{c.require_citations}|{c.require_verification}|{c.sensitivity}"
+    # The isolation fingerprint (SPEC §7): a plan is replayed only within the same tenant, under the same
+    # effective permission set, at the same sensitivity. Prior to v2-scope this was ``_h(sensitivity)``
+    # only — two tenants with the same intent/sources/sensitivity shared a key, so tenant A's authorized
+    # plan could be served to tenant B on the cache-HIT path (policy is evaluated on the MISS path only).
+    # tenant/permissions default to (∅, empty) so single-tenant callers hash to a stable value.
+    perms = ",".join(sorted(c.permissions))
+    policy_fingerprint = _h(f"{c.tenant or '∅'}|{perms}|{c.sensitivity}")
     return PlanCacheKey(
         intent_normalized=intent.normalized,
         source_fingerprint=_h("|".join(sources)),
-        policy_fingerprint=_h(c.sensitivity),
+        policy_fingerprint=policy_fingerprint,
         constraint_envelope=_h(envelope),
     )
+
+
+def scope_fingerprint(tenant: str | None, permissions: tuple[str, ...] = ()) -> str:
+    """Isolation salt for an authenticated identity, reused by overlays that scope a plan cache from an
+    ambient principal rather than from ``Constraints`` (e.g. the enterprise identity-scoped cache). Kept
+    here so the AGPL default and any overlay derive the tenant/permission fingerprint the same way."""
+    perms = ",".join(sorted(permissions))
+    return _h(f"{tenant or '∅'}|{perms}")
 
 
 class NullPlanCache:

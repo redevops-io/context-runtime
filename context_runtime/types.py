@@ -34,6 +34,14 @@ class Constraints:
     require_verification: bool = False
     sensitivity: Sensitivity = "public"
     weight_overrides: dict[str, float] = field(default_factory=dict)
+    # Isolation identity (SPEC §7). ``tenant`` + ``permissions`` participate in the plan-cache key so a
+    # sealed plan is replayed only *within the same tenant under the same effective permissions* — never
+    # across tenants. Defaults keep single-tenant behaviour identical: an unset tenant with empty
+    # permissions folds to the same key it did before this field existed. Multi-tenant callers MUST set
+    # ``tenant`` (and the effective ``permissions`` set) so plan reuse cannot cross the isolation boundary;
+    # the enterprise overlay guarantees this from the authenticated Identity even if a caller forgets.
+    tenant: str | None = None
+    permissions: tuple[str, ...] = ()
 
 
 SourceKind = Literal["docs", "code", "logs", "metrics", "api", "graph", "memory"]
