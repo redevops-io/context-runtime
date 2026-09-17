@@ -1,0 +1,137 @@
+{
+  "shapely": {
+    "general": 1485,
+    "mismatch": 19,
+    "cases": [
+      {
+        "workload": "point_in_polygon",
+        "fixture": "v64",
+        "python": true,
+        "arm": false
+      },
+      {
+        "workload": "point_in_polygon",
+        "fixture": "v64",
+        "python": true,
+        "arm": false
+      },
+      {
+        "workload": "point_in_polygon",
+        "fixture": "v64",
+        "python": true,
+        "arm": false
+      },
+      {
+        "workload": "point_in_polygon",
+        "fixture": "v64",
+        "python": true,
+        "arm": false
+      },
+      {
+        "workload": "point_in_polygon",
+        "fixture": "v256",
+        "python": true,
+        "arm": false
+      },
+      {
+        "workload": "point_in_polygon",
+        "fixture": "v256",
+        "python": true,
+        "arm": false
+      },
+      {
+        "workload": "point_in_polygon",
+        "fixture": "v256",
+        "python": true,
+        "arm": false
+      },
+      {
+        "workload": "point_in_polygon",
+        "fixture": "v256",
+        "python": true,
+        "arm": false
+      },
+      {
+        "workload": "point_in_polygon",
+        "fixture": "v256",
+        "python": true,
+        "arm": false
+      },
+      {
+        "workload": "point_in_polygon",
+        "fixture": "v256",
+        "python": true,
+        "arm": false
+      },
+      {
+        "workload": "point_in_polygon",
+        "fixture": "v256",
+        "python": true,
+        "arm": false
+      },
+      {
+        "workload": "point_in_polygon",
+        "fixture": "v1024",
+        "python": true,
+        "arm": false
+      },
+      {
+        "workload": "point_in_polygon",
+        "fixture": "v1024",
+        "python": true,
+        "arm": false
+      },
+      {
+        "workload": "point_in_polygon",
+        "fixture": "v1024",
+        "python": true,
+        "arm": false
+      },
+      {
+        "workload": "point_in_polygon",
+        "fixture": "v1024",
+        "python": true,
+        "arm": false
+      },
+      {
+        "workload": "point_in_polygon",
+        "fixture": "v1024",
+        "python": true,
+        "arm": false
+      },
+      {
+        "workload": "point_in_polygon",
+        "fixture": "v1024",
+        "python": true,
+        "arm": false
+      },
+      {
+        "workload": "point_in_polygon",
+        "fixture": "v1024",
+        "python": true,
+        "arm": false
+      },
+      {
+        "workload": "point_in_polygon",
+        "fixture": "v1024",
+        "python": true,
+        "arm": false
+      },
+      {
+        "workload": "adversarial",
+        "fixture": "collinear_x",
+        "python": true,
+        "arm": false
+      }
+    ],
+    "adversarial": 12,
+    "adversarial_mismatch": 1
+  },
+  "mojo": {
+    "general": 1485,
+    "mismatch": 0,
+    "cases": [],
+    "adversarial": 12,
+    "adversarial_mismatch": 0
+  }
+}

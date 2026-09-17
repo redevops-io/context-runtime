@@ -1,0 +1,14 @@
+{
+  "seed": "0x5eed2026",
+  "generator_commit": "fe040f132427e182b68fbaff46b8451a3fd06da9",
+  "epsilon": {
+    "on_edge": 1e-09,
+    "collinear": 1e-12
+  },
+  "counts": {
+    "point_in_polygon": 1000,
+    "polygon_pairs": 480,
+    "spatial_join": 5,
+    "adversarial": 12
+  }
+}
