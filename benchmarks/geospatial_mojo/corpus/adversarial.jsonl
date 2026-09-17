@@ -1,0 +1,12 @@
+{"case":"on_vertex","op":"point_in_polygon","ring":[[0.0,0.0],[10.0,0.0],[10.0,10.0],[0.0,10.0]],"point":[0.0,0.0]}
+{"case":"on_edge_mid","op":"point_in_polygon","ring":[[0.0,0.0],[10.0,0.0],[10.0,10.0],[0.0,10.0]],"point":[5.0,0.0]}
+{"case":"eps_minus_ulp_inside","op":"point_in_polygon","ring":[[0.0,0.0],[10.0,0.0],[10.0,10.0],[0.0,10.0]],"point":[5.0,9.999997779553951e-10]}
+{"case":"eps_exact","op":"point_in_polygon","ring":[[0.0,0.0],[10.0,0.0],[10.0,10.0],[0.0,10.0]],"point":[5.0,1e-09]}
+{"case":"eps_plus_ulp","op":"point_in_polygon","ring":[[0.0,0.0],[10.0,0.0],[10.0,10.0],[0.0,10.0]],"point":[5.0,1.000000222044605e-09]}
+{"case":"just_outside_edge","op":"point_in_polygon","ring":[[0.0,0.0],[10.0,0.0],[10.0,10.0],[0.0,10.0]],"point":[5.0,-1e-09]}
+{"case":"collinear_x","op":"point_in_polygon","ring":[[0.0,0.0],[10.0,0.0],[10.0,10.0],[0.0,10.0]],"point":[10.000000000001,5.0]}
+{"case":"large_magnitude","op":"point_in_polygon","ring":[[10000000.0,10000000.0],[10000010.0,10000000.0],[10000010.0,10000010.0],[10000000.0,10000010.0]],"point":[10000005.0,10000000.0]}
+{"case":"negative_coords","op":"point_in_polygon","ring":[[-10,-10],[-1,-10],[-1,-1],[-10,-1]],"point":[-5,-10]}
+{"case":"reversed_ring","op":"point_in_polygon","ring":[[0.0,10.0],[10.0,10.0],[10.0,0.0],[0.0,0.0]],"point":[5.0,5.0]}
+{"case":"repeated_last","op":"point_in_polygon","ring":[[0.0,0.0],[10.0,0.0],[10.0,10.0],[0.0,10.0],[0.0,0.0]],"point":[5.0,5.0]}
+{"case":"tiny_polygon","op":"point_in_polygon","ring":[[0,0],[1e-06,0],[1e-06,1e-06],[0,1e-06]],"point":[5e-07,5e-07]}
