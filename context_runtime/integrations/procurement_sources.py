@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -79,6 +80,16 @@ class UrllibFetcher:
                     if ln.lower().startswith("disallow:")]
         return not any(d and p.path.startswith(d) for d in disallow)
 
+    def _opener(self):
+        # A per-instance opener with a cookie jar so a session handshake (e.g. PeopleSoft's 302 +
+        # PSJSESSIONID cookie on INFORMS) is followed correctly across redirects.
+        if not hasattr(self, "_op"):
+            import http.cookiejar
+            import urllib.request
+            self._op = urllib.request.build_opener(
+                urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        return self._op
+
     def fetch(self, url: str, *, timeout: float = 20.0) -> FetchResult:
         import urllib.request
         if not self._allowed(url):
@@ -89,10 +100,10 @@ class UrllibFetcher:
             time.sleep(wait)
         try:
             req = urllib.request.Request(url, headers={"User-Agent": self.user_agent})
-            with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310 (explicit opt-in)
+            with self._opener().open(req, timeout=timeout) as r:  # noqa: S310 (explicit opt-in)
                 body = r.read().decode("utf-8", "ignore")
                 self._last[host] = time.monotonic()
-                return FetchResult(r.status, body, r.headers.get("Content-Type", ""))
+                return FetchResult(getattr(r, "status", 200), body, r.headers.get("Content-Type", ""))
         except Exception as e:  # noqa: BLE001
             return FetchResult(0, "", f"error:{e!r}")
 
@@ -104,6 +115,7 @@ class SourceMethod(str, Enum):
     JSON = "json"
     HTML = "html"
     SAM_API = "sam_api"
+    INFORMS = "informs"          # Miami-Dade PeopleSoft public bidding grid (portal-specific extractor)
 
 
 class SourceHealth(str, Enum):
@@ -144,8 +156,10 @@ def _seed_sources() -> list[ProcurementSource]:
     return [
         ProcurementSource("src-aventura", "fl-aventura", "City of Aventura — Bids",
                           "https://www.cityofaventura.com/bids.aspx", SourceMethod.HTML),
-        ProcurementSource("src-miami-dade", "fl-miami-dade-county", "Miami-Dade County — Procurement",
-                          "https://www.miamidade.gov/global/procurement/home.page", SourceMethod.HTML),
+        ProcurementSource("src-miami-dade-informs", "fl-miami-dade-county", "Miami-Dade County — INFORMS Public Bidding",
+                          "https://supplier.miamidade.gov/psc/EXTSUPP/SUPPLIER/ERP/c/"
+                          "SCP_PUBLIC_MENU_FL.SCP_PUB_BID_CMP_FL.GBL?PAGE=SCP_PUB_BIDLIST_FL",
+                          SourceMethod.INFORMS, provenance="official-verified"),
         ProcurementSource("src-mdcps", "fl-mdcps", "Miami-Dade County Public Schools — Procurement",
                           "https://procurement.dadeschools.net/", SourceMethod.HTML),
         ProcurementSource("src-fort-lauderdale", "fl-fort-lauderdale", "City of Fort Lauderdale — Bids",
@@ -192,6 +206,51 @@ def parse_json_items(text: str, items_key: str = "items") -> list[dict]:
     return [d for d in items if isinstance(d, dict)]
 
 
+import html as _html  # noqa: E402
+
+_INFORMS_SPAN = re.compile(r"id='SCP_PUB_AUC_VW_([A-Z0-9_]+)\$(\d+)'\s*>([^<]*)</span>")
+
+
+def parse_informs(text: str) -> list[dict]:
+    """Extract rows from the Miami-Dade INFORMS public-bidding grid (a PeopleSoft Fluid page).
+
+    The grid renders each field as ``<span id='SCP_PUB_AUC_VW_<FIELD>$<row>'>value</span>`` — AUC_ID,
+    AUC_NAME, AUC_FORMAT, AUC_TYPE. We group by row index and return {title, event_id, format, type}.
+    """
+    from collections import defaultdict
+    rows: dict[int, dict] = defaultdict(dict)
+    for field, idx, val in _INFORMS_SPAN.findall(text):
+        rows[int(idx)][field] = _html.unescape(val).strip()
+    out = []
+    for i in sorted(rows):
+        r = rows[i]
+        if not (r.get("AUC_ID") or r.get("AUC_NAME")):
+            continue
+        out.append({"title": r.get("AUC_NAME", ""), "event_id": r.get("AUC_ID", ""),
+                    "format": r.get("AUC_FORMAT", ""), "type": r.get("AUC_TYPE", ""), "link": ""})
+    return out
+
+
+# Keyword → service-category tagger. Municipal solicitation titles carry no NAICS, so we derive coarse
+# service tags from the title text; qualification then matches them against the business's services.
+_CATEGORY_KEYWORDS = {
+    "engineering": ("engineering", "engineer"),
+    "it": ("cisco", "software", "hardware", "adobe", "license", "technology", " it ", "network", "systems"),
+    "professional services": ("professional", "svcs", "services", "consult", "legislative", "legal", "title company"),
+    "maintenance": ("maintenance", "repair"),
+    "hvac": ("hvac", "air condition", "chiller", "mechanical", "rooftop"),
+    "construction": ("construction", "build", "renovation", "roofing"),
+    "accounting": ("1099", "irs", "payroll", "retirement"),
+    "equipment": ("clock", "equipment", "furniture", "vehicle"),
+}
+
+
+def tag_categories(title: str) -> tuple[str, ...]:
+    t = f" {title.lower()} "
+    tags = [cat for cat, kws in _CATEGORY_KEYWORDS.items() if any(k in t for k in kws)]
+    return tuple(sorted(set(tags)))
+
+
 # ──────────────────────────── collect ────────────────────────────
 
 def _now_iso() -> str:
@@ -210,7 +269,9 @@ def collect(sources: list[ProcurementSource], fetcher: Fetcher, *, now: Optional
             records = parse_rss(res.text)
         elif src.method in (SourceMethod.JSON, SourceMethod.SAM_API):
             records = parse_json_items(res.text)
-        else:  # HTML parsing is portal-specific — a real deployment plugs a per-portal extractor here.
+        elif src.method is SourceMethod.INFORMS:
+            records = parse_informs(res.text)
+        else:  # generic HTML is portal-specific — a real deployment plugs a per-portal extractor here.
             records = []
         for rec in records:
             h = "sha256:" + hashlib.sha256(
@@ -238,13 +299,15 @@ def normalize(obs: Observation, source: ProcurementSource, *,
     """Map a raw observation to the normalized RevenueOpportunity (dedup id from source + record hash)."""
     r = obs.raw
     title = r.get("title") or r.get("title_text") or r.get("subject") or "(untitled solicitation)"
+    # municipal titles carry no NAICS → derive coarse service tags from the title (union with any passed in)
+    cats = tuple(sorted(set(categories) | set(tag_categories(title))))
     return RevenueOpportunity(
-        opportunity_id=f"{source.source_id}:{obs.content_hash.split(':')[-1]}",
+        opportunity_id=f"{source.source_id}:{r.get('event_id') or obs.content_hash.split(':')[-1]}",
         source=source.source_id, issuing_entity=source.name.split(" — ")[0],
         jurisdiction_id=source.jurisdiction_id, title=title,
-        solicitation_type=_guess_type(title), place_of_performance_zip=zip_code,
+        solicitation_type=_guess_type(r.get("format", "") + " " + title), place_of_performance_zip=zip_code,
         description=r.get("description") or r.get("summary") or "",
-        categories=categories, response_due_at=r.get("response_due_at") or r.get("pubdate") or "",
+        categories=cats, response_due_at=r.get("response_due_at") or r.get("pubdate") or "",
         source_url=r.get("link") or r.get("id") or source.url,
         evidence_ids=(f"obs:{obs.source_id}:{obs.content_hash.split(':')[-1]}",),
         discovered_at=obs.fetched_at)
@@ -262,7 +325,7 @@ class RegionResult:
 def run_region(zip_code: str, radius_miles: float, profile: BusinessProfile, *,
                fetcher: Fetcher, registry: Optional[JurisdictionRegistry] = None,
                sources: Optional[list[ProcurementSource]] = None,
-               default_categories: tuple[str, ...] = ("hvac", "mechanical")) -> RegionResult:
+               default_categories: tuple[str, ...] = ()) -> RegionResult:
     """Resolve the monitored jurisdictions for a ZIP/radius, collect their sources, normalize + qualify,
     and emit handoff records — the collector → discovery → qualification → handoff pipeline, one region.
     """
