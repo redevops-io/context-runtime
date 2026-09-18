@@ -176,6 +176,7 @@ class RevenueOpportunity:
     response_due_at: str = ""                  # ISO date; "" = unknown
     estimated_value: Optional[float] = None
     set_aside: str = ""
+    place_of_performance_state: str = ""       # for region-agnostic (federal/SAM.gov) opportunities
     required_licenses: tuple[str, ...] = ()
     required_certifications: tuple[str, ...] = ()
     documents: tuple[str, ...] = ()
@@ -216,6 +217,11 @@ class Decision(str, Enum):
     REJECT = "REJECT"
 
 
+# A source with this jurisdiction id is region-agnostic (federal, e.g. SAM.gov): it has no single local
+# issuing jurisdiction, so qualification uses place of performance rather than jurisdiction membership.
+FEDERAL_JURISDICTION = "*"
+
+
 @dataclass
 class Qualification:
     """The evidence-backed verdict. Every result carries explicit reasons — never a bare score."""
@@ -233,23 +239,37 @@ def qualify(opp: RevenueOpportunity, profile: BusinessProfile, registry: Jurisdi
     worked examples (`REJECT — mandatory license not present`, `REVIEW — insurance requirement unknown`, …).
     """
     reasons: list[str] = []
-
-    # ── geography (hard gate): is the issuing jurisdiction inside the owner's monitored service area? ──
-    # Membership (not raw centroid distance) is the right test — a county contains the ZIP even though its
-    # area centroid can sit far away, and `within(...)` already resolved containment vs proximity correctly.
-    monitored = {m.jurisdiction.id: m for m in registry.within(profile.service_zip, profile.service_radius_miles)}
-    m = monitored.get(opp.jurisdiction_id)
+    m: Optional[MonitoredJurisdiction] = None
     dist: Optional[float] = None
-    if m is None:
-        j = next((jj for jj in registry.jurisdictions() if jj.id == opp.jurisdiction_id), None)
+    federal = opp.jurisdiction_id == FEDERAL_JURISDICTION
+
+    if federal:
+        # ── region-agnostic (federal / SAM.gov) geography: there is no local issuing jurisdiction, so
+        # qualify by PLACE OF PERFORMANCE, not membership. In the business's state (or nationwide, i.e.
+        # unstated) passes; a different state is out of area. Distance is not meaningful here. ──
         zbiz = registry.zip_area(profile.service_zip)
-        if j is not None and zbiz is not None:
-            d = round(haversine_miles(zbiz.centroid, j.centroid), 1)
-            reasons.append(f"{j.name} is outside the {profile.service_radius_miles:g}-mi service area ({d:.0f} mi)")
-        else:
-            reasons.append(f"jurisdiction {opp.jurisdiction_id!r} is not monitored for this service area")
-        return Qualification(opp.opportunity_id, Decision.REJECT, reasons, 0.0, dist)
-    dist = m.distance_miles
+        biz_state = zbiz.state if zbiz else ""
+        pop = (opp.place_of_performance_state or "").upper()
+        if pop and biz_state and pop != biz_state.upper():
+            reasons.append(f"federal opportunity — place of performance {pop} outside your state ({biz_state})")
+            return Qualification(opp.opportunity_id, Decision.REJECT, reasons, 0.0, None)
+        reasons.append("federal opportunity (SAM.gov) — place of performance in-state or nationwide")
+    else:
+        # ── geography (hard gate): is the issuing jurisdiction inside the owner's monitored service area? ──
+        # Membership (not raw centroid distance) is the right test — a county contains the ZIP even though
+        # its area centroid can sit far away, and `within(...)` already resolved containment vs proximity.
+        monitored = {mj.jurisdiction.id: mj for mj in registry.within(profile.service_zip, profile.service_radius_miles)}
+        m = monitored.get(opp.jurisdiction_id)
+        if m is None:
+            j = next((jj for jj in registry.jurisdictions() if jj.id == opp.jurisdiction_id), None)
+            zbiz = registry.zip_area(profile.service_zip)
+            if j is not None and zbiz is not None:
+                d = round(haversine_miles(zbiz.centroid, j.centroid), 1)
+                reasons.append(f"{j.name} is outside the {profile.service_radius_miles:g}-mi service area ({d:.0f} mi)")
+            else:
+                reasons.append(f"jurisdiction {opp.jurisdiction_id!r} is not monitored for this service area")
+            return Qualification(opp.opportunity_id, Decision.REJECT, reasons, 0.0, dist)
+        dist = m.distance_miles
 
     # ── mandatory licenses/certifications (hard gate) ──
     have_lic = {s.lower() for s in profile.licenses}
@@ -269,7 +289,9 @@ def qualify(opp: RevenueOpportunity, profile: BusinessProfile, registry: Jurisdi
         reasons.append(f"no service match: opportunity is {', '.join(opp.categories)}; business does {', '.join(profile.services)}")
         return Qualification(opp.opportunity_id, Decision.REJECT, reasons, 0.0, dist)
     reasons.append(f"service match {service_match:.0%} ({', '.join(matched) or 'none'})")
-    if m.reason is InclusionReason.CONTAINS:
+    if federal:
+        pass                                   # federal geography reason already recorded above
+    elif m.reason is InclusionReason.CONTAINS:
         reasons.append(f"issuing jurisdiction ({m.jurisdiction.name}) covers your ZIP")
     else:
         reasons.append(f"within service area — {dist:.0f} mi")
@@ -451,6 +473,7 @@ def to_handoff(opp: RevenueOpportunity, qual: Qualification,
         "solicitation_type": opp.solicitation_type.value,
         "status": opp.status,
         "place_of_performance_zip": opp.place_of_performance_zip,
+        "place_of_performance_state": opp.place_of_performance_state,
         "geographic_distance_miles": qual.distance_miles,
         "categories": list(opp.categories),
         "posted_at": opp.posted_at,

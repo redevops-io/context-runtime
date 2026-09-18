@@ -28,7 +28,7 @@ from .local_gov import (
 )
 from .procurement_sources import (
     COLLECTOR_VERSION, Fetcher, Observation, ProcurementSource, SourceMethod, _now_iso, _observe,
-    default_source_registry, enrich_informs, merge_detail, normalize, parse_source,
+    default_source_registry, enrich_informs, merge_detail, normalize, parse_source, resolve_fetch_url,
 )
 
 
@@ -145,8 +145,16 @@ def run_collection(*, zip_code: str, radius_miles: float, profile: BusinessProfi
     counts = {"NEW": 0, "UPDATED": 0, "UNCHANGED": 0, "PURSUE": 0, "REVIEW": 0, "REJECT": 0}
 
     for src in region_sources:
+        # SAM.gov needs a keyed URL built from env SAM_API_KEY; a missing key is a recorded source
+        # failure (not a silent skip), and the key never enters an observation (obs uses src.url).
+        fetch_url, url_err = resolve_fetch_url(src, profile=profile, now=started)
+        if fetch_url is None:
+            outcomes.append(SourceOutcome(
+                source_id=src.source_id, method=src.method.value, ok=False, http_status=0,
+                record_count=0, error=url_err))
+            continue
         t0 = time.monotonic()
-        res = fetcher.fetch(src.url)
+        res = fetcher.fetch(fetch_url)
         fetch_ms = int((time.monotonic() - t0) * 1000)
         ok = res.status == 200 and bool(res.text)
         records = parse_source(src.method, res.text) if ok else []

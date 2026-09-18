@@ -368,6 +368,87 @@ def parse_informs_detail(text: str) -> dict:
     return rec
 
 
+def parse_sam(text: str) -> list[dict]:
+    """Parse a SAM.gov Opportunities v2 response (``opportunitiesData``) into raw records.
+
+    SAM is a FEDERAL, region-agnostic source: each notice carries a place of performance (state), which
+    qualification uses instead of local-jurisdiction membership. We map the documented fields; NAICS is the
+    authoritative category (municipal-style title keyword tagging is a poor fit for federal notices)."""
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return []
+    items = data.get("opportunitiesData") if isinstance(data, dict) else (data if isinstance(data, list) else [])
+    out = []
+    for d in items or []:
+        if not isinstance(d, dict) or not (d.get("title") or d.get("noticeId")):
+            continue
+        poc = d.get("pointOfContact") or []
+        contact = ""
+        if isinstance(poc, list) and poc and isinstance(poc[0], dict):
+            contact = (poc[0].get("fullName") or "").strip()
+            if poc[0].get("email"):
+                contact = f"{contact} <{poc[0]['email']}>".strip()
+        pop = d.get("placeOfPerformance") or {}
+        st = pop.get("state") if isinstance(pop, dict) else None
+        state = ((st.get("code") or st.get("name")) if isinstance(st, dict) else (st or "")) or ""
+        naics = str(d.get("naicsCode") or "").strip()
+        dept = (d.get("fullParentPathName") or "")
+        out.append({
+            "record_kind": "sam",
+            "title": (d.get("title") or "").strip(),
+            "event_id": (d.get("noticeId") or d.get("solicitationNumber") or "").strip(),
+            "format": (d.get("type") or d.get("baseType") or "").strip(),
+            "posted_at": str(d.get("postedDate") or "")[:10],
+            "response_due_at": str(d.get("responseDeadLine") or "")[:10],
+            "department": dept.split(".")[-1].strip() if dept else "",
+            "contact": contact,
+            "set_aside": (d.get("typeOfSetAsideDescription") or "").strip(),
+            "naics": naics,
+            "categories": [naics] if naics else [],
+            "place_of_performance_state": str(state).strip(),
+            "link": (d.get("uiLink") or d.get("additionalInfoLink") or "").strip(),
+        })
+    return out
+
+
+def sam_gov_url(base_url: str, api_key: str, *, posted_from: str, posted_to: str,
+                naics: tuple[str, ...] = (), limit: int = 25,
+                ptypes: tuple[str, ...] = ("o", "k", "p"), state: str = "") -> str:
+    """Build a SAM.gov Opportunities v2 query URL. ``api_key`` is a secret from the environment — it lives
+    only in the URL handed to the fetcher, never in the source registry or the evidence store."""
+    from urllib.parse import urlencode
+    params = {"api_key": api_key, "postedFrom": posted_from, "postedTo": posted_to, "limit": str(limit)}
+    if ptypes:
+        params["ptype"] = ",".join(ptypes)
+    if naics:
+        params["ncode"] = ",".join(naics)
+    if state:
+        params["state"] = state
+    sep = "&" if "?" in base_url else "?"
+    return f"{base_url}{sep}{urlencode(params)}"
+
+
+def resolve_fetch_url(source: ProcurementSource, *, profile: Optional[BusinessProfile] = None,
+                      now: Optional[str] = None, window_days: int = 14):
+    """The effective URL to fetch for a source. Identity for most sources; for SAM_API it builds the keyed
+    query URL from env ``SAM_API_KEY`` over a recent posted window + the profile's NAICS. Returns
+    ``(url, error)`` — url is None (with an error string) when SAM has no key, so the caller records a
+    source-reliability failure rather than silently skipping (the key is never logged or stored)."""
+    if source.method is not SourceMethod.SAM_API:
+        return source.url, ""
+    import os
+    from datetime import datetime, timedelta, timezone
+    key = os.environ.get("SAM_API_KEY", "").strip()
+    if not key:
+        return None, "SAM_API_KEY not set"
+    end = datetime.strptime(now[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc) if now else datetime.now(timezone.utc)
+    start = end - timedelta(days=window_days)
+    naics = tuple(profile.naics) if profile else ()
+    return sam_gov_url(source.url, key, posted_from=start.strftime("%m/%d/%Y"),
+                       posted_to=end.strftime("%m/%d/%Y"), naics=naics), ""
+
+
 def parse_future_solicitations(text: str) -> list[dict]:
     """Parse Miami-Dade's "Future Solicitations" forecast feed (a DataTables JSON endpoint).
 
@@ -430,7 +511,9 @@ def parse_source(method: SourceMethod, text: str) -> list[dict]:
     agree on what a source's records are (generic HTML is portal-specific → no records here)."""
     if method is SourceMethod.RSS:
         return parse_rss(text)
-    if method in (SourceMethod.JSON, SourceMethod.SAM_API):
+    if method is SourceMethod.SAM_API:
+        return parse_sam(text)
+    if method is SourceMethod.JSON:
         return parse_json_items(text)
     if method is SourceMethod.INFORMS:
         return parse_informs(text)
@@ -531,8 +614,11 @@ def normalize(obs: Observation, source: ProcurementSource, *,
     """Map a raw observation to the normalized RevenueOpportunity (dedup id from source + record hash)."""
     r = obs.raw
     title = r.get("title") or r.get("title_text") or r.get("subject") or "(untitled solicitation)"
-    # municipal titles carry no NAICS → derive coarse service tags from the title (union with any passed in)
-    cats = tuple(sorted(set(categories) | set(tag_categories(title))))
+    # municipal titles carry no NAICS → derive coarse service tags from the title; federal (SAM) records
+    # carry an authoritative NAICS in `categories`/`naics`. Union all available signals.
+    cats = tuple(sorted(set(categories) | set(tag_categories(title))
+                        | {str(c) for c in r.get("categories", ()) if c}
+                        | ({str(r["naics"])} if r.get("naics") else set())))
     contact = r.get("contact", "")
     if r.get("contact_email"):
         contact = f"{contact} <{r['contact_email']}>".strip()
@@ -544,6 +630,8 @@ def normalize(obs: Observation, source: ProcurementSource, *,
         description=r.get("description") or r.get("summary") or "",
         categories=cats, posted_at=r.get("posted_at") or "",
         response_due_at=r.get("response_due_at") or r.get("pubdate") or "",
+        set_aside=r.get("set_aside", ""),
+        place_of_performance_state=r.get("place_of_performance_state", ""),
         department=r.get("department", ""), contact=contact,
         source_url=r.get("link") or r.get("id") or source.url,
         evidence_ids=(obs.observation_id,),
