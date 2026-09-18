@@ -111,3 +111,132 @@ def test_informs_run_region_qualifies_real_shape():
     assert "PURSUE" in decisions                                   # Cisco/Bond match an eng/IT firm, in-county
     # every handoff carries a Miami-Dade observation reference (replayable evidence)
     assert all(any(e.startswith("obs:src-miami-dade-informs") for e in h["evidence_ids"]) for h in res.handoffs)
+
+
+# ── INFORMS detail enrichment (a stage separate from list discovery) ──
+# A realistic detail page mirroring the fields the live PeopleSoft detail page actually exposes (built
+# from the real E26SP01: Bond Engineering Services detail). Its own hash/provenance; not the list page.
+_INFORMS_DETAIL_HTML = """<html><body>
+<span class='ps_box-value' id='SCP_P_AUCDTL_VW_AUC_NAME$0' >E26SP01: Bond Engineering Services</span>
+<span class='ps_box-value' id='BUS_UNIT_AUC_VW_DESCR$0' >Strategic Procurement</span>
+<span class='ps_box-value' id='SCP_P_AUCDTL_VW_AUC_ID$0' >E26SP01</span>
+<span class='ps_box-value' id='SCP_P_AUCDTL_VW_AUC_STATUS$0' >Posted</span>
+<span class='ps_box-value' id='SCP_P_AUCDTL_VW_AUC_FORMAT$0' >RFP</span>
+<span class='ps_box-value' id='SCP_P_AUCDTL_VW_AUC_TYPE$0' >RFx</span>
+<span class='ps_box-value' id='SCP_P_AUCDTL_VW_MULTIPLE_BIDS_FLG$0' >Not Allowed</span>
+<span class='ps_box-value' id='SCP_P_AUCDTL_VW_NAME1$0' >Whiteside, Julie</span>
+<span class='ps_box-value' id='SCP_P_AUCDTL_VW_SCP_STRT_DATE_CHAR$0' >08/17/2026 08:00 AM EST</span>
+<span class='ps_box-value' id='SCP_P_AUCDTL_VW_SCP_END_DATE_CHAR$0' >09/21/2026 02:00 PM EST</span>
+<span class='ps_box-value' id='PYMT_TR_EFF_VW_DESCR$0' >Net30</span>
+<a href='#'>Download</a><a href='#'>Download</a>
+</body></html>"""
+
+
+def test_parse_informs_detail_extracts_real_structure():
+    from context_runtime.integrations.procurement_sources import parse_informs_detail
+    d = parse_informs_detail(_INFORMS_DETAIL_HTML)
+    assert d["event_id"] == "E26SP01" and d["status"] == "Posted"
+    assert d["response_due_at"] == "2026-09-21"          # the REAL deadline, from the page (not inferred)
+    assert d["posted_at"] == "2026-08-17"
+    assert d["department"] == "Strategic Procurement" and d["contact"] == "Whiteside, Julie"
+    assert d["payment_terms"] == "Net30" and d["document_count"] == 2
+
+
+def test_parse_informs_detail_does_not_invent_missing_dates():
+    from context_runtime.integrations.procurement_sources import parse_informs_detail
+    # a page with no end-date span → response_due_at must be "" (don't infer missing deadlines)
+    d = parse_informs_detail("<span id='SCP_P_AUCDTL_VW_AUC_ID$0' >E99$0</span>")
+    assert d["response_due_at"] == "" and d["posted_at"] == ""
+
+
+def test_list_parse_carries_department_and_detail_action():
+    from context_runtime.integrations.procurement_sources import parse_informs
+    html = _INFORMS_HTML.replace(
+        "<span class='ps_box-value' id='SCP_PUB_AUC_VW_AUC_NAME$1'",
+        "<span class='ps_box-value' id='BUS_UNIT_AUC_VW_DESCR$1' >Strategic Procurement</span>"
+        "<span class='ps_box-value' id='SCP_PUB_AUC_VW_AUC_NAME$1'")
+    rows = parse_informs(html)
+    r1 = next(r for r in rows if r["event_id"] == "E26SP01")
+    assert r1["department"] == "Strategic Procurement"
+    assert r1["detail_action"] == "SCP_COSP_WK_FL_DESCR$1"      # deterministic from row index
+
+
+def test_enrichment_merges_detail_as_second_observation_with_real_deadline():
+    from context_runtime.integrations.procurement_sources import ProcurementSource, SourceMethod
+    src = ProcurementSource("src-miami-dade-informs", "fl-miami-dade-county",
+                            "Miami-Dade County — INFORMS Public Bidding", "https://fixture/informs",
+                            SourceMethod.INFORMS)
+    fetcher = FixtureFetcher(
+        {"https://fixture/informs": FetchResult(200, _INFORMS_HTML, "text/html")},
+        detail_responses={"SCP_COSP_WK_FL_DESCR$1": FetchResult(200, _INFORMS_DETAIL_HTML, "text/html")})
+    profile = BusinessProfile(name="Metro Eng & Tech", service_zip="33180", service_radius_miles=50,
+                              services=("engineering", "professional services"))
+    res = run_region("33180", 50, profile, fetcher=fetcher, sources=[src], enrich=True)
+    # the detail is a SEPARATE observation preserved alongside the list rows (3 list + 1 detail)
+    kinds = sorted(o.kind for o in res.observations)
+    assert kinds.count("detail") == 1 and kinds.count("list") == 3
+    bond = next(h for h in res.handoffs if h["opportunity_id"].endswith("E26SP01"))
+    assert bond["response_due_at"] == "2026-09-21"      # the real deadline drove the handoff, not a fallback
+    assert bond["status"] == "Posted" and bond["department"] == "Strategic Procurement"
+    assert bond["detail_observed"] is True
+    # the opportunity references BOTH the list and the detail observation (dual lineage)
+    ev = bond["evidence_ids"]
+    assert any(":list:" in e for e in ev) and any(":detail:" in e for e in ev)
+
+
+def test_enrichment_degrades_gracefully_without_detail_fetcher():
+    from context_runtime.integrations.procurement_sources import ProcurementSource, SourceMethod
+    src = ProcurementSource("src-miami-dade-informs", "fl-miami-dade-county",
+                            "Miami-Dade County — INFORMS Public Bidding", "https://fixture/informs",
+                            SourceMethod.INFORMS)
+    fetcher = FixtureFetcher({"https://fixture/informs": FetchResult(200, _INFORMS_HTML, "text/html")})
+    profile = BusinessProfile(name="Metro Eng & Tech", service_zip="33180", service_radius_miles=50,
+                              services=("engineering",))
+    res = run_region("33180", 50, profile, fetcher=fetcher, sources=[src], enrich=True)
+    assert all(o.kind == "list" for o in res.observations)         # no detail fabricated
+    assert all(not h["detail_observed"] for h in res.handoffs)
+
+
+# ── Future Solicitations → GOV_FORECAST (source #2) ──
+_FUTURE_JSON = """[
+ {"webPostingCounter":8960,"releaseDate":"9/11/2026 12:00:00 AM","removalDate":"9/25/2026 12:00:00 AM",
+  "documentTitle":"Bond Engineering Services","sendFeedBack":"Julie Whiteside",
+  "emailAddress":"Julie.Whiteside@miamidade.gov","attachmentCount":1},
+ {"webPostingCounter":8961,"releaseDate":"9/12/2026 12:00:00 AM","removalDate":"9/26/2026 12:00:00 AM",
+  "documentTitle":"Body Bags and Evidence Bags","sendFeedBack":"Jerome Derival",
+  "emailAddress":"Jerome.Derival2@miamidade.gov","attachmentCount":1}
+]"""
+
+
+def test_parse_future_solicitations():
+    from context_runtime.integrations.procurement_sources import parse_future_solicitations
+    rows = parse_future_solicitations(_FUTURE_JSON)
+    assert len(rows) == 2 and rows[0]["record_kind"] == "forecast"
+    assert rows[0]["event_id"] == "FUT-8960" and rows[0]["response_due_at"] == "2026-09-25"
+    assert rows[0]["contact_email"].endswith("@miamidade.gov")
+
+
+def test_future_solicitations_become_gov_forecast_handoffs():
+    from context_runtime.integrations.procurement_sources import ProcurementSource, SourceMethod
+    src = ProcurementSource("src-miami-dade-future", "fl-miami-dade-county",
+                            "Miami-Dade County — Future Solicitations (forecast)", "https://fixture/future",
+                            SourceMethod.MDC_FUTURE)
+    fetcher = FixtureFetcher({"https://fixture/future": FetchResult(200, _FUTURE_JSON, "application/json")})
+    profile = BusinessProfile(name="Metro Eng & Tech", service_zip="33180", service_radius_miles=50,
+                              services=("engineering", "professional services"))
+    res = run_region("33180", 50, profile, fetcher=fetcher, sources=[src])
+    bond = next(h for h in res.handoffs if "Bond Engineering" in h["title"])
+    assert bond["opportunity_kind"] == "gov_forecast"              # a forecast, NOT a live solicitation
+    assert bond["solicitation_type"] == "FORECAST"
+    assert bond["correlation_key"]                                 # carries a linkage key to the future solicitation
+
+
+def test_forecast_and_solicitation_share_a_correlation_key():
+    # the whole point of GOV_FORECAST: a forecast links to the formal solicitation that later opens for it
+    from context_runtime.integrations.local_gov import (
+        RevenueOpportunity, SolicitationType, correlation_key)
+    fut = RevenueOpportunity("f", "s", "Miami-Dade County", "fl-miami-dade-county",
+                             "Bond Engineering Services", SolicitationType.FORECAST, "33180")
+    sol = RevenueOpportunity("s", "s", "Miami-Dade County", "fl-miami-dade-county",
+                             "E26SP01: Bond Engineering Services", SolicitationType.RFP, "33180")
+    assert correlation_key(fut) == correlation_key(sol)

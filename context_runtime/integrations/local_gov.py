@@ -184,6 +184,13 @@ class RevenueOpportunity:
     evidence_ids: tuple[str, ...] = ()
     discovered_at: str = ""
     geographic_distance_miles: Optional[float] = None
+    # ── fields a detail/enrichment observation supplies (empty until a detail page is fetched) ──
+    status: str = ""                           # e.g. "Posted" (source-declared lifecycle status)
+    department: str = ""                       # issuing department/business unit
+    pre_bid_at: str = ""                       # pre-bid / site-visit datetime, only if the source states one
+    question_due_at: str = ""                  # question/clarification deadline, only if stated
+    payment_terms: str = ""
+    detail_observed: bool = False              # True once a detail observation has enriched this record
 
 
 # ──────────────────────────── the business the opportunity is qualified against ────────────────────────────
@@ -343,6 +350,49 @@ def default_registry() -> JurisdictionRegistry:
 
 HANDOFF_CONTRACT_VERSION = "revenue-handoff/v1"
 
+import hashlib as _hashlib  # noqa: E402
+import re as _re  # noqa: E402
+
+_STOPWORDS = {"the", "a", "an", "of", "for", "and", "services", "service", "svcs", "county",
+              "city", "inc", "llc", "co", "rfp", "rfq", "rfi", "itb", "bid"}
+
+
+def correlation_key(opp: "RevenueOpportunity") -> str:
+    """A stable key linking the SAME procurement across sources/stages — a Future-Solicitations forecast
+    and the formal INFORMS solicitation that later opens for it. Derived from the jurisdiction plus the
+    significant title tokens (order-independent, stop-words dropped), so "Bond Engineering Services" and
+    "E26SP01: Bond Engineering Services" collide. Deterministic; never an LLM guess."""
+    toks = [t for t in _re.findall(r"[a-z0-9]+", opp.title.lower()) if t not in _STOPWORDS and len(t) > 2]
+    # drop a leading event-id-like token (e.g. "e26sp01") so a forecast without it still matches
+    toks = [t for t in toks if not _re.fullmatch(r"[a-z]{1,3}\d{2,}[a-z0-9]*", t)]
+    return f"{opp.jurisdiction_id}:" + "-".join(sorted(set(toks)))
+
+
+def opportunity_material(opp: "RevenueOpportunity") -> dict:
+    """The *material* fields of a normalized opportunity — the ones whose change is a real EvidenceChange.
+    Provenance-only fields (discovered_at, evidence ids) are deliberately excluded so a re-fetch alone is
+    not a change. Used for both the normalized-opportunity digest and per-field change diffs."""
+    return {
+        "title": opp.title, "solicitation_type": opp.solicitation_type.value, "status": opp.status,
+        "department": opp.department, "response_due_at": opp.response_due_at,
+        "question_due_at": opp.question_due_at, "pre_bid_at": opp.pre_bid_at,
+        "estimated_value": "" if opp.estimated_value is None else f"{opp.estimated_value:.2f}",
+        "categories": "|".join(sorted(opp.categories)),
+        "required_licenses": "|".join(sorted(opp.required_licenses)),
+        "required_certifications": "|".join(sorted(opp.required_certifications)),
+        "documents": "|".join(sorted(opp.documents)), "contact": opp.contact, "source_url": opp.source_url,
+    }
+
+
+def opportunity_digest(opp: "RevenueOpportunity") -> str:
+    """Content hash over the material fields — the normalized-opportunity digest in the durable lineage.
+    Two normalizations of the same tender with no material change produce the same digest (→ UNCHANGED);
+    a moved deadline / new status / new documents changes it (→ an EvidenceChange that can reawaken the
+    mission)."""
+    mat = opportunity_material(opp)
+    blob = "\x1f".join(f"{k}={mat[k]}" for k in sorted(mat))
+    return "sha256:" + _hashlib.sha256(blob.encode()).hexdigest()[:16]
+
 
 def _confidence(qual: "Qualification") -> float:
     """A coarse, honest confidence from the qualification: a clean PURSUE with full service match is
@@ -367,22 +417,36 @@ def to_handoff(opp: RevenueOpportunity, qual: Qualification,
     return {
         "contract_version": HANDOFF_CONTRACT_VERSION,
         "opportunity_id": opp.opportunity_id,          # the cross-repo idempotency key
+        # gov_solicitation = an open, biddable tender; gov_forecast = a pre-solicitation notice of an
+        # intended future procurement. The consumer opens distinct mission types; a forecast is later
+        # linked to the solicitation that opens for it via `correlation_key`.
+        "opportunity_kind": "gov_forecast" if opp.solicitation_type is SolicitationType.FORECAST else "gov_solicitation",
+        "correlation_key": correlation_key(opp),       # links a forecast ↔ the formal solicitation
         "source": opp.source,
         "issuing_entity": opp.issuing_entity,
+        "department": opp.department,
         "jurisdiction_id": opp.jurisdiction_id,
         "title": opp.title,
         "summary": opp.description or opp.title,
         "solicitation_type": opp.solicitation_type.value,
+        "status": opp.status,
         "place_of_performance_zip": opp.place_of_performance_zip,
         "geographic_distance_miles": qual.distance_miles,
         "categories": list(opp.categories),
         "posted_at": opp.posted_at,
         "response_due_at": opp.response_due_at,
+        "question_due_at": opp.question_due_at,
+        "pre_bid_at": opp.pre_bid_at,
         "estimated_value": opp.estimated_value,
         "required_licenses": list(opp.required_licenses),
         "required_certifications": list(opp.required_certifications),
+        "contact": opp.contact,
+        "payment_terms": opp.payment_terms,
+        "documents": list(opp.documents),
         "source_url": opp.source_url,
         "evidence_ids": list(opp.evidence_ids),        # REFERENCES to Discovery evidence, not copies
+        "detail_observed": opp.detail_observed,
+        "normalized_digest": opportunity_digest(opp),  # the normalized-opportunity digest (lineage)
         "discovered_at": opp.discovered_at,
         "qualification": {
             "decision": qual.decision.value,
