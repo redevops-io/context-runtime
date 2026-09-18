@@ -202,6 +202,7 @@ def run_collection(*, zip_code: str, radius_miles: float, profile: BusinessProfi
 
 
 def _parse_iso(ts: str) -> Optional[float]:
+    # self-consistent seconds for computing DELTAS (both operands parsed the same way); not a true epoch.
     for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d"):   # full timestamp, or a source's date-only posted field
         try:
             return time.mktime(time.strptime(ts, fmt))
@@ -210,11 +211,72 @@ def _parse_iso(ts: str) -> Optional[float]:
     return None
 
 
-def soak_report(runs: list[dict]) -> dict:
+def _epoch_utc(ts: str) -> Optional[float]:
+    # a TRUE UTC epoch (needed when comparing against timezone-aware expected slots).
+    from datetime import datetime, timezone
+    for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(ts, fmt).replace(tzinfo=timezone.utc).timestamp()
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+def schedule_adherence(runs: list[dict], *, expected_slots_local=("08:15", "20:15"),
+                       tz: str = "America/New_York", tolerance_minutes: int = 120,
+                       now: Optional[str] = None) -> dict:
+    """Compare recorded runs against the EXPECTED schedule slots — the direct "did the run happen?" signal.
+
+    For each expected slot from the first recorded run through ``now``, a run whose started_at falls within
+    ±``tolerance_minutes`` counts as a hit; a slot with no run near it is missing. Anchored strictly AFTER
+    the first run so a manual day-1 seed (which won't sit on a cron slot) never makes the first slots look
+    missed, and DST-correct via the local timezone. Returns expected/observed/missing counts, an adherence
+    ratio, and the exact missing slot timestamps (UTC)."""
+    from datetime import datetime, timedelta, timezone
+    try:
+        from zoneinfo import ZoneInfo
+        zone = ZoneInfo(tz)
+    except Exception:  # noqa: BLE001 — no tz database → interpret the slots as UTC
+        zone = timezone.utc
+        tz = "UTC"
+
+    run_epochs = sorted(e for e in (_epoch_utc(r.get("started_at", "")) for r in runs) if e is not None)
+    if not run_epochs:
+        return {"expected": 0, "observed": 0, "missing": 0, "adherence": None, "missing_slots": []}
+    first = run_epochs[0]
+    now_epoch = _epoch_utc(now) if now else datetime.now(timezone.utc).timestamp()
+    tol = tolerance_minutes * 60
+
+    expected: list[float] = []
+    day = datetime.fromtimestamp(first, zone).date()
+    end = datetime.fromtimestamp(now_epoch, zone).date()
+    while day <= end:
+        for hhmm in expected_slots_local:
+            hh, mm = (int(x) for x in hhmm.split(":"))
+            slot = datetime(day.year, day.month, day.day, hh, mm, tzinfo=zone).timestamp()
+            if first < slot <= now_epoch:            # only slots after the seed and already due
+                expected.append(slot)
+        day += timedelta(days=1)
+
+    missing = [datetime.fromtimestamp(s, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+               for s in expected if not any(abs(r - s) <= tol for r in run_epochs)]
+    n = len(expected)
+    return {
+        "expected": n, "observed": n - len(missing), "missing": len(missing),
+        "adherence": round((n - len(missing)) / n, 3) if n else None,
+        "tolerance_minutes": tolerance_minutes, "expected_slots_local": list(expected_slots_local),
+        "tz": tz, "missing_slots": missing,
+    }
+
+
+def soak_report(runs: list[dict], *, expected_slots_local=None, tz: str = "America/New_York",
+                tolerance_minutes: int = 120, now: Optional[str] = None) -> dict:
     """Summarize N CollectionRun records into a report giving THREE distinct reliability measurements
     plus the qualification funnel — the separations that make the numbers defensible.
 
-      * scheduler reliability — did the collection run happen? (runs seen + scheduled-vs-actual lag)
+      * scheduler reliability — did the collection run happen? (runs seen + scheduled-vs-actual lag, and,
+        when ``expected_slots_local`` is given, an explicit expected-vs-observed slot check with the exact
+        missing slots)
       * source reliability — could we observe each source, over the runs SINCE it was onboarded? (so a
         source added on day 12 is scored on its ~18 days of coverage, never a phantom 30/30)
       * procurement activity — did anything actually change? (NEW/UPDATED + runs-with-change)
@@ -250,16 +312,21 @@ def soak_report(runs: list[dict]) -> dict:
     lags = [(_parse_iso(r.get("started_at", "")) or 0) - (_parse_iso(r.get("scheduled_at", "")) or 0)
             for r in runs if r.get("scheduled_at") and r.get("started_at")]
     runs_with_change = sum(1 for r in runs if (r.get("new_count", 0) + r.get("updated_count", 0)) > 0)
+    scheduler = {                                          # did the run happen, and on time?
+        "runs_recorded": len(runs),
+        "max_lag_seconds": round(max(lags)) if lags else 0,
+        "avg_lag_seconds": round(sum(lags) / len(lags)) if lags else 0,
+    }
+    if expected_slots_local:                               # explicit expected-vs-observed slot check
+        scheduler["adherence"] = schedule_adherence(
+            runs, expected_slots_local=expected_slots_local, tz=tz,
+            tolerance_minutes=tolerance_minutes, now=now)
     return {
         "runs": len(runs),
         "window": {"first": runs[0].get("started_at"), "last": runs[-1].get("ended_at")},
         "collector_versions": sorted({r.get("collector_version", "") for r in runs}),
         "qualification_versions": sorted({r.get("qualification_version", "") for r in runs if r.get("qualification_version")}),
-        "scheduler": {                                     # did the run happen, and on time?
-            "runs_recorded": len(runs),
-            "max_lag_seconds": round(max(lags)) if lags else 0,
-            "avg_lag_seconds": round(sum(lags) / len(lags)) if lags else 0,
-        },
+        "scheduler": scheduler,
         "reliability": per_source,                         # could we reach each source (since onboarding)?
         "activity": {                                      # did anything actually change?
             "new_total": sum(r.get("new_count", 0) for r in runs),

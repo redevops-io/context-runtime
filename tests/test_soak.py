@@ -9,7 +9,7 @@ from context_runtime.integrations.procurement_sources import (
     FetchResult, FixtureFetcher, ProcurementSource, SourceMethod,
 )
 from context_runtime.integrations.soak import (
-    CollectionRunStore, discovery_report, run_collection, soak_report,
+    CollectionRunStore, discovery_report, run_collection, schedule_adherence, soak_report,
 )
 
 _INFORMS_HTML = """<html><body>
@@ -156,6 +156,35 @@ def test_discovery_report_measures_posting_to_discovery_latency(tmp_path):
     # the forecast (posted 2026-09-11, discovered 2026-09-18) contributes a 7-day latency
     assert dr["posting_to_discovery_days"]["measured"] >= 1
     assert dr["posting_to_discovery_days"]["max"] >= 7
+
+
+def test_schedule_adherence_flags_missing_slots():
+    # a manual seed + scheduled runs, with the 2026-09-19 20:15 slot MISSED (collector/machine down)
+    runs = [{"started_at": "2026-09-18T20:15:00Z"},   # first run anchors; its own slot isn't counted
+            {"started_at": "2026-09-19T08:15:00Z"},
+            {"started_at": "2026-09-20T08:15:00Z"}]
+    adh = schedule_adherence(runs, expected_slots_local=("08:15", "20:15"), tz="UTC",
+                             tolerance_minutes=120, now="2026-09-20T09:00:00Z")
+    assert adh["expected"] == 3 and adh["observed"] == 2 and adh["missing"] == 1
+    assert adh["missing_slots"] == ["2026-09-19T20:15:00Z"]     # the exact missed slot, named
+    assert adh["adherence"] == round(2 / 3, 3)
+
+
+def test_schedule_adherence_all_hit_is_perfect():
+    runs = [{"started_at": "2026-09-18T20:15:00Z"}, {"started_at": "2026-09-19T08:15:00Z"},
+            {"started_at": "2026-09-19T20:15:00Z"}]
+    adh = schedule_adherence(runs, expected_slots_local=("08:15", "20:15"), tz="UTC",
+                             tolerance_minutes=120, now="2026-09-19T21:00:00Z")
+    assert adh["missing"] == 0 and adh["adherence"] == 1.0 and adh["missing_slots"] == []
+
+
+def test_soak_report_includes_adherence_when_cadence_given(tmp_path):
+    _run(tmp_path, _fetcher(), "run-1")
+    rep = soak_report(CollectionRunStore(tmp_path / "runs.jsonl").runs(),
+                      expected_slots_local=("08:15", "20:15"), tz="UTC", now="2026-09-18T09:00:00Z")
+    assert "adherence" in rep["scheduler"]
+    # without a cadence, the slot check is simply absent (backward compatible)
+    assert "adherence" not in soak_report(CollectionRunStore(tmp_path / "runs.jsonl").runs())["scheduler"]
 
 
 def test_first_seen_preserved_last_seen_advances(tmp_path):
