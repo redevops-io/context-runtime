@@ -332,3 +332,64 @@ SEED_JURISDICTIONS: list[Jurisdiction] = [
 def default_registry() -> JurisdictionRegistry:
     """The seeded South-Florida test registry (ZIP 33180 and neighbours)."""
     return JurisdictionRegistry(SEED_ZIPS, SEED_JURISDICTIONS)
+
+
+# ──────────────────────────── the discovery → Revenue Mission handoff contract ────────────────────────────
+# A boring, JSON-serializable contract (revenue-handoff/v1) that carries a qualified opportunity across
+# the repo boundary into the Mission Runtime. It preserves the qualification evidence, source provenance,
+# geographic reasoning, deadlines and confidence — and carries evidence IDENTITY (references), never a copy
+# of the underlying Discovery evidence. `opportunity_id` is the idempotency key: a rediscovered/amended
+# tender reuses it so the consumer updates the existing mission rather than creating a new lead.
+
+HANDOFF_CONTRACT_VERSION = "revenue-handoff/v1"
+
+
+def _confidence(qual: "Qualification") -> float:
+    """A coarse, honest confidence from the qualification: a clean PURSUE with full service match is
+    high; a REVIEW is mid; a REJECT is low. Deterministic — no model call."""
+    base = {Decision.PURSUE: 0.75, Decision.REVIEW: 0.5, Decision.REJECT: 0.2}[qual.decision]
+    return round(min(0.95, base + 0.2 * qual.service_match), 2)
+
+
+def to_handoff(opp: RevenueOpportunity, qual: Qualification,
+               monitored: list[MonitoredJurisdiction] | None = None) -> dict:
+    """Emit the revenue-handoff/v1 record for a qualified opportunity (the Mission Runtime consumes it).
+
+    ``monitored`` (from ``JurisdictionRegistry.within``) supplies the *why this jurisdiction is in the
+    owner's area* geographic reasoning; if omitted, that field is empty.
+    """
+    geo_reasoning: list[str] = []
+    if monitored:
+        for m in monitored:
+            if m.jurisdiction.id == opp.jurisdiction_id:
+                geo_reasoning = [m.detail]
+                break
+    return {
+        "contract_version": HANDOFF_CONTRACT_VERSION,
+        "opportunity_id": opp.opportunity_id,          # the cross-repo idempotency key
+        "source": opp.source,
+        "issuing_entity": opp.issuing_entity,
+        "jurisdiction_id": opp.jurisdiction_id,
+        "title": opp.title,
+        "summary": opp.description or opp.title,
+        "solicitation_type": opp.solicitation_type.value,
+        "place_of_performance_zip": opp.place_of_performance_zip,
+        "geographic_distance_miles": qual.distance_miles,
+        "categories": list(opp.categories),
+        "posted_at": opp.posted_at,
+        "response_due_at": opp.response_due_at,
+        "estimated_value": opp.estimated_value,
+        "required_licenses": list(opp.required_licenses),
+        "required_certifications": list(opp.required_certifications),
+        "source_url": opp.source_url,
+        "evidence_ids": list(opp.evidence_ids),        # REFERENCES to Discovery evidence, not copies
+        "discovered_at": opp.discovered_at,
+        "qualification": {
+            "decision": qual.decision.value,
+            "reasons": list(qual.reasons),
+            "service_match": qual.service_match,
+            "distance_miles": qual.distance_miles,
+        },
+        "geographic_reasoning": geo_reasoning,
+        "confidence": _confidence(qual),
+    }

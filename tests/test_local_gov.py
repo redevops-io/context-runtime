@@ -103,3 +103,25 @@ def test_core_invariant():
     assert has_valid_next_state(owner="o", terminal_disposition="WON")
     assert not has_valid_next_state(owner="o")               # owner but no action/waiting/terminal
     assert not has_valid_next_state(owner="", next_action="x")  # action but no owner
+
+
+def test_to_handoff_preserves_evidence_and_reasoning():
+    from context_runtime.integrations.local_gov import to_handoff, HANDOFF_CONTRACT_VERSION
+    reg = default_registry()
+    opp = RevenueOpportunity(
+        opportunity_id="AVE-2026-014", source="city_portal", issuing_entity="City of Aventura",
+        jurisdiction_id="fl-aventura", title="HVAC replacement (12 RTUs)",
+        solicitation_type=SolicitationType.ITB, place_of_performance_zip="33180",
+        categories=("hvac", "mechanical"), response_due_at="2026-10-02", estimated_value=180_000,
+        source_url="https://www.cityofaventura.com/bids/AVE-2026-014",
+        evidence_ids=("ev:ave-014:obs-1", "ev:ave-014:doc-1"))
+    q = qualify(opp, _PROFILE, reg)
+    h = to_handoff(opp, q, reg.within("33180", 50))
+
+    assert h["contract_version"] == HANDOFF_CONTRACT_VERSION
+    assert h["opportunity_id"] == "AVE-2026-014"                 # the idempotency key
+    assert h["qualification"]["decision"] == "PURSUE"
+    assert list(h["evidence_ids"]) == ["ev:ave-014:obs-1", "ev:ave-014:doc-1"]  # references, not copies
+    assert h["geographic_reasoning"] and "boundary" in h["geographic_reasoning"][0]
+    assert h["source_url"].startswith("https://") and h["response_due_at"] == "2026-10-02"
+    assert 0.0 <= h["confidence"] <= 0.95
