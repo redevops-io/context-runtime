@@ -44,6 +44,9 @@ class EvidenceChange:
     new_digest: str
     changed_fields: list[str] = field(default_factory=list)
     at: str = ""
+    first_seen_at: str = ""       # when we first discovered this opportunity (stable across runs)
+    last_seen_at: str = ""        # the most recent run that observed it
+    source_posted_at: str = ""    # the source's own posted/release date, where the source states one
 
 
 def _now_iso() -> str:
@@ -60,6 +63,9 @@ class EvidenceStore:
         self._obs_ids: set[str] = set()
         self._opp_digest: dict[str, str] = {}
         self._opp_material: dict[str, dict] = {}
+        self._opp_first_seen: dict[str, str] = {}
+        self._opp_last_seen: dict[str, str] = {}
+        self._opp_record: dict[str, dict] = {}
         self._load()
 
     # ── replay the durable log to rebuild in-memory state ──
@@ -77,8 +83,19 @@ class EvidenceStore:
             if rec.get("rec") == "observation":
                 self._obs_ids.add(rec["observation_id"])
             elif rec.get("rec") == "opportunity":
-                self._opp_digest[rec["opportunity_id"]] = rec["normalized_digest"]
-                self._opp_material[rec["opportunity_id"]] = rec.get("material", {})
+                oid = rec["opportunity_id"]
+                self._opp_digest[oid] = rec["normalized_digest"]
+                self._opp_material[oid] = rec.get("material", {})
+                self._opp_record[oid] = rec
+                self._opp_first_seen.setdefault(oid, rec.get("first_seen_at") or rec.get("known_at", ""))
+                if rec.get("first_seen_at"):
+                    self._opp_first_seen[oid] = min(self._opp_first_seen[oid] or rec["first_seen_at"],
+                                                    rec["first_seen_at"])
+                self._opp_last_seen[oid] = rec.get("last_seen_at") or rec.get("known_at", "")
+            elif rec.get("rec") == "seen":
+                oid = rec["opportunity_id"]
+                if rec.get("at", "") > self._opp_last_seen.get(oid, ""):
+                    self._opp_last_seen[oid] = rec["at"]
 
     def _append(self, rec: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -114,30 +131,46 @@ class EvidenceStore:
         material = opportunity_material(opp)
         prior = self._opp_digest.get(oid)
         ts = now or _now_iso()
+        source_posted_at = opp.posted_at
 
         if prior is None:
             kind, changed = ChangeKind.NEW, sorted(k for k, v in material.items() if v)
+            first_seen = ts
         elif prior == digest:
-            return EvidenceChange(oid, ChangeKind.UNCHANGED, prior, digest, [], ts)
+            # rediscovered, no material change → only advance last_seen_at (append-only, lightweight)
+            first_seen = self._opp_first_seen.get(oid, ts)
+            self._opp_last_seen[oid] = ts
+            self._append({"rec": "seen", "opportunity_id": oid, "at": ts})
+            return EvidenceChange(oid, ChangeKind.UNCHANGED, prior, digest, [], ts,
+                                  first_seen_at=first_seen, last_seen_at=ts,
+                                  source_posted_at=source_posted_at)
         else:
             before = self._opp_material.get(oid, {})
             changed = sorted(k for k in material if material.get(k) != before.get(k))
             kind = ChangeKind.UPDATED
+            first_seen = self._opp_first_seen.get(oid, ts)
 
         self._opp_digest[oid] = digest
         self._opp_material[oid] = material
-        self._append({
+        self._opp_first_seen[oid] = first_seen
+        self._opp_last_seen[oid] = ts
+        record = {
             "rec": "opportunity", "opportunity_id": oid, "normalized_digest": digest,
             "opportunity_kind": "gov_forecast" if opp.solicitation_type.value == "FORECAST" else "gov_solicitation",
             "correlation_key": correlation_key(opp), "response_due_at": opp.response_due_at,
             "evidence_ids": list(opp.evidence_ids), "detail_observed": opp.detail_observed,
             "material": material, "known_at": ts,
-        })
+            "first_seen_at": first_seen, "last_seen_at": ts, "source_posted_at": source_posted_at,
+        }
+        self._opp_record[oid] = record
+        self._append(record)
         self._append({
             "rec": "evidence_change", "opportunity_id": oid, "kind": kind.value,
             "prior_digest": prior or "", "new_digest": digest, "changed_fields": changed, "at": ts,
         })
-        return EvidenceChange(oid, kind, prior or "", digest, changed, ts)
+        return EvidenceChange(oid, kind, prior or "", digest, changed, ts,
+                              first_seen_at=first_seen, last_seen_at=ts,
+                              source_posted_at=source_posted_at)
 
     # ── read-side helpers ──
     def known_opportunity_ids(self) -> set[str]:
@@ -148,3 +181,14 @@ class EvidenceStore:
 
     def opportunity_digest_of(self, opportunity_id: str) -> Optional[str]:
         return self._opp_digest.get(opportunity_id)
+
+    def opportunities(self) -> list[dict]:
+        """Latest opportunity record per id, with first_seen_at/last_seen_at/source_posted_at — the basis
+        for discovery-performance analysis (posting → discovery latency, change-detection latency)."""
+        out = []
+        for oid, rec in self._opp_record.items():
+            r = dict(rec)
+            r["first_seen_at"] = self._opp_first_seen.get(oid, r.get("first_seen_at", ""))
+            r["last_seen_at"] = self._opp_last_seen.get(oid, r.get("last_seen_at", ""))
+            out.append(r)
+        return out

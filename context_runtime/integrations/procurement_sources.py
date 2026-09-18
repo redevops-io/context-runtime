@@ -425,6 +425,20 @@ def _now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+def parse_source(method: SourceMethod, text: str) -> list[dict]:
+    """Dispatch a source's response body to its parser. One place so `collect` and the soak collector
+    agree on what a source's records are (generic HTML is portal-specific → no records here)."""
+    if method is SourceMethod.RSS:
+        return parse_rss(text)
+    if method in (SourceMethod.JSON, SourceMethod.SAM_API):
+        return parse_json_items(text)
+    if method is SourceMethod.INFORMS:
+        return parse_informs(text)
+    if method is SourceMethod.MDC_FUTURE:
+        return parse_future_solicitations(text)
+    return []
+
+
 def collect(sources: list[ProcurementSource], fetcher: Fetcher, *, now: Optional[str] = None) -> list[Observation]:
     """Fetch and parse every source; preserve one Observation per raw record (with a content hash)."""
     ts = now or _now_iso()
@@ -433,17 +447,7 @@ def collect(sources: list[ProcurementSource], fetcher: Fetcher, *, now: Optional
         res = fetcher.fetch(src.url)
         if res.status != 200 or not res.text:
             continue
-        if src.method is SourceMethod.RSS:
-            records = parse_rss(res.text)
-        elif src.method in (SourceMethod.JSON, SourceMethod.SAM_API):
-            records = parse_json_items(res.text)
-        elif src.method is SourceMethod.INFORMS:
-            records = parse_informs(res.text)
-        elif src.method is SourceMethod.MDC_FUTURE:
-            records = parse_future_solicitations(res.text)
-        else:  # generic HTML is portal-specific — a real deployment plugs a per-portal extractor here.
-            records = []
-        for rec in records:
+        for rec in parse_source(src.method, res.text):
             out.append(_observe(src.source_id, src.url, ts, res.status, rec, kind="list"))
     return out
 

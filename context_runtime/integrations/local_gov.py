@@ -353,6 +353,26 @@ HANDOFF_CONTRACT_VERSION = "revenue-handoff/v1"
 import hashlib as _hashlib  # noqa: E402
 import re as _re  # noqa: E402
 
+# Bump when qualify() logic changes. The soak stamps a qualification_version combining THIS with a
+# fingerprint of the business profile, so if either the rules OR the profile change mid-soak the version
+# string changes and the day-1 vs day-30 funnels stay comparable (never silently mixed).
+QUALIFICATION_RULES_VERSION = "qual-rules/v1"
+
+
+def profile_fingerprint(profile: "BusinessProfile") -> str:
+    blob = "\x1f".join([
+        profile.name, profile.service_zip, f"{profile.service_radius_miles:g}",
+        "|".join(sorted(profile.services)), "|".join(sorted(profile.naics)),
+        "|".join(sorted(profile.licenses)), "|".join(sorted(profile.certifications)),
+        str(profile.min_contract_value), str(profile.max_contract_value)])
+    return _hashlib.sha256(blob.encode()).hexdigest()[:8]
+
+
+def qualification_version(profile: "BusinessProfile") -> str:
+    """The version under which a decision was made — rules constant + profile fingerprint. Recorded on
+    every handoff and CollectionRun so a rules/profile change is visible in the data, not hidden."""
+    return f"{QUALIFICATION_RULES_VERSION}+profile:{profile_fingerprint(profile)}"
+
 _STOPWORDS = {"the", "a", "an", "of", "for", "and", "services", "service", "svcs", "county",
               "city", "inc", "llc", "co", "rfp", "rfq", "rfi", "itb", "bid"}
 
