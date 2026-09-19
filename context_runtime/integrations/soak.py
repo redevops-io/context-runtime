@@ -27,8 +27,9 @@ from .local_gov import (
     BusinessProfile, JurisdictionRegistry, default_registry, qualification_version, qualify, to_handoff,
 )
 from .procurement_sources import (
-    COLLECTOR_VERSION, Fetcher, Observation, ProcurementSource, SourceMethod, _now_iso, _observe,
-    default_source_registry, enrich_informs, merge_detail, normalize, parse_source, resolve_fetch_url,
+    BROWSER_METHODS, COLLECTOR_VERSION, Fetcher, Observation, ProcurementSource, SourceMethod, _now_iso,
+    _observe, default_source_registry, enrich_informs, merge_detail, normalize, parse_source,
+    resolve_fetch_url,
 )
 
 
@@ -120,7 +121,8 @@ def run_collection(*, zip_code: str, radius_miles: float, profile: BusinessProfi
                    evidence_store: Optional[EvidenceStore] = None,
                    run_store: Optional[CollectionRunStore] = None,
                    outbox: Optional[str | Path] = None, scheduled_at: Optional[str] = None,
-                   enrich: bool = True, default_categories: tuple[str, ...] = ()) -> CollectionResult:
+                   enrich: bool = True, default_categories: tuple[str, ...] = (),
+                   browser_fetcher: Optional[Fetcher] = None) -> CollectionResult:
     """Run one collection pass and record a CollectionRun (always, even on a zero-change day).
 
     Persists observations + EvidenceChanges to ``evidence_store`` when given, the CollectionRun to
@@ -153,8 +155,10 @@ def run_collection(*, zip_code: str, radius_miles: float, profile: BusinessProfi
                 source_id=src.source_id, method=src.method.value, ok=False, http_status=0,
                 record_count=0, error=url_err))
             continue
+        # portals that block plain HTTP / render via JS use the browser fetcher when one is provided
+        use_fetcher = browser_fetcher if (browser_fetcher and src.method in BROWSER_METHODS) else fetcher
         t0 = time.monotonic()
-        res = fetcher.fetch(fetch_url)
+        res = use_fetcher.fetch(fetch_url)
         fetch_ms = int((time.monotonic() - t0) * 1000)
         ok = res.status == 200 and bool(res.text)
         records = parse_source(src.method, res.text) if ok else []

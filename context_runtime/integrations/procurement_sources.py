@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -179,6 +180,83 @@ class UrllibFetcher:
             return None
 
 
+def _find_chrome() -> Optional[str]:
+    """Locate a Chromium/Chrome binary for headless rendering (system install or a Playwright download)."""
+    import glob
+    import shutil
+    for name in ("google-chrome", "chromium", "chromium-browser", "chrome"):
+        p = shutil.which(name)
+        if p:
+            return p
+    for pat in (os.path.expanduser("~/.cache/ms-playwright/chromium-*/chrome-linux/chrome"),
+                os.path.expanduser("~/.cache/ms-playwright/chromium-*/chrome-linux/headless_shell")):
+        hits = sorted(glob.glob(pat))
+        if hits:
+            return hits[-1]
+    return None
+
+
+class BrowserFetcher:
+    """A headless-browser fetcher for portals that block plain HTTP (bot protection) or render bids only
+    after JavaScript (SPAs). It renders the page with headless Chromium and returns the resulting DOM, so
+    a per-portal parser can extract from the rendered HTML.
+
+    Same politeness as the HTTP fetcher: robots.txt is honoured (per user-agent group) and a per-host rate
+    limit applies. Rendering is heavier, so the default interval is larger. Read-only — it only renders the
+    publicly-exposed page; it never submits anything."""
+
+    def __init__(self, user_agent: str = "ReDevOps-ProcurementBot/0.1 (+https://redevops.io)",
+                 min_interval_s: float = 3.0, chrome: Optional[str] = None,
+                 virtual_time_ms: int = 12000, timeout_s: float = 90.0):
+        self.user_agent = user_agent
+        self.min_interval_s = min_interval_s
+        self.chrome = chrome or _find_chrome()
+        self.virtual_time_ms = virtual_time_ms
+        self.timeout_s = timeout_s
+        self._last: dict[str, float] = {}
+        self._robots: dict[str, str] = {}
+
+    def _allowed(self, url: str) -> bool:
+        import urllib.request
+        p = urlparse(url)
+        host = f"{p.scheme}://{p.netloc}"
+        if host not in self._robots:
+            try:
+                req = urllib.request.Request(host + "/robots.txt", headers={"User-Agent": self.user_agent})
+                with urllib.request.urlopen(req, timeout=10.0) as r:  # noqa: S310 (explicit opt-in)
+                    self._robots[host] = r.read().decode("utf-8", "ignore")
+            except Exception:  # noqa: BLE001
+                self._robots[host] = ""
+        return not any(d and p.path.startswith(d)
+                       for d in _robots_disallows(self._robots[host], self.user_agent))
+
+    def fetch(self, url: str, *, timeout: float = 0.0) -> FetchResult:
+        import subprocess
+        if self.chrome is None:
+            return FetchResult(0, "", "error:no-chrome-binary")
+        if not self._allowed(url):
+            return FetchResult(999, "", "blocked-by-robots")
+        host = urlparse(url).netloc
+        wait = self.min_interval_s - (time.monotonic() - self._last.get(host, 0.0))
+        if wait > 0:
+            time.sleep(wait)
+        cmd = [self.chrome, "--headless=new", "--no-sandbox", "--disable-gpu",
+               f"--virtual-time-budget={self.virtual_time_ms}", f"--user-agent={self.user_agent}",
+               "--dump-dom", url]
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True,
+                                 timeout=timeout or self.timeout_s)
+            self._last[host] = time.monotonic()
+            dom = out.stdout or ""
+            if not dom.strip():
+                return FetchResult(0, "", f"error:empty-render:{out.returncode}")
+            return FetchResult(200, dom, "text/html")
+        except subprocess.TimeoutExpired:
+            return FetchResult(0, "", "error:render-timeout")
+        except Exception as e:  # noqa: BLE001
+            return FetchResult(0, "", f"error:{e!r}")
+
+
 # ──────────────────────────── the source registry ────────────────────────────
 
 class SourceMethod(str, Enum):
@@ -189,6 +267,11 @@ class SourceMethod(str, Enum):
     INFORMS = "informs"          # Miami-Dade PeopleSoft public bidding grid (portal-specific extractor)
     MDC_FUTURE = "mdc_future"    # Miami-Dade Strategic Procurement "Future Solicitations" (forecast) JSON
     CIVICPLUS = "civicplus"      # CivicPlus municipal Bids module (server-rendered HTML; many FL cities)
+    BONFIRE = "bonfire"          # Bonfire (bonfirehub.com) open-opportunities portal (needs a browser render)
+
+
+# Methods whose pages block plain HTTP or render only after JS → they need a BrowserFetcher.
+BROWSER_METHODS = frozenset({SourceMethod.BONFIRE})
 
 
 class SourceHealth(str, Enum):
@@ -262,6 +345,9 @@ def _seed_sources() -> list[ProcurementSource]:
         ProcurementSource("src-hallandale-beach", "fl-hallandale-beach", "City of Hallandale Beach — Bids",
                           "https://www.cohb.org/bids.aspx", SourceMethod.CIVICPLUS,
                           provenance="official-verified"),
+        ProcurementSource("src-broward-bonfire", "fl-broward-county", "Broward County — Purchasing (Bonfire)",
+                          "https://broward.bonfirehub.com/portal/?tab=openOpportunities",
+                          SourceMethod.BONFIRE, provenance="official-verified"),
         ProcurementSource("src-mdcps", "fl-mdcps", "Miami-Dade County Public Schools — Procurement",
                           "https://procurement.dadeschools.net/", SourceMethod.HTML),
         ProcurementSource("src-fort-lauderdale", "fl-fort-lauderdale", "City of Fort Lauderdale — Bids",
@@ -521,6 +607,52 @@ def parse_civicplus(text: str) -> list[dict]:
     return out
 
 
+_MONTHS = {m: i for i, m in enumerate(
+    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], start=1)}
+
+
+def _bonfire_date_to_iso(text: str) -> str:
+    """"Sep 21st 2026, 2:00 PM EDT" → "2026-09-21". "" if no such date — never inferred."""
+    m = re.search(r'([A-Za-z]{3})[a-z]*\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})', text or "")
+    if not m:
+        return ""
+    mon = _MONTHS.get(m.group(1).lower())
+    return f"{m.group(3)}-{mon:02d}-{int(m.group(2)):02d}" if mon else ""
+
+
+def parse_bonfire(html: str) -> list[dict]:
+    """Parse a Bonfire (bonfirehub.com) open-opportunities portal — the rendered DOM (needs a browser to
+    produce; the page is a JS/DataTables app). Bonfire powers many public agencies, so this one parser
+    serves them all. Columns: Status, Ref#, Project (title), Department, Close Date, Days Left, Action
+    (a link to /opportunities/N). The underscore.js template row (containing ``<%``) is skipped."""
+    out = []
+    def _txt(x):
+        return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", x)).strip()
+    for row in re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.DOTALL):
+        if "<%" in row or "/opportunities/" not in row:
+            continue
+        link = re.search(r"/opportunities/\d+", row)
+        tds = re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)
+        if not link or len(tds) < 5:
+            continue
+        ref = _txt(tds[1])
+        title = _txt(tds[2])
+        if not (ref or title):
+            continue
+        out.append({
+            "record_kind": "bonfire",
+            "title": _html.unescape(title),
+            "event_id": _html.unescape(ref) or link.group(0).split("/")[-1],
+            "status": _txt(tds[0]),
+            "department": _html.unescape(_txt(tds[3])),
+            "response_due_at": _bonfire_date_to_iso(_txt(tds[4])),
+            "response_due_at_text": _txt(tds[4]),
+            "link": link.group(0),                       # relative; normalize resolves against the source
+            "format": "",
+        })
+    return out
+
+
 def parse_future_solicitations(text: str) -> list[dict]:
     """Parse Miami-Dade's "Future Solicitations" forecast feed (a DataTables JSON endpoint).
 
@@ -593,6 +725,8 @@ def parse_source(method: SourceMethod, text: str) -> list[dict]:
         return parse_future_solicitations(text)
     if method is SourceMethod.CIVICPLUS:
         return parse_civicplus(text)
+    if method is SourceMethod.BONFIRE:
+        return parse_bonfire(text)
     return []
 
 
