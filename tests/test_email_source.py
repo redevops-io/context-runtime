@@ -8,6 +8,7 @@ FROM-filter guardrail, IMAP credential handling) is backend-independent and veri
 """
 from __future__ import annotations
 
+import json
 from email.message import EmailMessage
 
 from context_runtime.integrations.procurement_sources import (
@@ -76,6 +77,15 @@ def test_collect_via_email_source(tmp_path):
     obs = collect([src], MboxFetcher(str(tmp_path)))
     assert len(obs) == 2 and all(o.raw["record_kind"] == "bidnet_email" for o in obs)
     assert all(o.content_hash.startswith("sha256:") for o in obs)     # evidence preserved with hashes
+
+
+def test_real_bidnet_sender_and_domain_are_recognized():
+    # BidNet actually mails from noreply@bidnet.com with links that may be bidnet.com or bidnetdirect.com
+    html = ('<a href="https://www.bidnet.com/florida/solicitations/notice/900123">'
+            'Civil Engineering On-Call Services</a>')
+    recs = parse_email_alerts(json.dumps([{"from": "BidNet Direct <noreply@bidnet.com>", "html": html}]))
+    assert len(recs) == 1 and recs[0]["event_id"] == "900123"
+    assert recs[0]["title"].startswith("Civil Engineering")
 
 
 def test_imap_fetcher_without_creds_is_error_not_crash():

@@ -291,7 +291,7 @@ class MboxFetcher:
     source (and the fallback when a live inbox is exported by hand). Filters to messages FROM the alert
     sender so nothing else in the mailbox is ever touched."""
     path: str
-    from_filter: str = "bidnetdirect.com"
+    from_filter: str = "bidnet"
 
     def fetch(self, url: str = "", *, timeout: float = 20.0) -> FetchResult:
         import email as _email
@@ -319,7 +319,7 @@ class ImapFetcher:
     the alert mail, never other correspondence. Credentials come from the environment; they are never
     stored here or logged. Google Workspace needs an app password (imap.gmail.com)."""
 
-    def __init__(self, host: str, user: str, password: str, *, from_filter: str = "bidnetdirect.com",
+    def __init__(self, host: str, user: str, password: str, *, from_filter: str = "bidnet",
                  folder: str = "INBOX", limit: int = 100):
         self.host = host
         self.user = user
@@ -771,7 +771,7 @@ def parse_bidnet_email(msg: dict) -> list[dict]:
     body = msg.get("html") or ""
     out, seen = [], set()
     for m in re.finditer(
-            r'<a[^>]+href="(https?://[^"]*bidnetdirect\.com[^"]*)"[^>]*>(.*?)</a>', body, re.I | re.DOTALL):
+            r'<a[^>]+href="(https?://[^"]*bidnet(?:direct)?\.com[^"]*)"[^>]*>(.*?)</a>', body, re.I | re.DOTALL):
         href, title = m.group(1), re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", m.group(2))).strip()
         if not title or len(title) < 6 or href in seen:
             continue
@@ -801,7 +801,8 @@ def parse_email_alerts(text: str) -> list[dict]:
     for e in emails if isinstance(emails, list) else []:
         if not isinstance(e, dict):
             continue
-        if "bidnetdirect" in (e.get("from", "") or "").lower():
+        # BidNet Direct mails from noreply@bidnet.com (bid links may be bidnet.com or bidnetdirect.com)
+        if "bidnet" in (e.get("from", "") or "").lower():
             out.extend(parse_bidnet_email(e))
     return out
 
