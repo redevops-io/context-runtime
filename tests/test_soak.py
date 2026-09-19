@@ -189,7 +189,10 @@ def test_soak_report_includes_adherence_when_cadence_given(tmp_path):
 
 def test_first_seen_preserved_last_seen_advances(tmp_path):
     ev_path = tmp_path / "evidence.jsonl"
-    _run(tmp_path, _fetcher(), "run-1")
+    run_collection(zip_code="33180", radius_miles=50, profile=_PROFILE, fetcher=_fetcher(),
+                   run_id="run-1", now="2026-09-18T00:00:00Z", sources=[_INFORMS, _FUTURE], enrich=True,
+                   evidence_store=EvidenceStore(ev_path),
+                   run_store=CollectionRunStore(tmp_path / "runs.jsonl"))
     run_collection(zip_code="33180", radius_miles=50, profile=_PROFILE, fetcher=_fetcher(),
                    run_id="run-2", now="2026-09-19T00:00:00Z", sources=[_INFORMS, _FUTURE], enrich=True,
                    evidence_store=EvidenceStore(ev_path),

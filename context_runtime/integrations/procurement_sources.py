@@ -42,6 +42,41 @@ class Fetcher(Protocol):
     def fetch(self, url: str, *, timeout: float = 20.0) -> FetchResult: ...
 
 
+def _robots_disallows(txt: str, user_agent: str) -> list[str]:
+    """The Disallow rules that apply to US, parsed by user-agent GROUP (RFC-style records).
+
+    A robots.txt record is one or more ``User-agent`` lines followed by rules; rules apply only to the
+    agents in their own record. The naive "collect every Disallow line" approach is wrong — it lets one
+    bot's ``Disallow: /`` (e.g. Baiduspider/Yandex blanket blocks common on CivicPlus sites) block a
+    compliant bot it was never addressed to. We match our product token, falling back to the ``*`` group."""
+    token = user_agent.split("/", 1)[0].strip().lower()
+    groups: dict[str, list[str]] = {}
+    agents: list[str] = []
+    seen_rule = False
+    for raw in txt.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line or ":" not in line:
+            continue
+        field, val = (s.strip() for s in line.split(":", 1))
+        field = field.lower()
+        if field == "user-agent":
+            if seen_rule:                     # a rule already closed the previous record → start a new one
+                agents, seen_rule = [], False
+            agents.append(val.lower())
+            groups.setdefault(val.lower(), [])
+        elif field == "disallow":
+            seen_rule = True
+            for a in agents:
+                groups.setdefault(a, []).append(val)
+        elif field in ("allow", "crawl-delay", "sitemap", "host"):
+            seen_rule = True
+    # prefer a group that matches our token (prefix either way), else the wildcard group
+    for agent, rules in groups.items():
+        if agent != "*" and (agent in token or token in agent):
+            return rules
+    return groups.get("*", [])
+
+
 @dataclass
 class FixtureFetcher:
     """A deterministic fetcher for tests/offline runs — maps url → canned response. The response bodies
@@ -80,11 +115,8 @@ class UrllibFetcher:
                     self._robots[host] = r.read().decode("utf-8", "ignore")
             except Exception:  # noqa: BLE001
                 self._robots[host] = ""      # no robots reachable → default allow, still rate-limited
-        # a deliberately conservative check: honour a global "User-agent: * / Disallow: <prefix>".
-        disallow = [ln.split(":", 1)[1].strip()
-                    for ln in self._robots[host].splitlines()
-                    if ln.lower().startswith("disallow:")]
-        return not any(d and p.path.startswith(d) for d in disallow)
+        disallows = _robots_disallows(self._robots[host], self.user_agent)
+        return not any(d and p.path.startswith(d) for d in disallows)
 
     def _opener(self):
         # A per-instance opener with a cookie jar so a session handshake (e.g. PeopleSoft's 302 +
@@ -156,6 +188,7 @@ class SourceMethod(str, Enum):
     SAM_API = "sam_api"
     INFORMS = "informs"          # Miami-Dade PeopleSoft public bidding grid (portal-specific extractor)
     MDC_FUTURE = "mdc_future"    # Miami-Dade Strategic Procurement "Future Solicitations" (forecast) JSON
+    CIVICPLUS = "civicplus"      # CivicPlus municipal Bids module (server-rendered HTML; many FL cities)
 
 
 class SourceHealth(str, Enum):
@@ -215,8 +248,6 @@ def _seed_sources() -> list[ProcurementSource]:
     """Real official procurement URLs for the seeded 33180-area jurisdictions (#36). Methods are best
     known; a live source-discovery pass would confirm/refresh them."""
     return [
-        ProcurementSource("src-aventura", "fl-aventura", "City of Aventura — Bids",
-                          "https://www.cityofaventura.com/bids.aspx", SourceMethod.HTML),
         ProcurementSource("src-miami-dade-informs", "fl-miami-dade-county", "Miami-Dade County — INFORMS Public Bidding",
                           "https://supplier.miamidade.gov/psc/EXTSUPP/SUPPLIER/ERP/c/"
                           "SCP_PUBLIC_MENU_FL.SCP_PUB_BID_CMP_FL.GBL?PAGE=SCP_PUB_BIDLIST_FL",
@@ -225,6 +256,12 @@ def _seed_sources() -> list[ProcurementSource]:
                           "Miami-Dade County — Future Solicitations (forecast)",
                           "https://www.miamidade.gov/apps/ISD/stratproc/Home/FutureSolicitationsList",
                           SourceMethod.MDC_FUTURE, provenance="official-verified"),
+        ProcurementSource("src-aventura", "fl-aventura", "City of Aventura — Bids",
+                          "https://www.cityofaventura.com/bids.aspx", SourceMethod.CIVICPLUS,
+                          provenance="official-verified"),
+        ProcurementSource("src-hallandale-beach", "fl-hallandale-beach", "City of Hallandale Beach — Bids",
+                          "https://www.cohb.org/bids.aspx", SourceMethod.CIVICPLUS,
+                          provenance="official-verified"),
         ProcurementSource("src-mdcps", "fl-mdcps", "Miami-Dade County Public Schools — Procurement",
                           "https://procurement.dadeschools.net/", SourceMethod.HTML),
         ProcurementSource("src-fort-lauderdale", "fl-fort-lauderdale", "City of Fort Lauderdale — Bids",
@@ -449,6 +486,41 @@ def resolve_fetch_url(source: ProcurementSource, *, profile: Optional[BusinessPr
                        posted_to=end.strftime("%m/%d/%Y"), naics=naics), ""
 
 
+def parse_civicplus(text: str) -> list[dict]:
+    """Parse a CivicPlus municipal Bids module (server-rendered HTML; the same platform hundreds of US
+    cities run — e.g. Aventura, Hallandale Beach). Each bid is a ``listItemsRow bid`` block with a title
+    link to ``bids.aspx?bidID=N``, an optional "Bid No.", and a status block that renders labels
+    ("Status:", "Closes:") and their values in parallel spans. We take the non-label span values, so a
+    closing value that is not a date (e.g. "Upon Contract") yields no deadline — we do not infer one. An
+    empty list is a legitimate "no open bids", not a broken collector."""
+    out = []
+    for b in re.split(r'<div class="listItemsRow bid', text)[1:]:
+        bid = re.search(r'bids?\.aspx\?bidID=(\d+)', b, re.I)
+        if not bid:
+            continue
+        title = re.search(r'bidID=\d+"[^>]*>([^<]+)</a>', b, re.I)
+        no = re.search(r'Bid No\.</strong>\s*([^<]+?)\s*<', b)
+        # within the status region, the label spans end with ":"; the remaining spans are the values
+        si = b.find("bidStatus")
+        vals = []
+        if si >= 0:
+            vals = [_html.unescape(v).strip()
+                    for v in re.findall(r'<span[^>]*>([^<]*)</span>', b[si:si + 700])]
+            vals = [v for v in vals if v and not v.endswith(":")]
+        status = vals[0] if len(vals) > 0 else ""
+        closes = vals[1] if len(vals) > 1 else ""
+        out.append({
+            "record_kind": "civicplus",
+            "title": _html.unescape(title.group(1)).strip() if title else "",
+            "event_id": (no.group(1).strip() if no else f"bid{bid.group(1)}"),
+            "status": status,
+            "response_due_at": _mdy_to_iso(closes),      # "" for non-date closings (don't infer)
+            "link": f"bids.aspx?bidID={bid.group(1)}",   # relative; normalize resolves against the source
+            "format": "",
+        })
+    return out
+
+
 def parse_future_solicitations(text: str) -> list[dict]:
     """Parse Miami-Dade's "Future Solicitations" forecast feed (a DataTables JSON endpoint).
 
@@ -519,6 +591,8 @@ def parse_source(method: SourceMethod, text: str) -> list[dict]:
         return parse_informs(text)
     if method is SourceMethod.MDC_FUTURE:
         return parse_future_solicitations(text)
+    if method is SourceMethod.CIVICPLUS:
+        return parse_civicplus(text)
     return []
 
 
@@ -622,6 +696,10 @@ def normalize(obs: Observation, source: ProcurementSource, *,
     contact = r.get("contact", "")
     if r.get("contact_email"):
         contact = f"{contact} <{r['contact_email']}>".strip()
+    link = r.get("link") or r.get("id") or ""
+    if link and not link.startswith("http"):                 # resolve relative links (CivicPlus, some RSS)
+        from urllib.parse import urljoin
+        link = urljoin(source.url, link)
     return RevenueOpportunity(
         opportunity_id=f"{source.source_id}:{r.get('event_id') or obs.content_hash.split(':')[-1]}",
         source=source.source_id, issuing_entity=source.name.split(" — ")[0],
@@ -632,8 +710,9 @@ def normalize(obs: Observation, source: ProcurementSource, *,
         response_due_at=r.get("response_due_at") or r.get("pubdate") or "",
         set_aside=r.get("set_aside", ""),
         place_of_performance_state=r.get("place_of_performance_state", ""),
+        status=r.get("status", ""),
         department=r.get("department", ""), contact=contact,
-        source_url=r.get("link") or r.get("id") or source.url,
+        source_url=link or source.url,
         evidence_ids=(obs.observation_id,),
         discovered_at=obs.fetched_at)
 
