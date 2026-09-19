@@ -257,6 +257,112 @@ class BrowserFetcher:
             return FetchResult(0, "", f"error:{e!r}")
 
 
+def _extract_email(msg) -> dict:
+    """Flatten an email.message.Message into {subject, from, date, text, html}."""
+    def hdr(k):
+        return str(msg.get(k, "") or "")
+    text, html = "", ""
+    if msg.is_multipart():
+        for part in msg.walk():
+            if part.get_content_maintype() == "multipart":
+                continue
+            ctype = part.get_content_type()
+            payload = part.get_payload(decode=True)
+            if payload is None:
+                continue
+            body = payload.decode(part.get_content_charset() or "utf-8", "ignore")
+            if ctype == "text/plain" and not text:
+                text = body
+            elif ctype == "text/html" and not html:
+                html = body
+    else:
+        payload = msg.get_payload(decode=True)
+        body = payload.decode(msg.get_content_charset() or "utf-8", "ignore") if payload else ""
+        if msg.get_content_type() == "text/html":
+            html = body
+        else:
+            text = body
+    return {"subject": hdr("Subject"), "from": hdr("From"), "date": hdr("Date"), "text": text, "html": html}
+
+
+@dataclass
+class MboxFetcher:
+    """Read emails from an mbox file or a directory of .eml files — the offline/testing path for the EMAIL
+    source (and the fallback when a live inbox is exported by hand). Filters to messages FROM the alert
+    sender so nothing else in the mailbox is ever touched."""
+    path: str
+    from_filter: str = "bidnetdirect.com"
+
+    def fetch(self, url: str = "", *, timeout: float = 20.0) -> FetchResult:
+        import email as _email
+        import glob
+        import mailbox
+        msgs = []
+        try:
+            if os.path.isdir(self.path):
+                for f in sorted(glob.glob(os.path.join(self.path, "*.eml"))):
+                    with open(f, "rb") as fh:
+                        msgs.append(_email.message_from_binary_file(fh))
+            else:
+                msgs = list(mailbox.mbox(self.path))
+        except Exception as e:  # noqa: BLE001
+            return FetchResult(0, "", f"error:{e!r}")
+        recs = [_extract_email(m) for m in msgs]
+        if self.from_filter:
+            recs = [r for r in recs if self.from_filter.lower() in r["from"].lower()]
+        return FetchResult(200, json.dumps(recs), "application/x-emails")
+
+
+class ImapFetcher:
+    """Read bid-match notification emails from an inbox over IMAP — read-only and SERVER-SIDE filtered to
+    ``FROM from_filter`` (e.g. bidnetdirect.com), so on a shared mailbox the collector can only ever touch
+    the alert mail, never other correspondence. Credentials come from the environment; they are never
+    stored here or logged. Google Workspace needs an app password (imap.gmail.com)."""
+
+    def __init__(self, host: str, user: str, password: str, *, from_filter: str = "bidnetdirect.com",
+                 folder: str = "INBOX", limit: int = 100):
+        self.host = host
+        self.user = user
+        self._password = password
+        self.from_filter = from_filter
+        self.folder = folder
+        self.limit = limit
+
+    @classmethod
+    def from_env(cls, prefix: str = "BIDNET_IMAP", **kw) -> "ImapFetcher":
+        """Build from ``<prefix>_HOST`` (default imap.gmail.com), ``_USER``, ``_PASSWORD`` (an app
+        password for Google Workspace). The password is read here and never echoed."""
+        return cls(os.environ.get(f"{prefix}_HOST", "imap.gmail.com"),
+                   os.environ.get(f"{prefix}_USER", ""), os.environ.get(f"{prefix}_PASSWORD", ""), **kw)
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.user and self._password)
+
+    def fetch(self, url: str = "", *, timeout: float = 30.0) -> FetchResult:
+        import email as _email
+        import imaplib
+        if not self.configured:
+            return FetchResult(0, "", "error:IMAP credentials not set (BIDNET_IMAP_USER/PASSWORD)")
+        try:
+            M = imaplib.IMAP4_SSL(self.host, timeout=timeout)
+            M.login(self.user, self._password)
+            M.select(self.folder, readonly=True)                      # read-only: never mutate the mailbox
+            typ, data = M.search(None, "FROM", f'"{self.from_filter}"')  # server-side scope guardrail
+            ids = data[0].split() if data and data[0] else []
+            if self.limit:
+                ids = ids[-self.limit:]
+            recs = []
+            for i in ids:
+                typ, d = M.fetch(i, "(RFC822)")
+                if d and d[0]:
+                    recs.append(_extract_email(_email.message_from_bytes(d[0][1])))
+            M.logout()
+            return FetchResult(200, json.dumps(recs), "application/x-emails")
+        except Exception as e:  # noqa: BLE001
+            return FetchResult(0, "", f"error:{e!r}")
+
+
 # ──────────────────────────── the source registry ────────────────────────────
 
 class SourceMethod(str, Enum):
@@ -268,6 +374,7 @@ class SourceMethod(str, Enum):
     MDC_FUTURE = "mdc_future"    # Miami-Dade Strategic Procurement "Future Solicitations" (forecast) JSON
     CIVICPLUS = "civicplus"      # CivicPlus municipal Bids module (server-rendered HTML; many FL cities)
     BONFIRE = "bonfire"          # Bonfire (bonfirehub.com) open-opportunities portal (needs a browser render)
+    EMAIL = "email"              # bid-match notification emails (e.g. BidNet Direct) read from an inbox
 
 
 # Methods whose pages block plain HTTP or render only after JS → they need a BrowserFetcher.
@@ -653,6 +760,52 @@ def parse_bonfire(html: str) -> list[dict]:
     return out
 
 
+def parse_bidnet_email(msg: dict) -> list[dict]:
+    """Extract matched solicitations from a BidNet Direct bid-match notification email.
+
+    PROVISIONAL until locked against a real sample: BidNet match emails list each matched solicitation as
+    a link to its bidnetdirect.com detail page with the title as the link text; this pulls those (title +
+    link + any numeric id in the URL). Agency and exact close date will be mapped once we have a real
+    email — we do not invent a deadline. This is link-based extraction, so it degrades safely (a layout we
+    don't recognise yields nothing rather than garbage)."""
+    body = msg.get("html") or ""
+    out, seen = [], set()
+    for m in re.finditer(
+            r'<a[^>]+href="(https?://[^"]*bidnetdirect\.com[^"]*)"[^>]*>(.*?)</a>', body, re.I | re.DOTALL):
+        href, title = m.group(1), re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", m.group(2))).strip()
+        if not title or len(title) < 6 or href in seen:
+            continue
+        if not re.search(r"(solicitation|/bid|notice|supplier|opportunit|/tenders?/)", href, re.I):
+            continue
+        seen.add(href)
+        idm = re.search(r"(\d{5,})", href)
+        out.append({
+            "record_kind": "bidnet_email",
+            "title": _html.unescape(title),
+            "event_id": idm.group(1) if idm else "bn-" + hashlib.sha256(href.encode()).hexdigest()[:10],
+            "response_due_at": "",                            # locked from a real sample; never inferred
+            "link": href,
+            "format": "",
+        })
+    return out
+
+
+def parse_email_alerts(text: str) -> list[dict]:
+    """Parse a batch of alert emails (JSON list from Mbox/ImapFetcher). Routes by sender: BidNet emails go
+    to parse_bidnet_email. The FROM-filter already restricts the batch to the alert sender."""
+    try:
+        emails = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return []
+    out = []
+    for e in emails if isinstance(emails, list) else []:
+        if not isinstance(e, dict):
+            continue
+        if "bidnetdirect" in (e.get("from", "") or "").lower():
+            out.extend(parse_bidnet_email(e))
+    return out
+
+
 def parse_future_solicitations(text: str) -> list[dict]:
     """Parse Miami-Dade's "Future Solicitations" forecast feed (a DataTables JSON endpoint).
 
@@ -727,6 +880,8 @@ def parse_source(method: SourceMethod, text: str) -> list[dict]:
         return parse_civicplus(text)
     if method is SourceMethod.BONFIRE:
         return parse_bonfire(text)
+    if method is SourceMethod.EMAIL:
+        return parse_email_alerts(text)
     return []
 
 
