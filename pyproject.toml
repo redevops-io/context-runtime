@@ -16,12 +16,12 @@ litellm = ["litellm>=1.40"]
 # Single-hop hybrid retrieval (DuckDB vector + BM25 + RRF + rerank).
 rag = ["redevops-rag @ git+https://github.com/redevops-io/redevops-rag.git@6e50d6db262135f9fa51f8c5cbc9be4b8952179b"]
 # Multi-hop graph retrieval (knowledge graph + Personalized PageRank).
-hipporag = ["hipporag @ git+https://github.com/redevops-io/HippoRAG.git"]
+hipporag = ["hipporag @ git+https://github.com/redevops-io/HippoRAG.git@ea601818728ad51d5841c240a43bd47a5b3f8091"]
 # Bi-temporal graph retrieval (the `temporal` method) — real Graphiti KG over Neo4j.
 # Pinned to the redevops fork for G1 source hydration (recovers the raw source turns
 # behind each lossy LLM-extracted fact); neo4j ships with graphiti-core.
 graphiti = [
-    "graphiti-core @ git+https://github.com/redevops-io/graphiti.git@redevops/g1-source-hydration",
+    "graphiti-core @ git+https://github.com/redevops-io/graphiti.git@053af50b96c5a78ac097decb88fdceb1266d8f0c",
     "sentence-transformers>=3.0",
 ]
 # Semantic (embedding) retrieval + hybrid BM25⊕semantic fusion — deterministic ONNX
