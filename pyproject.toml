@@ -15,7 +15,7 @@ dependencies = [
 litellm = ["litellm>=1.40"]
 # Reproducible context-state views (F1) — consumes the neutral runtime-contracts types
 # (ContextView / EvidenceChange). Opt-in; importing context_runtime.context_state needs it.
-context-state = ["runtime-contracts @ git+https://github.com/redevops-io/runtime-contracts.git@v0.3.13"]
+context-state = ["runtime-contracts @ git+https://github.com/redevops-io/runtime-contracts.git@v0.3.14"]
 # Single-hop hybrid retrieval (DuckDB vector + BM25 + RRF + rerank).
 rag = ["redevops-rag @ git+https://github.com/redevops-io/redevops-rag.git@v0.4.0"]
 # Multi-hop graph retrieval (knowledge graph + Personalized PageRank).
