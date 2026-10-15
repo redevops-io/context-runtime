@@ -1,0 +1,13 @@
+claim_id: cr_benchmark_v1_v2_headline
+claim: "Learned-policy precision +14.6 / +11.3 pts (Py/Go), abstention recall 0 -> 100%, expensive-stage depth -62% (BENCHMARKS.md headline)."
+status: Illustrative/synthetic
+code_commit: "6e8aa1937d8baae8f2dd84d0231e10af3b3c10e1"
+dataset: "Seeded ground-truth retrieval simulation, 40-seed average, generated inside examples/consolidated_benchmark.py"
+protocol: "PYTHONPATH=. python examples/consolidated_benchmark.py; re-run 2026-10-15 printed the same table as BENCHMARKS.md."
+model: "none (simulation)"
+metrics: "Py precision 67.6% -> 82.2% (+14.6 pts); Go 84.6% -> 95.9% (+11.3 pts); abstention recall 0% -> 100%; depth 8.00 -> 3.00 (-62% Py, -63% Go); precision after sizer 37.5% -> 100%"
+baselines: "v1 policy in the same simulation"
+reproduce: "PYTHONPATH=. python examples/consolidated_benchmark.py"
+artifacts: "BENCHMARKS.md; examples/consolidated_benchmark.py"
+limitations: "Precision is headlined at beta=0.9 while the shipped default is 0.5. The simulation defines both ground truth and the unanswerable set. The Go columns come from the Go port, which lives in a private repository (context-runtime-go) and was not reviewed or run here. Not a measurement on real corpora."
+review: "none; no external review"

@@ -688,4 +688,3 @@ A runtime is **v0.1-conformant** iff it:
 - [ ] requires neither Plan Cache, Knowledge graph, CP-SAT, mixture reasoners,
       cost-aware scheduling, policy engine, agent scheduler, nor dynamic plugin
       loading (all v0.2+).
-```
