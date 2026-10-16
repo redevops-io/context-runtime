@@ -8,6 +8,10 @@ the v0.3.x work staged across the coordinated-release feature branches, so both 
 geospatial and the concurrency entries appear here on every 0.3.x branch (which is also
 what keeps this file merge-clean).
 
+### Control plane hardening
+
+- Module proxy validates paths; tenants are bound to credentials (`CR_TENANT_KEYS`, `CR_ALLOW_ANONYMOUS_TENANTS`).
+
 ### Geospatial capabilities + zoning intelligence
 
 Geospatial support as a **Runtime capability, not a separate Geospatial Runtime**: a parcel's geometry,
