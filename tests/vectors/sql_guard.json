@@ -490,6 +490,160 @@
   {
    "sql": "SELECT FROM WHERE",
    "allow": false
+  },
+  {
+   "sql": "SELECT * FROM sales.orders",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "SELECT * FROM \"sales\".\"orders\"",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "SELECT * FROM warehouse.sales.orders",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "SELECT * FROM orders WHERE note ILIKE 'a%'",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "SELECT md5(note) FROM orders",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "SELECT quantile_cont(amount, 0.5) FROM orders",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "SELECT * FROM data.csv",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM \"data\".csv",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM \"data\".\"csv\"",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM main.parquet",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM s.json",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM s.jsonl",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM s.ndjson",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM s.tsv",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM s.txt",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM s.xlsx",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM s.arrow",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM s.db",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM s.duckdb",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM s.gz",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM s.zst",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM x.y.csv",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM 'data.csv'",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM \"data.csv\"",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM s.\"a.parquet\"",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM \"dir/data\"",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM \"dir\\\\data\"",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM 'http://host/x'",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM 's3://bucket/x'",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM \"s3://bucket/x\"",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM file.t",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM s3.t",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM http.t",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM (SELECT 1) a JOIN \"x.csv\" b ON true",
+   "allow": false
+  },
+  {
+   "sql": "WITH c AS (SELECT * FROM data.csv) SELECT * FROM c",
+   "allow": false
+  },
+  {
+   "sql": "SELECT list(status) FROM orders",
+   "allow": true,
+   "dialects": [
+    "duckdb"
+   ],
+   "limit": 100
   }
  ]
 }

@@ -225,3 +225,13 @@ def test_duckdb_warehouse_applies_resource_limits():
     wh = DuckDBWarehouse(memory_limit="256MB", threads=1)
     row = wh.run_sql("SELECT current_setting('threads') AS t, current_setting('max_expression_depth') AS d")[0]
     assert int(row["t"]) == 1 and int(row["d"]) == 200
+
+
+def test_guard_restricts_to_allowed_schemas_when_configured():
+    assert guard_sql("SELECT * FROM sales.orders", 10, allowed_schemas=["sales"]).endswith("LIMIT 10")
+    assert guard_sql("SELECT * FROM orders", 10, allowed_schemas=["sales"]).endswith("LIMIT 10")
+    with pytest.raises(SqlGuardError):
+        guard_sql("SELECT * FROM other.orders", 10, allowed_schemas=["sales"])
+    with pytest.raises(SqlGuardError):
+        guard_sql("SELECT * FROM cat.sales.orders", 10, allowed_schemas=["sales"])
+    assert guard_sql("SELECT * FROM other.orders", 10).endswith("LIMIT 10")   # default: permissive
