@@ -17,7 +17,7 @@ from context_runtime.plugins import base
 
 # ── the security guard: the whole point of the feature ──────────────────────────────────────────
 def test_guard_allows_select_and_appends_limit():
-    assert guard_sql("SELECT count(*) FROM invoices", 50) == "SELECT count(*) FROM invoices\nLIMIT 50"
+    assert guard_sql("SELECT count(*) FROM invoices", 50) == "SELECT COUNT(*) FROM invoices LIMIT 50"
     assert guard_sql("WITH x AS (SELECT 1) SELECT * FROM x LIMIT 5", 50).endswith("LIMIT 5")
 
 
@@ -152,3 +152,47 @@ def test_athena_analytical_end_to_end():
     hits = r.search("per status", k=10, method="sql")
     assert {h.meta["row"]["status"] for h in hits} == {"open", "paid"}
     assert all(h.source == "analytical:athena" for h in hits)
+
+
+# ── shared allow/deny vectors (also consumed by other ports) ────────────────────────────────────
+def _vectors():
+    import json
+    from pathlib import Path
+    doc = json.loads((Path(__file__).parent / "vectors" / "sql_guard.json").read_text())
+    return doc["max_rows"], doc["vectors"]
+
+
+def test_guard_matches_shared_vectors():
+    pytest.importorskip("sqlglot")
+    max_rows, vectors = _vectors()
+    import re
+    for v in vectors:
+        if v["allow"]:
+            out = guard_sql(v["sql"], max_rows)
+            if "limit" in v:
+                m = re.search(r"LIMIT\s+(\d+)", out, re.I)
+                assert m and int(m.group(1)) == v["limit"], (v["sql"], out)
+        else:
+            with pytest.raises(SqlGuardError):
+                guard_sql(v["sql"], max_rows)
+
+
+def test_guard_caps_caller_supplied_limit():
+    assert guard_sql("SELECT * FROM t LIMIT 100000", 50).endswith("LIMIT 50")
+    assert guard_sql("SELECT * FROM t LIMIT 5", 50).endswith("LIMIT 5")
+
+
+def test_guard_accepts_backend_dialects():
+    assert guard_sql("SELECT status, count(*) n FROM invoices GROUP BY status", 10, "athena").endswith("LIMIT 10")
+    assert guard_sql("SELECT 1", 10, "not-a-dialect").endswith("LIMIT 10")
+
+
+def test_duckdb_warehouse_disables_external_access():
+    duckdb = pytest.importorskip("duckdb")
+    from context_runtime.adapters.warehouse_duckdb import DuckDBWarehouse
+    wh = DuckDBWarehouse()
+    assert wh.run_sql("SELECT 1 AS a") == [{"a": 1}]
+    with pytest.raises(duckdb.Error):
+        wh.run_sql("SELECT * FROM read_csv('/etc/hostname')")
+    with pytest.raises(duckdb.Error):
+        wh.run_sql("SET enable_external_access=true")

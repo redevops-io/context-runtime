@@ -6,7 +6,8 @@ soc_triage/rag examples simulate their core. In production the same engine point
 (``providers.aws.athena_backend``) instead; the retriever doesn't change.
 
 Read-only by contract: ``run_sql`` executes the already-guarded query and caps rows. DuckDB is an
-optional dep (``context-runtime[duckdb]``); the connection is injectable for tests.
+optional dep (``context-runtime[duckdb]``); the connection is injectable for tests. External file and
+network access is disabled on the connection before any query runs.
 """
 from __future__ import annotations
 
@@ -15,11 +16,17 @@ class DuckDBWarehouse:
     def __init__(self, conn=None, *, database: str = ":memory:"):
         self._conn = conn
         self.database = database
+        self._locked = False
 
     def _connection(self):
         if self._conn is None:
             import duckdb  # optional: context-runtime[duckdb]
             self._conn = duckdb.connect(self.database)
+        if not self._locked:
+            # No file / network access from queries, and the setting cannot be changed back.
+            self._conn.execute("SET enable_external_access=false")
+            self._conn.execute("SET lock_configuration=true")
+            self._locked = True
         return self._conn
 
     def dialect(self) -> str:

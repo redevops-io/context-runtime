@@ -37,7 +37,9 @@ embeddings = ["fastembed>=0.3", "numpy>=1.24"]
 polars = ["polars>=1.0"]
 # Persistent BM25 index backend (DuckDB `fts`, MIT) — one file per shard / per user's local
 # data. The in-memory store is the zero-dep default; this is the real-index backend.
-duckdb = ["duckdb>=1.0"]
+duckdb = ["duckdb>=1.0", "sqlglot>=25"]
+# SQL parser used by the analytical retriever to validate generated queries.
+analytical = ["sqlglot>=25"]
 # Postgres full-text store backend (psycopg v3) — the same flat index over tsvector, for
 # data that already lives in Postgres. psycopg_pool enables real parallel queries under the
 # concurrent control plane (falls back to a lock-guarded single connection without it). Optional.
@@ -75,7 +77,7 @@ pdf-tables = ["pdfplumber>=0.11"]
 # Cloud-provider adapters (providers/aws — Bedrock model + KB, OpenSearch, Athena, Guardrails).
 # One SDK per cloud; adapters lazy-import it and accept injected clients, so the base runtime and
 # the test suite never require it. Azure/GCP/DigitalOcean add their own extra alongside this one.
-aws = ["boto3>=1.34"]
+aws = ["boto3>=1.34", "sqlglot>=25"]
 # Observability export.
 otel = ["opentelemetry-sdk>=1.20"]
 langfuse = ["langfuse>=2.0"]

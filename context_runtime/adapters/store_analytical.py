@@ -8,7 +8,7 @@ construction — the text-to-SQL generator is any ``ModelPlugin`` and the execut
 swaps the backend, not the engine.
 
 Security is the whole game here: a generated statement is validated by ``guard_sql`` before it ever
-reaches the backend — SELECT/WITH only, single statement, no DDL/DML, row-capped. A backend that
+reaches the backend — parsed, single statement, SELECT/WITH only, allowlisted functions, row-capped. A backend that
 also enforces read-only credentials is defence in depth, not a substitute.
 """
 from __future__ import annotations
@@ -17,15 +17,52 @@ import re
 
 from ..types import Hit, ModelRequest, PluginInfo, Retrieval
 
-_ALLOWED_START = re.compile(r"^\s*(with|select)\b", re.I)
-# whole-word mutation/DDL/admin verbs that must never appear in a read path
-_FORBIDDEN = re.compile(
-    r"\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|merge|replace|"
-    r"attach|copy|pragma|call|exec|execute|vacuum|analyze|set|reset|load|install)\b", re.I)
-
-
 class SqlGuardError(ValueError):
     """A generated statement failed the read-only safety check; it is never executed."""
+
+
+# Functions a generated read-only query may call (upper-case SQL names). Anything else - file and
+# network readers, system/admin functions, sleep, generators - is rejected.
+ALLOWED_FUNCTIONS = frozenset("""
+COUNT SUM AVG MIN MAX STDDEV STDDEV_POP STDDEV_SAMP VARIANCE VAR_POP VAR_SAMP MEDIAN MODE ANY_VALUE
+APPROX_DISTINCT APPROX_COUNT_DISTINCT COUNT_IF BOOL_AND BOOL_OR STRING_AGG GROUP_CONCAT LISTAGG
+ARRAY_AGG FIRST LAST CORR COVAR_POP COVAR_SAMP PERCENTILE_CONT PERCENTILE_DISC QUANTILE
+ABS CEIL CEILING FLOOR ROUND TRUNC TRUNCATE SQRT POWER POW EXP LN LOG LOG2 LOG10 SIGN MOD
+GREATEST LEAST COALESCE NULLIF IFNULL NVL IF CASE CAST TRY_CAST SAFE_CAST
+LOWER UPPER LENGTH CHAR_LENGTH TRIM LTRIM RTRIM SUBSTRING SUBSTR REPLACE CONCAT CONCAT_WS LEFT RIGHT
+POSITION STRPOS STARTS_WITH ENDS_WITH REVERSE INITCAP
+DATE_TRUNC DATE_PART EXTRACT DATE_DIFF DATEDIFF DATE_ADD DATEADD DATE_SUB TIMESTAMP_DIFF TIMESTAMP_ADD
+CURRENT_DATE CURRENT_TIMESTAMP CURRENT_TIME NOW LOCALTIMESTAMP YEAR MONTH DAY HOUR MINUTE SECOND
+QUARTER WEEK DAYOFWEEK DAYOFMONTH DAYOFYEAR STRFTIME TO_CHAR TO_DATE TO_TIMESTAMP DATE TIMESTAMP
+AND OR XOR
+ROW_NUMBER RANK DENSE_RANK NTILE LAG LEAD FIRST_VALUE LAST_VALUE NTH_VALUE PERCENT_RANK CUME_DIST
+""".split())
+
+# Statement-level nodes that may never appear anywhere in the tree (including inside CTEs).
+_FORBIDDEN_NODE_NAMES = (
+    "Insert", "Update", "Delete", "Merge", "Create", "Drop", "Alter", "AlterTable", "TruncateTable",
+    "Command", "Copy", "Set", "SetItem", "Pragma", "Attach", "Detach", "Install", "Load", "Use", "Grant",
+    "Into", "Lock", "Fetch", "Transaction", "Commit", "Rollback", "Describe", "Show", "Analyze",
+    "LoadData", "Export", "Kill", "Declare",
+)
+_ROOT_NODE_NAMES = ("Select", "Union", "Except", "Intersect")
+# A plain table name part: no path separators, dots or quotes (blocks "file.csv"-style scans).
+_TABLE_PART = re.compile(r"^[A-Za-z_][A-Za-z0-9_$ -]*$")
+_SYSTEM_SCHEMAS = ("information_schema", "pg_catalog", "sys", "mysql", "performance_schema")
+_SYSTEM_PREFIXES = ("pg_", "duckdb_", "sqlite_")
+
+
+def _sqlglot():
+    try:
+        import sqlglot
+        from sqlglot import exp
+    except ImportError as e:  # pragma: no cover - fail closed when the parser is missing
+        raise SqlGuardError("sqlglot is required to validate SQL (pip install 'context-runtime[duckdb]')") from e
+    return sqlglot, exp
+
+
+def _node_types(exp, names):
+    return tuple(t for t in (getattr(exp, n, None) for n in names) if isinstance(t, type))
 
 
 def strip_sql(text: str) -> str:
@@ -41,21 +78,77 @@ def strip_sql(text: str) -> str:
     return t.rstrip(";").strip()
 
 
-def guard_sql(sql: str, max_rows: int) -> str:
-    """Validate + normalize a read-only query. Raises SqlGuardError on anything unsafe."""
-    s = sql.strip().rstrip(";").strip()
-    if not s:
+def guard_sql(sql: str, max_rows: int, dialect: str | None = None) -> str:
+    """Validate and normalize a read-only query. Raises SqlGuardError on anything unsafe.
+
+    The statement is parsed (sqlglot); it must be exactly one SELECT / WITH...SELECT / set operation,
+    contain only allowlisted functions and plain table references, and its row limit is capped at
+    ``max_rows``. The returned SQL is re-generated from the validated tree, so what runs is what was checked.
+    """
+    if max_rows < 1:
+        raise SqlGuardError("max_rows must be positive")
+    sqlglot, exp = _sqlglot()
+    text = (sql or "").strip()
+    if not text:
         raise SqlGuardError("empty query")
-    if ";" in s:
-        raise SqlGuardError("multiple statements are not allowed")
-    if not _ALLOWED_START.match(s):
+    read = dialect if dialect in _known_dialects(sqlglot) else None
+    try:
+        parsed = [e for e in sqlglot.parse(text, read=read) if e is not None]
+    except Exception as e:  # sqlglot raises ParseError / TokenError
+        raise SqlGuardError("query could not be parsed") from e
+    if len(parsed) != 1:
+        raise SqlGuardError("exactly one statement is allowed" if parsed else "empty query")
+    root = parsed[0]
+    if not isinstance(root, _node_types(exp, _ROOT_NODE_NAMES)):
         raise SqlGuardError("only SELECT / WITH queries are allowed")
-    if _FORBIDDEN.search(s):
-        raise SqlGuardError(f"forbidden keyword in query: {_FORBIDDEN.search(s).group(0)!r}")
-    # enforce a row cap: append LIMIT when the outer query has none
-    if not re.search(r"\blimit\s+\d+\s*$", s, re.I):
-        s = f"{s}\nLIMIT {max_rows}"
-    return s
+    forbidden = _node_types(exp, _FORBIDDEN_NODE_NAMES)
+    for node in root.walk():
+        if isinstance(node, forbidden):
+            raise SqlGuardError(f"forbidden construct in query: {type(node).__name__}")
+        if isinstance(node, exp.Func):
+            name = (node.name if isinstance(node, exp.Anonymous) else node.sql_name()).upper()
+            if name not in ALLOWED_FUNCTIONS:
+                raise SqlGuardError(f"function not allowed: {name.lower()}")
+        elif isinstance(node, exp.Table):
+            _check_table(node, exp)
+    _cap_limit(root, max_rows, exp)
+    return root.sql(dialect=read)
+
+
+def _known_dialects(sqlglot) -> set[str]:
+    try:
+        from sqlglot.dialects.dialect import Dialect
+        return set(Dialect.classes)
+    except Exception:
+        return set()
+
+
+def _check_table(node, exp) -> None:
+    for part in ("this", "db", "catalog"):
+        v = node.args.get(part)
+        if v is None:
+            continue
+        if not isinstance(v, exp.Identifier):
+            raise SqlGuardError("table functions and file references are not allowed")
+        name = v.name
+        low = name.lower()
+        if not _TABLE_PART.match(name):
+            raise SqlGuardError("invalid table reference")
+        if part in ("db", "catalog") and low in _SYSTEM_SCHEMAS:
+            raise SqlGuardError("system schemas are not allowed")
+        if part == "this" and (low.startswith(_SYSTEM_PREFIXES) or low in _SYSTEM_SCHEMAS):
+            raise SqlGuardError("system tables are not allowed")
+
+
+def _cap_limit(root, max_rows: int, exp) -> None:
+    lim = root.args.get("limit")
+    n = None
+    if lim is not None:
+        e = lim.args.get("expression")
+        if isinstance(e, exp.Literal) and not e.is_string and e.name.isdigit():
+            n = int(e.name)
+    if n is None or n > max_rows:
+        root.set("limit", exp.Limit(expression=exp.Literal.number(max_rows)))
 
 
 def _row_text(row: dict) -> str:
@@ -90,7 +183,7 @@ class AnalyticalRetriever:
 
     def search(self, query: str, k: int, method: Retrieval = "sql") -> list[Hit]:
         raw = self._generate_sql(query)
-        sql = guard_sql(raw, min(k, self.max_rows) if k else self.max_rows)
+        sql = guard_sql(raw, min(k, self.max_rows) if k else self.max_rows, self.backend.dialect())
         rows = self.backend.run_sql(sql, max_rows=self.max_rows)
         dialect = self.backend.dialect()
         hits: list[Hit] = []
