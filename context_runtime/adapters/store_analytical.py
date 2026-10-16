@@ -36,6 +36,7 @@ CURRENT_DATE CURRENT_TIMESTAMP CURRENT_TIME NOW LOCALTIMESTAMP YEAR MONTH DAY HO
 QUARTER WEEK DAYOFWEEK DAYOFMONTH DAYOFYEAR STRFTIME TO_CHAR TO_DATE TO_TIMESTAMP DATE TIMESTAMP
 AND OR XOR
 TIMESTAMP_TRUNC TIME_TO_STR TIME_TO_UNIX UNIX_TO_TIME STR_TO_TIME STR_POSITION LOGICAL_OR LOGICAL_AND
+QUANTILE_CONT QUANTILE_DISC MD5_DIGEST LIST
 LPAD RPAD PAD SPLIT_PART REGEXP_LIKE REGEXP_MATCHES REGEXP_REPLACE REGEXP_FULL_MATCH REGEXP_EXTRACT
 CONTAINS EPOCH LAST_DAY LEN MD5 TRY_ELEMENT_AT DAY_OF_WEEK DAY_OF_MONTH DAY_OF_YEAR WEEK_OF_YEAR
 ROW_NUMBER RANK DENSE_RANK NTILE LAG LEAD FIRST_VALUE LAST_VALUE NTH_VALUE PERCENT_RANK CUME_DIST
@@ -55,6 +56,9 @@ _FORBIDDEN_NODE_NAMES = (
 _ROOT_NODE_NAMES = ("Select", "Union", "Except", "Intersect")
 # A plain table name part: no path separators, dots or quotes (blocks "file.csv"-style scans).
 _TABLE_PART = re.compile(r"^[A-Za-z_][A-Za-z0-9_$ -]*$")
+_FILE_EXTENSIONS = frozenset(
+    "csv parquet json jsonl ndjson tsv txt xlsx arrow db duckdb gz zst".split())
+_URL_SCHEMES = frozenset("http https s3 s3a gs gcs file ftp ftps az abfs abfss hf r2".split())
 _SYSTEM_SCHEMAS = ("information_schema", "pg_catalog", "sys", "mysql", "performance_schema")
 _SYSTEM_PREFIXES = ("pg_", "duckdb_", "sqlite_")
 
@@ -85,12 +89,12 @@ def strip_sql(text: str) -> str:
     return t.rstrip(";").strip()
 
 
-def guard_sql(sql: str, max_rows: int, dialect: str | None = None) -> str:
+def guard_sql(sql: str, max_rows: int, dialect: str | None = None, allowed_schemas=None) -> str:
     """Validate and normalize a read-only query. Raises SqlGuardError on anything unsafe.
 
     The statement is parsed (sqlglot); it must be exactly one SELECT / WITH...SELECT / set operation,
     contain only allowlisted functions and plain table references, and its row limit is capped at
-    ``max_rows``. The returned SQL is re-generated from the validated tree, so what runs is what was checked.
+    ``max_rows``. If ``allowed_schemas`` is given, qualified table names must use one of those catalog/schema names. The returned SQL is re-generated from the validated tree, so what runs is what was checked.
     """
     if max_rows < 1:
         raise SqlGuardError("max_rows must be positive")
@@ -108,6 +112,7 @@ def guard_sql(sql: str, max_rows: int, dialect: str | None = None) -> str:
     if len(parsed) != 1:
         raise SqlGuardError("exactly one statement is allowed" if parsed else "empty query")
     root = parsed[0]
+    allowed = None if allowed_schemas is None else {str(a).lower() for a in allowed_schemas}
     if not isinstance(root, _node_types(exp, _ROOT_NODE_NAMES)):
         raise SqlGuardError("only SELECT / WITH queries are allowed")
     forbidden = _node_types(exp, _FORBIDDEN_NODE_NAMES)
@@ -119,7 +124,7 @@ def guard_sql(sql: str, max_rows: int, dialect: str | None = None) -> str:
             if name.replace("_", "") not in _ALLOWED_NORMALIZED:
                 raise SqlGuardError(f"function not allowed: {name.lower()}")
         elif isinstance(node, exp.Table):
-            _check_table(node, exp)
+            _check_table(node, exp, allowed)
     _cap_limit(root, max_rows, exp)
     return root.sql(dialect=read, comments=False)
 
@@ -132,7 +137,8 @@ def _known_dialects(sqlglot) -> set[str]:
         return set()
 
 
-def _check_table(node, exp) -> None:
+def _check_table(node, exp, allowed_schemas=None) -> None:
+    """Reject file-like or URL-like references, system tables, and (when configured) unlisted schemas."""
     for part in ("this", "db", "catalog"):
         v = node.args.get(part)
         if v is None:
@@ -143,8 +149,14 @@ def _check_table(node, exp) -> None:
         low = name.lower()
         if not _TABLE_PART.match(name):
             raise SqlGuardError("invalid table reference")
+        if low in _URL_SCHEMES and part != "this":
+            raise SqlGuardError("file and URL references are not allowed")
+        if part == "this" and node.args.get("db") is not None and low in _FILE_EXTENSIONS:
+            raise SqlGuardError("file references are not allowed")
         if part in ("db", "catalog") and low in _SYSTEM_SCHEMAS:
             raise SqlGuardError("system schemas are not allowed")
+        if allowed_schemas is not None and part in ("db", "catalog") and low not in allowed_schemas:
+            raise SqlGuardError("schema is not in the allowed list")
         if part == "this" and (low.startswith(_SYSTEM_PREFIXES) or low in _SYSTEM_SCHEMAS):
             raise SqlGuardError("system tables are not allowed")
 
@@ -175,11 +187,14 @@ _SQL_SYSTEM = (
 class AnalyticalRetriever:
     """RetrieverPlugin: NL question → guarded SQL → rows-as-Hits over a WarehouseBackend."""
 
-    def __init__(self, backend, model, *, max_rows: int = 100, sql_capability: str = "draft"):
+    def __init__(self, backend, model, *, max_rows: int = 100, sql_capability: str = "draft",
+                 allowed_schemas=None):
         self.backend = backend      # WarehouseBackend: schema() + run_sql() + dialect()
         self.model = model          # ModelPlugin: generates SQL (any provider — Bedrock or local)
         self.max_rows = max_rows
         self.sql_capability = sql_capability
+        # optional config: catalog/schema names generated SQL may reference (None = any non-file name)
+        self.allowed_schemas = allowed_schemas if allowed_schemas is not None else getattr(backend, "allowed_schemas", None)
 
     def _generate_sql(self, query: str) -> str:
         schema = self.backend.schema()
@@ -192,7 +207,8 @@ class AnalyticalRetriever:
 
     def search(self, query: str, k: int, method: Retrieval = "sql") -> list[Hit]:
         raw = self._generate_sql(query)
-        sql = guard_sql(raw, min(k, self.max_rows) if k else self.max_rows, self.backend.dialect())
+        sql = guard_sql(raw, min(k, self.max_rows) if k else self.max_rows, self.backend.dialect(),
+                        allowed_schemas=self.allowed_schemas)
         rows = self.backend.run_sql(sql, max_rows=self.max_rows)
         dialect = self.backend.dialect()
         hits: list[Hit] = []
