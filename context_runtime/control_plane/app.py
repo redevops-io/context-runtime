@@ -22,6 +22,7 @@ from .context import Context
 from .fleet import Fleet
 from .registry import Module, Registry
 from .router import Router
+from .security import UnsafePath, allowed_tenants, env_flag, parse_tenant_keys, upstream_api_url
 
 CONFIG_PATH = os.environ.get("CONTEXT_RUNTIME_CONFIG") or os.environ.get("AGENTIC_OS_CONFIG", "config.yaml")
 
@@ -300,6 +301,10 @@ async def module_api(name: str, path: str, request: Request) -> Response:
     base = MODULE_SERVICES.get(name)
     if base is None:
         raise HTTPException(404, f"no module {name}")
+    try:
+        upstream = upstream_api_url(base, path)
+    except UnsafePath:
+        raise HTTPException(400, "invalid path")
     client_ip = (request.headers.get("cf-connecting-ip")
                  or (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
                  or (request.client.host if request.client else ""))
@@ -307,7 +312,7 @@ async def module_api(name: str, path: str, request: Request) -> Response:
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.request(
-                request.method, f"{base}/api/{path}",
+                request.method, upstream,
                 params=dict(request.query_params), content=body,
                 headers={"content-type": request.headers.get("content-type", "application/json"),
                          "x-forwarded-for": client_ip},
@@ -1329,9 +1334,40 @@ if not _TENANTS:                                    # CR_TENANTS unset ⇒ legac
     _TENANTS[_DEFAULT_TENANT_ID] = librechat
 
 
-def _tenant_for(model_id: str | None) -> LibreChatTenant:
-    """Pick the tenant a model id maps to; fall back to the default (legacy) tenant."""
-    return _TENANTS.get((model_id or "").strip()) or _TENANTS.get(_DEFAULT_TENANT_ID) or librechat
+def _credential(request: Request) -> str | None:
+    """The caller's credential: ``X-API-Key`` or an ``Authorization: Bearer`` token."""
+    key = request.headers.get("x-api-key")
+    if not key:
+        auth = request.headers.get("authorization") or ""
+        if auth.lower().startswith("bearer "):
+            key = auth[7:].strip()
+    return key or None
+
+
+def _allowed_tenant_ids(request: Request) -> set[str]:
+    """Tenants this caller may use, from server-side config.
+
+    CR_TENANT_KEYS="key1=tenantA,tenantB;key2=*" binds credentials to tenants. A caller
+    without a bound credential only gets the default tenant, unless the deployment sets
+    CR_ALLOW_ANONYMOUS_TENANTS=1 (open multi-tenant demo mode).
+    """
+    return allowed_tenants(_credential(request), parse_tenant_keys(os.getenv("CR_TENANT_KEYS", "")),
+                           list(_TENANTS), _DEFAULT_TENANT_ID, env_flag("CR_ALLOW_ANONYMOUS_TENANTS"))
+
+
+def _tenant_for(model_id: str | None, request: Request) -> LibreChatTenant:
+    """Pick the tenant for a request. ``model`` only selects among tenants the caller's
+    credential is bound to; an unknown model falls back to the default tenant; a known
+    tenant the caller is not bound to is refused (403)."""
+    allowed = _allowed_tenant_ids(request)
+    wanted = (model_id or "").strip()
+    if wanted in _TENANTS:
+        if wanted not in allowed:
+            raise HTTPException(403, "tenant not permitted for this credential")
+        return _TENANTS[wanted]
+    if _DEFAULT_TENANT_ID not in allowed:
+        raise HTTPException(403, "tenant not permitted for this credential")
+    return _TENANTS.get(_DEFAULT_TENANT_ID) or librechat
 
 
 def _hits_json(hits) -> list[dict]:
@@ -1356,17 +1392,17 @@ class LcJudgeReq(BaseModel):
 
 
 @app.post("/librechat/ingest", dependencies=[Depends(require_api_key)])
-def librechat_ingest(req: LcIngestReq) -> dict:
+def librechat_ingest(req: LcIngestReq, request: Request) -> dict:
     """Index a (pre-built, normalized) corpus directory into a tenant's retriever."""
     if not os.path.isdir(req.path):
         raise HTTPException(400, f"not a directory: {req.path}")
-    return {"ingested": _tenant_for(req.model).ingest(req.path)}
+    return {"ingested": _tenant_for(req.model, request).ingest(req.path)}
 
 
 @app.post("/librechat/retrieve")
-def librechat_retrieve(req: LcRetrieveReq) -> dict:
+def librechat_retrieve(req: LcRetrieveReq, request: Request) -> dict:
     """Plan + retrieve context for a request using the learned strategy (no judging yet)."""
-    tenant = _tenant_for(req.model)
+    tenant = _tenant_for(req.model, request)
     ctx = tenant.retrieve(req.request)
     return {"request": ctx.request, "strategy": ctx.strategy.key,
             "method": ctx.strategy.method, "final_k": ctx.strategy.final_k,
@@ -1381,39 +1417,39 @@ class LcCompareReq(BaseModel):
 
 
 @app.post("/librechat/compare")
-def librechat_compare(req: LcCompareReq) -> dict:
+def librechat_compare(req: LcCompareReq, request: Request) -> dict:
     """Retrieval transparency: run every method (bm25/vector/hybrid/community/graph) side by
     side and report what the learned policy chose + served. Powers the LibreChat comparison
     panel that shows users WHY Context Runtime's answer is better than any single method."""
-    return _tenant_for(req.model).compare(req.request, k=max(1, min(req.k, 10)))
+    return _tenant_for(req.model, request).compare(req.request, k=max(1, min(req.k, 10)))
 
 
 @app.post("/librechat/explain")
-def librechat_explain(req: LcCompareReq) -> dict:
+def librechat_explain(req: LcCompareReq, request: Request) -> dict:
     """EXPLAIN (the DB EXPLAIN-ANALYZE analogue): why the runtime retrieved what it did — every
     candidate arm with its learned value + quality/cost decomposition, the per-method retrieval
     trace with calibrated P(relevant), what was served, the abstention decision, and how the reward
     is computed. Read-only, so inspecting never perturbs the learned policy."""
-    return _tenant_for(req.model).explain(req.request, k=max(1, min(req.k, 10)))
+    return _tenant_for(req.model, request).explain(req.request, k=max(1, min(req.k, 10)))
 
 
 @app.get("/librechat/image")
-def librechat_image(chunk_id: str, model: str | None = None):
+def librechat_image(chunk_id: str, request: Request, model: str | None = None):
     """Serve an indexed image by chunk_id so the LibreQB panel can render a thumbnail for
     cross-modal `image` hits. Only images the retriever has indexed are servable (no
     arbitrary file read)."""
     from fastapi.responses import FileResponse
-    path = _tenant_for(model).image_path(chunk_id)
+    path = _tenant_for(model, request).image_path(chunk_id)
     if not path or not os.path.isfile(path):
         raise HTTPException(404, "image not found")
     return FileResponse(path)
 
 
 @app.post("/librechat/judge", dependencies=[Depends(require_api_key)])
-def librechat_judge(req: LcJudgeReq) -> dict:
+def librechat_judge(req: LcJudgeReq, request: Request) -> dict:
     """Close the loop: an external LLM judge posts the retrieval-quality score (0..1) for
     the last retrieve of this request; the policy learns which strategy the judge rewards."""
-    tenant = _tenant_for(req.model)
+    tenant = _tenant_for(req.model, request)
     reward = tenant.record_judgment(req.request, max(0.0, min(1.0, req.score)))
     return {"reward": reward, "suggestion": tenant.suggest(req.request), "policy": tenant.policy()}
 
@@ -1425,20 +1461,20 @@ class LcFeedbackReq(BaseModel):
 
 
 @app.post("/librechat/feedback", dependencies=[Depends(require_api_key)])
-def librechat_feedback(req: LcFeedbackReq) -> dict:
+def librechat_feedback(req: LcFeedbackReq, request: Request) -> dict:
     """The app's NATIVE reward: map a user action (kept / regenerated / thumbs / …) to a
     retrieval-quality signal so the policy learns from REAL usage — no LLM in the loop.
     This is the primary online learning path; /librechat/judge is a cold-start bootstrap."""
-    tenant = _tenant_for(req.model)
+    tenant = _tenant_for(req.model, request)
     reward = tenant.record_feedback(req.request, req.signal)
     return {"signal": req.signal, "reward": reward,
             "suggestion": tenant.suggest(req.request), "policy": tenant.policy()}
 
 
 @app.post("/librechat/chat", dependencies=[Depends(require_api_key)])
-def librechat_chat(req: LcRetrieveReq) -> dict:
+def librechat_chat(req: LcRetrieveReq, request: Request) -> dict:
     """Self-contained loop: retrieve → (offline heuristic) judge → learn, in one call."""
-    tenant = _tenant_for(req.model)
+    tenant = _tenant_for(req.model, request)
     ctx, score, reward = tenant.handle(req.request)
     return {"request": ctx.request, "strategy": ctx.strategy.key, "score": score, "reward": reward,
             "hits": _hits_json(ctx.hits), "context": ctx.context,
@@ -1446,9 +1482,9 @@ def librechat_chat(req: LcRetrieveReq) -> dict:
 
 
 @app.get("/librechat/policy")
-def librechat_policy(model: str | None = None) -> dict:
+def librechat_policy(request: Request, model: str | None = None) -> dict:
     """The retrieval strategy a tenant has learned per request-type."""
-    return {"policy": _tenant_for(model).policy()}
+    return {"policy": _tenant_for(model, request).policy()}
 
 
 # ──────────────────────────── OpenAI-compatible shim (LibreChat self-learning bridge) ────────────────────────────
@@ -1549,13 +1585,13 @@ class ChatCompletionReq(BaseModel):
 
 
 @app.get("/v1/models")
-def v1_models() -> dict:
+def v1_models(request: Request) -> dict:
     """OpenAI-compatible model list — LibreChat populates its model dropdown from this. One entry
     per corpus tenant (finance / medical / mixed …), so each selectable model is a scoped corpus."""
     created = int(_time.time())
     return {"object": "list", "data": [
         {"id": tid, "object": "model", "created": created, "owned_by": "context-runtime"}
-        for tid in _TENANTS]}
+        for tid in _TENANTS if tid in _allowed_tenant_ids(request)]}
 
 
 def _forward_to_upstream(messages: list[dict], req: ChatCompletionReq) -> tuple[str, dict, str]:
@@ -1626,10 +1662,10 @@ def _learn_in_background(tenant, req: ChatCompletionReq, request_text: str, ctx)
         pass   # learning must never affect the served response
 
 
-def _chat_core(req: ChatCompletionReq) -> dict:
+def _chat_core(req: ChatCompletionReq, request: Request) -> dict:
     """The self-learning chat turn: retrieve → augment → answer (learning is deferred).
     Routes to the corpus tenant named by req.model (finance / medical / mixed)."""
-    tenant = _tenant_for(req.model)
+    tenant = _tenant_for(req.model, request)
     user_msgs = [m for m in req.messages if m.role == "user"]
     request_text = user_msgs[-1].content if user_msgs else ""
     # Count this turn as in-flight so the load-aware sizer/bandit see current concurrency.
@@ -1670,9 +1706,9 @@ def _chat_core(req: ChatCompletionReq) -> dict:
 
 
 @app.post("/v1/chat/completions")
-def v1_chat_completions(req: ChatCompletionReq):
+def v1_chat_completions(req: ChatCompletionReq, request: Request):
     """OpenAI-compatible chat completions — the LibreChat self-learning entry point."""
-    result = _chat_core(req)
+    result = _chat_core(req, request)
     if not req.stream:
         return result
     # minimal SSE stream: one content delta + the final stop, OpenAI delta format.

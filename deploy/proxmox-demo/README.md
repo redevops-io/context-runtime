@@ -98,6 +98,10 @@ curl -s localhost:8092/librechat/compare -H 'content-type: application/json' \
   Each corpus is its own tenant with its own learned policy + Query Board. Add/remove a model
   by editing `CR_TENANTS` (`id=/path` for a single corpus, `id=shards(a:/p1,b:/p2)` for a
   coverage-routed mix) — no code change.
+- Tenant access is bound server-side. `CR_TENANT_KEYS="key1=tenantA,tenantB;key2=*"` maps API keys
+  (`X-API-Key` or `Authorization: Bearer`) to the tenants they may use; the request `model` only selects
+  among those. Callers without a bound key get the default tenant only (403 for others), unless
+  `CR_ALLOW_ANONYMOUS_TENANTS=1` (open demo mode, set in `chat-demo.compose.yml`).
 - Mixed-model routing cleanliness is tunable via `CR_ROUTE_MARGIN` (default `0.15`, coverage
   router). Lower = stricter single-domain routing if a borderline query leaks.
 - **Per-tenant cross-language** (`CR_TENANT_LANGS`, opt-in): lists the CORPUS language(s) to
