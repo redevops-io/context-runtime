@@ -77,6 +77,105 @@
    "limit": 100
   },
   {
+   "sql": "SELECT date_trunc('month', created) AS m, count(*) FROM invoices GROUP BY 1",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT strftime(created, '%Y-%m') FROM invoices",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT regexp_matches(status, '^p') FROM invoices",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT * FROM invoices WHERE status ILIKE 'P%'",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT strpos(status, 'a') FROM invoices",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT bool_or(amount > 1) FROM invoices",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT split_part(status, '-', 1) FROM invoices",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT date_diff('day', created, now()) FROM invoices",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT lpad(status, 8, '0'), md5(status) FROM invoices",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT status, percentile_cont(0.5) WITHIN GROUP (ORDER BY amount) FROM invoices GROUP BY status",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT date_part('year', created), year(created), last_day(created) FROM invoices",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
    "sql": "SELECT a || b, NOT c, d IS NULL, e IN (1,2) FROM t WHERE x = 1 OR y <> 2 AND z BETWEEN 1 AND 3 ORDER BY a DESC",
    "allow": true,
    "limit": 100
@@ -233,7 +332,7 @@
    "allow": false
   },
   {
-   "sql": "SELECT * FROM read_csv('/etc/passwd')",
+   "sql": "SELECT * FROM read_csv('/data/x.csv')",
    "allow": false
   },
   {
@@ -253,11 +352,11 @@
    "allow": false
   },
   {
-   "sql": "SELECT * FROM read_text('/etc/passwd')",
+   "sql": "SELECT * FROM read_text('/data/x.csv')",
    "allow": false
   },
   {
-   "sql": "SELECT * FROM read_blob('/etc/passwd')",
+   "sql": "SELECT * FROM read_blob('/data/x.csv')",
    "allow": false
   },
   {
@@ -265,7 +364,7 @@
    "allow": false
   },
   {
-   "sql": "SELECT * FROM '/etc/passwd'",
+   "sql": "SELECT * FROM '/data/x.csv'",
    "allow": false
   },
   {
@@ -281,11 +380,11 @@
    "allow": false
   },
   {
-   "sql": "SELECT pg_read_file('/etc/passwd')",
+   "sql": "SELECT pg_read_file('/data/x.csv')",
    "allow": false
   },
   {
-   "sql": "SELECT pg_read_binary_file('/etc/passwd')",
+   "sql": "SELECT pg_read_binary_file('/data/x.csv')",
    "allow": false
   },
   {
@@ -297,7 +396,7 @@
    "allow": false
   },
   {
-   "sql": "SELECT lo_import('/etc/passwd')",
+   "sql": "SELECT lo_import('/data/x.csv')",
    "allow": false
   },
   {
@@ -309,7 +408,7 @@
    "allow": false
   },
   {
-   "sql": "SELECT dblink_exec('host=x', 'drop table t')",
+   "sql": "SELECT dblink_exec('host=x', 'select 1')",
    "allow": false
   },
   {
@@ -369,7 +468,7 @@
    "allow": false
   },
   {
-   "sql": "SELECT (SELECT pg_read_file('/etc/passwd'))",
+   "sql": "SELECT (SELECT pg_read_file('/data/x.csv'))",
    "allow": false
   },
   {

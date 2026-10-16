@@ -35,8 +35,15 @@ DATE_TRUNC DATE_PART EXTRACT DATE_DIFF DATEDIFF DATE_ADD DATEADD DATE_SUB TIMEST
 CURRENT_DATE CURRENT_TIMESTAMP CURRENT_TIME NOW LOCALTIMESTAMP YEAR MONTH DAY HOUR MINUTE SECOND
 QUARTER WEEK DAYOFWEEK DAYOFMONTH DAYOFYEAR STRFTIME TO_CHAR TO_DATE TO_TIMESTAMP DATE TIMESTAMP
 AND OR XOR
+TIMESTAMP_TRUNC TIME_TO_STR TIME_TO_UNIX UNIX_TO_TIME STR_TO_TIME STR_POSITION LOGICAL_OR LOGICAL_AND
+LPAD RPAD PAD SPLIT_PART REGEXP_LIKE REGEXP_MATCHES REGEXP_REPLACE REGEXP_FULL_MATCH REGEXP_EXTRACT
+CONTAINS EPOCH LAST_DAY LEN MD5 TRY_ELEMENT_AT DAY_OF_WEEK DAY_OF_MONTH DAY_OF_YEAR WEEK_OF_YEAR
 ROW_NUMBER RANK DENSE_RANK NTILE LAG LEAD FIRST_VALUE LAST_VALUE NTH_VALUE PERCENT_RANK CUME_DIST
 """.split())
+
+# Dialects name the same function differently (DATEDIFF / DATE_DIFF, STRPOS / STR_POSITION), so
+# names are compared with underscores removed.
+_ALLOWED_NORMALIZED = frozenset(n.replace("_", "") for n in ALLOWED_FUNCTIONS)
 
 # Statement-level nodes that may never appear anywhere in the tree (including inside CTEs).
 _FORBIDDEN_NODE_NAMES = (
@@ -89,6 +96,8 @@ def guard_sql(sql: str, max_rows: int, dialect: str | None = None) -> str:
         raise SqlGuardError("max_rows must be positive")
     sqlglot, exp = _sqlglot()
     text = (sql or "").strip()
+    if "\x00" in text:
+        raise SqlGuardError("invalid character in query")
     if not text:
         raise SqlGuardError("empty query")
     read = dialect if dialect in _known_dialects(sqlglot) else None
@@ -107,12 +116,12 @@ def guard_sql(sql: str, max_rows: int, dialect: str | None = None) -> str:
             raise SqlGuardError(f"forbidden construct in query: {type(node).__name__}")
         if isinstance(node, exp.Func):
             name = (node.name if isinstance(node, exp.Anonymous) else node.sql_name()).upper()
-            if name not in ALLOWED_FUNCTIONS:
+            if name.replace("_", "") not in _ALLOWED_NORMALIZED:
                 raise SqlGuardError(f"function not allowed: {name.lower()}")
         elif isinstance(node, exp.Table):
             _check_table(node, exp)
     _cap_limit(root, max_rows, exp)
-    return root.sql(dialect=read)
+    return root.sql(dialect=read, comments=False)
 
 
 def _known_dialects(sqlglot) -> set[str]:

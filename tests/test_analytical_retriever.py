@@ -162,19 +162,28 @@ def _vectors():
     return doc["max_rows"], doc["vectors"]
 
 
-def test_guard_matches_shared_vectors():
+@pytest.mark.parametrize("dialect", [None, "duckdb", "postgres", "athena"])
+def test_guard_matches_shared_vectors(dialect):
     pytest.importorskip("sqlglot")
     max_rows, vectors = _vectors()
     import re
     for v in vectors:
         if v["allow"]:
-            out = guard_sql(v["sql"], max_rows)
+            if dialect not in v.get("dialects", [None, "duckdb", "postgres", "athena"]):
+                continue
+            out = guard_sql(v["sql"], max_rows, dialect)
             if "limit" in v:
                 m = re.search(r"LIMIT\s+(\d+)", out, re.I)
                 assert m and int(m.group(1)) == v["limit"], (v["sql"], out)
         else:
             with pytest.raises(SqlGuardError):
-                guard_sql(v["sql"], max_rows)
+                guard_sql(v["sql"], max_rows, dialect)
+
+
+def test_guard_rejects_nul_and_drops_comments():
+    with pytest.raises(SqlGuardError):
+        guard_sql("SELECT 1\x00", 10)
+    assert "note" not in guard_sql("SELECT 1 /* note */", 10)
 
 
 def test_guard_caps_caller_supplied_limit():
@@ -196,3 +205,23 @@ def test_duckdb_warehouse_disables_external_access():
         wh.run_sql("SELECT * FROM read_csv('/etc/hostname')")
     with pytest.raises(duckdb.Error):
         wh.run_sql("SET enable_external_access=true")
+
+
+def test_duckdb_warehouse_stops_runaway_queries():
+    import time
+    duckdb = pytest.importorskip("duckdb")
+    from context_runtime.adapters.warehouse_duckdb import DuckDBWarehouse
+    wh = DuckDBWarehouse(timeout_s=0.5)
+    sql = guard_sql("WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r) SELECT count(*) FROM r", 10, "duckdb")
+    t0 = time.time()
+    with pytest.raises(duckdb.Error):
+        wh.run_sql(sql)
+    assert time.time() - t0 < 10
+    assert wh.run_sql("SELECT 1 AS a") == [{"a": 1}]   # connection stays usable
+
+
+def test_duckdb_warehouse_applies_resource_limits():
+    from context_runtime.adapters.warehouse_duckdb import DuckDBWarehouse
+    wh = DuckDBWarehouse(memory_limit="256MB", threads=1)
+    row = wh.run_sql("SELECT current_setting('threads') AS t, current_setting('max_expression_depth') AS d")[0]
+    assert int(row["t"]) == 1 and int(row["d"]) == 200
