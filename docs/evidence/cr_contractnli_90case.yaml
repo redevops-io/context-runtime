@@ -1,13 +1,13 @@
 claim_id: cr_contractnli_90case
-claim: "ContractNLI 90-case result (owner-reported): 0.511 truncated / 0.700 naive / 0.733 closure."
+claim: "ContractNLI 90-case result (reported, not independently reproduced): 0.511 truncated / 0.700 naive / 0.733 closure."
 status: internally_reproduced?: UNVERIFIED - source run not located
 code_commit: "unknown"
 dataset: "NOT_IN_REPO (ContractNLI, 90 cases; selection method unknown)"
 protocol: "NOT_IN_REPO. The run that produced these numbers was not found in any of the four core repos. Not re-run."
 model: "unknown"
-metrics: "truncated 0.511; naive 0.700; closure 0.733 (owner-reported, metric unknown). The 0.033 difference between naive and closure is not shown to be statistically conclusive; no paired significance analysis has been done."
+metrics: "truncated 0.511; naive 0.700; closure 0.733 (reported, metric unknown). The 0.033 difference between naive and closure is not shown to be statistically conclusive; no paired significance analysis has been done."
 baselines: "truncated context and naive context (definitions unknown)"
 reproduce: "NOT_IN_REPO"
 artifacts: "NOT_IN_REPO"
-limitations: "Owner-reported only. 90 cases is small. No significance test, no confidence interval, no seed or variance information. Do not cite as evidence of improvement until the source run is located, committed and a paired analysis is done. This card exists so the number is not quoted without its caveats."
+limitations: "Reported only; source run not available in this repository. 90 cases is small. No significance test, no confidence interval, no seed or variance information. Do not cite as evidence of improvement until the source run is located, committed and a paired analysis is done. This card exists so the number is not quoted without its caveats."
 review: "none; no external review"

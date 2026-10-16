@@ -131,7 +131,7 @@ Plus **outreach-engine** (Twenty CRM), and **growth-assistant** + **agentic-priv
 reward examples shown above (`examples/<app>.py`); the rest are native realizations without a
 standalone tuner.
 
-The **enterprise line** (`CR-enterprise`, a separate private repository; its "v4" is unrelated to this repo's default branch name `v4`) adds a commercial layer that *composes with*
+The **enterprise line** (a separate repository that is not public) adds a commercial layer that *composes with*
 this optimizer rather than replacing it: **Policy-Constrained Planning** — provider / budget / PII /
 data-residency / mandatory-verification / human-approval predicates define the *feasible* plan set
 **before** the cost model ranks, so every execution can be proven within governance — and

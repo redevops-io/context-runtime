@@ -24,9 +24,9 @@ model (see [ROADMAP.md](ROADMAP.md)). "Production runtime" is a **future** ROADM
 - All reward and benchmark numbers come from seeded simulators written by the same authors as the learner.
   Label for all of them: *Illustrative/synthetic*. See [docs/evidence/](docs/evidence/).
 - One sidekick example *simulates the acceptance signal*.
-- The Go port is in a separate private repository (`context-runtime-go`); parity claims are not checkable here.
+- The Go port is in a separate private repository; parity claims are not checkable here.
 - Heterogeneous-shard benchmark needs a FinanceBench corpus that is not in the repo.
-- The ContractNLI 90-case figures are owner-reported only; the source run is not in these repositories. See
+- The ContractNLI 90-case figures are reported only, not independently reproduced; the source run is not in these repositories. See
   [docs/evidence/cr_contractnli_90case.yaml](docs/evidence/cr_contractnli_90case.yaml).
 
 ## Known gaps
@@ -42,7 +42,7 @@ model (see [ROADMAP.md](ROADMAP.md)). "Production runtime" is a **future** ROADM
 | `0.1.0` | `pyproject.toml` and `context_runtime.__version__` |
 | tags `v0.1.0`, `v0.2.0`, `v0.3.0` | semver-style tags (the code still reports `0.1.0`) |
 | tags `w3`, `w4`, `w5`, `w7` | non-semver "wave" tags |
-| default branch `v4` | a branch name, not a version; unrelated to the private `CR-enterprise` "v4" line |
+| default branch `v4` | a branch name, not a version; unrelated to any version line |
 | "v7.0" | a `git describe` string recorded in `runtime-contracts/adoption/implementations.yaml` |
 
 No tags are changed by this documentation. For reproducibility, cite a commit hash.

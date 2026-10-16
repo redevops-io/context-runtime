@@ -9,5 +9,5 @@ metrics: "Py precision 67.6% -> 82.2% (+14.6 pts); Go 84.6% -> 95.9% (+11.3 pts)
 baselines: "v1 policy in the same simulation"
 reproduce: "PYTHONPATH=. python examples/consolidated_benchmark.py"
 artifacts: "BENCHMARKS.md; examples/consolidated_benchmark.py"
-limitations: "Precision is headlined at beta=0.9 while the shipped default is 0.5. The simulation defines both ground truth and the unanswerable set. The Go columns come from the Go port, which lives in a private repository (context-runtime-go) and was not reviewed or run here. Not a measurement on real corpora."
+limitations: "Precision is headlined at beta=0.9 while the shipped default is 0.5. The simulation defines both ground truth and the unanswerable set. The Go columns come from the Go port, which is not public and was not reviewed or run here. Not a measurement on real corpora."
 review: "none; no external review"
