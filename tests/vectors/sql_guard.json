@@ -1,0 +1,495 @@
+{
+ "max_rows": 100,
+ "vectors": [
+  {
+   "sql": "SELECT count(*) FROM invoices",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "SELECT status, count(*) AS n FROM invoices GROUP BY status ORDER BY status",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "WITH x AS (SELECT 1 AS a) SELECT * FROM x LIMIT 5",
+   "allow": true,
+   "limit": 5
+  },
+  {
+   "sql": "SELECT * FROM invoices LIMIT 5000",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "SELECT * FROM invoices LIMIT 10 OFFSET 20",
+   "allow": true,
+   "limit": 10
+  },
+  {
+   "sql": "SELECT * FROM invoices LIMIT ALL",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "SELECT a FROM t UNION ALL SELECT a FROM u",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "SELECT a FROM t UNION SELECT a FROM u LIMIT 7",
+   "allow": true,
+   "limit": 7
+  },
+  {
+   "sql": "SELECT 1;",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "SELECT 'a;b' AS s",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "SELECT -- trailing comment\n 1",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "SELECT sum(amount) OVER (PARTITION BY status ORDER BY id) FROM invoices",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "SELECT CASE WHEN amount > 100 THEN 'big' ELSE 'small' END, coalesce(status,'n/a'), CAST(id AS VARCHAR), date_trunc('month', created) FROM invoices",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "SELECT i.id, c.name FROM invoices i JOIN customers c ON c.id = i.customer_id WHERE i.amount BETWEEN 1 AND 9 AND c.name LIKE 'A%'",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "SELECT * FROM main.invoices",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "SELECT date_trunc('month', created) AS m, count(*) FROM invoices GROUP BY 1",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT strftime(created, '%Y-%m') FROM invoices",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT regexp_matches(status, '^p') FROM invoices",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT * FROM invoices WHERE status ILIKE 'P%'",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT strpos(status, 'a') FROM invoices",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT bool_or(amount > 1) FROM invoices",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT split_part(status, '-', 1) FROM invoices",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT date_diff('day', created, now()) FROM invoices",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT lpad(status, 8, '0'), md5(status) FROM invoices",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT status, percentile_cont(0.5) WITHIN GROUP (ORDER BY amount) FROM invoices GROUP BY status",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT date_part('year', created), year(created), last_day(created) FROM invoices",
+   "allow": true,
+   "dialects": [
+    "duckdb",
+    "postgres"
+   ],
+   "limit": 100
+  },
+  {
+   "sql": "SELECT a || b, NOT c, d IS NULL, e IN (1,2) FROM t WHERE x = 1 OR y <> 2 AND z BETWEEN 1 AND 3 ORDER BY a DESC",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "SELECT lower(name), length(name), round(amount, 2), extract(year FROM created), count(DISTINCT customer_id), max(amount) FROM invoices GROUP BY 1,2,3,4 HAVING count(*) > 1",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "SELECT * FROM (SELECT id FROM invoices) s",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "SELECT * FROM (VALUES (1),(2)) AS v(a)",
+   "allow": true,
+   "limit": 100
+  },
+  {
+   "sql": "",
+   "allow": false
+  },
+  {
+   "sql": "   ",
+   "allow": false
+  },
+  {
+   "sql": ";",
+   "allow": false
+  },
+  {
+   "sql": "DELETE FROM invoices",
+   "allow": false
+  },
+  {
+   "sql": "UPDATE t SET x=1",
+   "allow": false
+  },
+  {
+   "sql": "INSERT INTO t VALUES (1)",
+   "allow": false
+  },
+  {
+   "sql": "DROP TABLE t",
+   "allow": false
+  },
+  {
+   "sql": "SELECT 1; DROP TABLE t",
+   "allow": false
+  },
+  {
+   "sql": "SELECT 1; SELECT 2",
+   "allow": false
+  },
+  {
+   "sql": "CREATE TABLE t (a int)",
+   "allow": false
+  },
+  {
+   "sql": "CREATE TABLE t AS SELECT 1",
+   "allow": false
+  },
+  {
+   "sql": "TRUNCATE t",
+   "allow": false
+  },
+  {
+   "sql": "GRANT ALL ON t TO x",
+   "allow": false
+  },
+  {
+   "sql": "ALTER TABLE t ADD c int",
+   "allow": false
+  },
+  {
+   "sql": "PRAGMA table_info(t)",
+   "allow": false
+  },
+  {
+   "sql": "SET x=1",
+   "allow": false
+  },
+  {
+   "sql": "RESET x",
+   "allow": false
+  },
+  {
+   "sql": "ATTACH 'x.db' AS d",
+   "allow": false
+  },
+  {
+   "sql": "DETACH d",
+   "allow": false
+  },
+  {
+   "sql": "INSTALL httpfs",
+   "allow": false
+  },
+  {
+   "sql": "LOAD httpfs",
+   "allow": false
+  },
+  {
+   "sql": "COPY t TO 'out.csv'",
+   "allow": false
+  },
+  {
+   "sql": "COPY t FROM 'in.csv'",
+   "allow": false
+  },
+  {
+   "sql": "COPY (SELECT 1) TO 'out.csv'",
+   "allow": false
+  },
+  {
+   "sql": "EXPLAIN SELECT 1",
+   "allow": false
+  },
+  {
+   "sql": "DESCRIBE t",
+   "allow": false
+  },
+  {
+   "sql": "SHOW TABLES",
+   "allow": false
+  },
+  {
+   "sql": "CALL pragma_version()",
+   "allow": false
+  },
+  {
+   "sql": "VACUUM",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * INTO newt FROM t",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM t INTO OUTFILE '/tmp/x'",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM t FOR UPDATE",
+   "allow": false
+  },
+  {
+   "sql": "WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d",
+   "allow": false
+  },
+  {
+   "sql": "WITH i AS (INSERT INTO t VALUES (1) RETURNING *) SELECT * FROM i",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM read_csv('/data/x.csv')",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM read_csv_auto('x.csv')",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM read_parquet('x.parquet')",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM read_json('x.json')",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM read_json_auto('x.json')",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM read_text('/data/x.csv')",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM read_blob('/data/x.csv')",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM glob('/*')",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM '/data/x.csv'",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM 'data.csv'",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM \"data.parquet\"",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM 'https://example.com/x.csv'",
+   "allow": false
+  },
+  {
+   "sql": "SELECT pg_read_file('/data/x.csv')",
+   "allow": false
+  },
+  {
+   "sql": "SELECT pg_read_binary_file('/data/x.csv')",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM pg_ls_dir('/')",
+   "allow": false
+  },
+  {
+   "sql": "SELECT pg_sleep(10)",
+   "allow": false
+  },
+  {
+   "sql": "SELECT lo_import('/data/x.csv')",
+   "allow": false
+  },
+  {
+   "sql": "SELECT lo_export(1, '/tmp/x')",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM dblink('host=x', 'select 1') AS t(a int)",
+   "allow": false
+  },
+  {
+   "sql": "SELECT dblink_exec('host=x', 'select 1')",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM duckdb_tables()",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM duckdb_settings()",
+   "allow": false
+  },
+  {
+   "sql": "SELECT current_setting('x')",
+   "allow": false
+  },
+  {
+   "sql": "SELECT getenv('HOME')",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM generate_series(1, 1000000000)",
+   "allow": false
+  },
+  {
+   "sql": "SELECT repeat('a', 1000000000)",
+   "allow": false
+  },
+  {
+   "sql": "SELECT sleep(10)",
+   "allow": false
+  },
+  {
+   "sql": "SELECT version()",
+   "allow": false
+  },
+  {
+   "sql": "SELECT unknown_fn(1)",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM information_schema.tables",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM pg_catalog.pg_user",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM pg_shadow",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM sqlite_master",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM t WHERE a IN (SELECT * FROM read_csv('x'))",
+   "allow": false
+  },
+  {
+   "sql": "SELECT (SELECT pg_read_file('/data/x.csv'))",
+   "allow": false
+  },
+  {
+   "sql": "WITH x AS (SELECT * FROM read_csv('x')) SELECT * FROM x",
+   "allow": false
+  },
+  {
+   "sql": "SELECT * FROM t FETCH FIRST 3 ROWS ONLY",
+   "allow": false
+  },
+  {
+   "sql": "SELECT 1 /* unterminated",
+   "allow": false
+  },
+  {
+   "sql": "SELEC 1",
+   "allow": false
+  },
+  {
+   "sql": "SELECT FROM WHERE",
+   "allow": false
+  }
+ ]
+}
