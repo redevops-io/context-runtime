@@ -1,0 +1,13 @@
+claim_id: cr_chat_memory_lift
+claim: "3-index chat memory tenant: learned reward 1.23 vs read-all-three -1.70, lift +2.93."
+status: Illustrative/synthetic
+code_commit: "6e8aa1937d8baae8f2dd84d0231e10af3b3c10e1"
+dataset: "Simulated rewards inside examples/chat_memory.py"
+protocol: "PYTHONPATH=. python examples/chat_memory.py; re-run 2026-10-15 printed 1.233 vs -1.700, lift +2.933."
+model: "none (simulation)"
+metrics: "learned 1.233; baseline -1.700; lift +2.933"
+baselines: "read all three indices"
+reproduce: "PYTHONPATH=. python examples/chat_memory.py"
+artifacts: "BENCHMARKS.md; examples/chat_memory.py"
+limitations: "Reward is simulated (BENCHMARKS.md says so); the live path needs real feedback and has not been measured here."
+review: "none; no external review"

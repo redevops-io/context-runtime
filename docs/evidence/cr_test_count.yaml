@@ -1,0 +1,13 @@
+claim_id: cr_test_count
+claim: "Test count: README said '360+ tests'; now '349 collected (338 passed, 11 skipped)'."
+status: Internally reproduced
+code_commit: "6e8aa1937d8baae8f2dd84d0231e10af3b3c10e1"
+dataset: "tests/ directory"
+protocol: "pip install -e '.[dev]' numpy httpx && pytest, 2026-10-15, Python 3.12. With only the dev extra, 2 modules fail collection (httpx) and 11 tests fail (numpy missing)."
+model: "none"
+metrics: "338 passed, 11 skipped (349 collected); 362 'def test_' occurrences in tests/"
+baselines: "NOT_IN_REPO"
+reproduce: "pip install -e '.[dev]' numpy httpx && pytest"
+artifacts: "tests/"
+limitations: "The 360+ figure counted function definitions, not collected tests. No CI workflow runs the suite in this repo (only secret-scan)."
+review: "none; no external review"

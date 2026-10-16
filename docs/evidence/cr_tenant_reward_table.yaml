@@ -1,0 +1,13 @@
+claim_id: cr_tenant_reward_table
+claim: "README tenant table: eleven example tenants, learned vs baseline reward (e.g. sidekick 67% vs 33%, redevops-rag 0.780 vs 0.428, market-radar 3.611 vs 0.403)."
+status: Illustrative/synthetic
+code_commit: "6e8aa1937d8baae8f2dd84d0231e10af3b3c10e1"
+dataset: "Seeded simulators inside each examples/*.py (no real users, no production data)"
+protocol: "Run each example with PYTHONPATH=. python examples/<name>.py; compare the printed learned vs baseline numbers to the README. Re-run 2026-10-15, Python 3.12, all 11 rows matched."
+model: "none for the rewards (StubModel / simulators); no LLM call"
+metrics: "sidekick 67% vs 33% (acceptance); rag_tuning 0.780 vs 0.428; soc_triage 0.900 vs 0.800; growth_engine 7.851 vs 5.282; control_tower 5.326 vs 1.643; agentic_billing 4.122 vs 2.442; social_autopilot 3.875 vs 0.773; agentic_support 3.679 vs 2.394; agentic_books 3.632 vs 2.430; market_radar 3.611 vs 0.403; agentic_compliance 3.562 vs 2.463"
+baselines: "Fixed strategy or full-context baselines named per row in the README"
+reproduce: "pip install -e . && PYTHONPATH=. python examples/sidekick_learning.py (and the other ten files in examples/)"
+artifacts: "examples/sidekick_learning.py rag_tuning.py soc_triage.py growth_engine.py control_tower.py agentic_billing.py social_autopilot.py agentic_support.py agentic_books.py market_radar.py agentic_compliance.py"
+limitations: "Simulated reward functions written by the same authors as the learner; units differ per row so rows are not comparable; single seeded run, no variance or significance analysis; the sidekick example simulates the acceptance signal; says nothing about real-world benefit."
+review: "none; no external review"

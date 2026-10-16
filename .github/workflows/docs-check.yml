@@ -1,0 +1,17 @@
+name: docs-check
+# Documentation only: relative links, fenced-command syntax (bash -n, never executed), no bare `pip install`
+# of unpublished ReDevOps packages, and docs/evidence card schema. Stdlib Python, no installs.
+on:
+  pull_request:
+  push:
+    branches: [v4]
+permissions:
+  contents: read
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python scripts/docs_check.py

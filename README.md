@@ -4,15 +4,68 @@
 
 > **🚀 NVIDIA Inception Program Member** — ReDevOps is a member of the NVIDIA Inception Program, supporting startups advancing AI and accelerated computing. Membership provides access to NVIDIA technology, technical resources, and the startup ecosystem. It does not imply product endorsement by NVIDIA.
 
-**An efficiency optimizer for a fleet of apps** — a database query planner for LLM
-context. The application says *"I need an answer"*; the runtime decides what the model
-sees — what to retrieve, compress, route, and verify — emits an inspectable,
-replayable plan, and **learns from the outcome**. It does for AI context what query
-planners did for SQL. See [POSITIONING.md](./POSITIONING.md) for the thesis.
+**What it does.** A "query planner for LLM context": the application states a goal and a budget; the runtime
+decides what the model sees (what to retrieve, compress, route and verify), emits an inspectable, replayable
+plan (`explain`, `simulate`), and learns from the outcome. It is the *Context* part of ReDevOps Runtime: context
+selection and optimization. Thesis and positioning: [POSITIONING.md](./POSITIONING.md).
+
+**Who it's for.** Engineers whose application makes recurring choices about which context, config or sources to
+use (top-k, rerank, which tools, which model tier) and has a measurable outcome to learn from.
+
+**Maturity: reference implementation (alpha), simulation-backed.** Python is the source of truth. It runs
+offline with stub models. No production deployment is claimed here, nothing is independently validated, and the
+Go port lives in a separate private repository that cannot be reviewed from here. Detail: [STATUS.md](./STATUS.md).
+
+## 3-minute example
+
+```bash
+git clone --depth 1 https://github.com/redevops-io/context-runtime.git && cd context-runtime
+python -m venv .venv && . .venv/bin/activate
+pip install -e .                                   # offline stub path; no provider key, no network at run time
+PYTHONPATH=. python examples/sidekick_learning.py  # learned policy vs fixed baseline on a seeded simulation
+```
+
+Expected (seeded; this is what the 2026-10-15 re-run printed): `Context Runtime (learning):  67%` against
+`naive baseline (fixed): 33%`. This is a **simulated acceptance signal**, not a measurement on real users.
+The API tour is in [30-second tour](#30-second-tour). This package is not on PyPI (no ReDevOps package is);
+install from a clone, or `pip install "context-runtime @ git+https://github.com/redevops-io/context-runtime.git"`.
+
+## Evidence
+
+Every number in this README is the output of a script in [`examples/`](./examples), on seeded synthetic data.
+Cards with commit, protocol, metrics and limitations: [docs/evidence/](./docs/evidence/). Labels used:
+*Illustrative/synthetic* | *Internally reproduced* | *Externally reproduced* | *Field validated*. **Nothing in
+this repository is externally reproduced or field validated.** The tenant table below was re-run on
+2026-10-15 and matched; that makes it *Illustrative/synthetic*, because the environments are simulators.
+
+## Limitations
+
+Simulated rewards, not production outcomes (one sidekick example "simulates the acceptance signal");
+single seeded runs unless a table says otherwise; Go parity is not verifiable here; the heterogeneous-shard
+benchmark needs a corpus that is not in the repo; version identifiers are inconsistent (see
+[STATUS.md](./STATUS.md#versions)).
+
+## Naming
+
+One public product, **ReDevOps Runtime**: *Mission* = governed execution, *Context* = context selection and
+optimization (this repo), *Discovery* = finding and prioritizing opportunities. *Agentic Apps* are
+applications using the runtime; *Agentic OS* is the integrated control-plane/deployment surface, not a fourth
+runtime. Glossary: [agentic-os/docs/GLOSSARY.md](https://github.com/redevops-io/agentic-os/blob/main/docs/GLOSSARY.md).
+
+## Docs
+
+[STATUS](./STATUS.md) · [ARCHITECTURE](./ARCHITECTURE.md) · [SPEC](./SPEC.md) · [BENCHMARKS](./BENCHMARKS.md) ·
+[ROADMAP](./ROADMAP.md) · [POSITIONING](./POSITIONING.md) · [SECURITY](./SECURITY.md) · [CONTRIBUTING](./CONTRIBUTING.md) ·
+[CHANGELOG](./CHANGELOG.md)
+
+---
+
+# Reference
 
 It optimizes any app with (a) a decision point about what context/config to use and
-(b) a measurable outcome. Eleven tenants are built and green (each number is the
-learned-vs-baseline reward its offline example in `examples/` prints):
+(b) a measurable outcome. Eleven example tenants run offline (each number is the
+learned-vs-baseline reward its example in `examples/` prints on a **seeded simulator**; *Illustrative/synthetic*,
+cards in [docs/evidence/](./docs/evidence/)):
 
 | Tenant | Context Runtime tunes | Result |
 |---|---|---|
@@ -28,7 +81,11 @@ learned-vs-baseline reward its offline example in `examples/` prints):
 | **market-radar** | which competitor watches to sweep per intel question | **3.611 vs 0.403** vs full-sweep |
 | **agentic-compliance** | which rule-family evidence to pull per finding | **3.562 vs 2.463** vs full-evidence |
 
-> Reward numbers are single-run outputs of each tenant's `examples/` script — re-run to reproduce (they drift with model/data changes). The **sidekick** and **redevops-rag** rows are current; the others may need a refresh.
+> **Label: Illustrative/synthetic.** Reward numbers are single-run outputs of each tenant's `examples/` script
+> on simulated environments (the sidekick example simulates the acceptance signal), not production results.
+> Re-run: all eleven rows matched on 2026-10-15 at commit `6e8aa19` (Python 3.12). They can drift with model or
+> data changes. Units differ per row (acceptance rate, retrieval reward, cumulative reward), so rows are not
+> comparable with each other.
 
 ```bash
 PYTHONPATH=. python examples/sidekick_learning.py   # discrete-strategy bandit
@@ -41,18 +98,21 @@ with an approval-gated audit trail) and **trace exporters** (`context_runtime/ob
 exporters.py` — JSONL offline, or Langfuse / OpenLLMetry-OTel when the extras are
 installed).
 
-> Status: **runnable reference implementation — Python and Go at feature parity.** Runs fully
-> offline with stub models; real bindings are wired and lazy-imported: LiteLLM models, and
+> Status: **runnable reference implementation (Python)**. Runs fully offline with stub models; real bindings
+> are wired and lazy-imported: LiteLLM models, and
 > [redevops-rag](https://github.com/redevops-io/redevops-rag) / DuckDB / Postgres retrieval
 > (BM25 · dense · hybrid · graph-PPR · community · sharded routing · cross-modal). Beyond the
-> initial slice it now ships score **calibration**, a **learned quality-aware planner**, and
+> initial slice it ships score **calibration**, a **learned quality-aware planner**, and
 > **EXPLAIN** for the retrieval decision (see [Also shipped](#also-shipped)). See
-> [SPEC.md](./SPEC.md) §10 for the conformance checklist these tests assert against.
+> [SPEC.md](./SPEC.md) §10 for the conformance checklist these tests assert against. The earlier phrase
+> "Python and Go at feature parity" is withdrawn: the Go port is in a private repository and was not reviewed.
 
 ## The agentic fleet
 
-The reward table above is the measured slice; the full fleet is **15 native agent services + a
-control plane**, mirrored from the live demo at **[demo.redevops.io](https://demo.redevops.io)**. Each
+The reward table above is the simulated slice. The fleet below is the set of services in the internal
+deployment mirrored at **[demo.redevops.io](https://demo.redevops.io)**; the "15 services" count is from this README's
+list and was not independently counted (other repos give different counts: see
+[agentic-os ARCHITECTURE](https://github.com/redevops-io/agentic-os/blob/main/ARCHITECTURE.md)). Each
 service wraps a mature OSS core and exposes `/health`, a Material-3 dashboard, and its agent endpoints —
 the Context Runtime is the decision layer *inside* each (which context / tools / config per request),
 while the core does the domain work:
@@ -71,7 +131,7 @@ Plus **outreach-engine** (Twenty CRM), and **growth-assistant** + **agentic-priv
 reward examples shown above (`examples/<app>.py`); the rest are native realizations without a
 standalone tuner.
 
-The **enterprise line** (`CR-enterprise`, v4) adds the commercial open-core layer that *composes with*
+The **enterprise line** (a separate repository that is not public) adds a commercial layer that *composes with*
 this optimizer rather than replacing it: **Policy-Constrained Planning** — provider / budget / PII /
 data-residency / mandatory-verification / human-approval predicates define the *feasible* plan set
 **before** the cost model ranks, so every execution can be proven within governance — and
@@ -146,7 +206,7 @@ The six plugin seams and their initial slice; several "real bindings" below are 
 
 ## Also shipped
 
-Beyond the initial slice, in both the Python source-of-truth and the Go port (feature parity):
+Beyond the initial slice, in both the Python source-of-truth (a Go port exists in a separate private repository):
 
 - **Retrieval as a routable capability** — BM25 · dense (fastembed ONNX) · hybrid (RRF) · graph
   (Personalized-PageRank multi-hop) · community · **sharded coverage routing** for heterogeneous
@@ -165,12 +225,15 @@ Beyond the initial slice, in both the Python source-of-truth and the Go port (fe
 
 ## Benchmarks
 
-Runnable results in [BENCHMARKS.md](./BENCHMARKS.md). Headline: the **v1 → v2 table measured in
-both runtimes** (Python + Go) — learned-policy precision **+14.6 / +11.3 pts**, abstention
+Runnable results in [BENCHMARKS.md](./BENCHMARKS.md) (all *Illustrative/synthetic*: seeded simulations).
+Headline: the **v1 → v2 table in both runtimes** (Python + Go; the Go column is produced by the merged
+benchmark script, the Go code itself is not in this repo) — learned-policy precision **+14.6 / +11.3 pts**, abstention
 **0 → 100%**, expensive-stage depth **−62%**. Plus retrieval over a **heterogeneous financial ×
 medical corpus** (coverage routing cuts cross-domain pollution 22→0 with recall intact), the
 **3-index chat memory** tenant (+2.93 learned vs read-all-three), and **parallel sharded fusion**
-(5.8× fan-out). Every number is produced by an example in [`examples/`](./examples).
+(5.8× fan-out). Every number is produced by an example in [`examples/`](./examples); cards in [docs/evidence/](./docs/evidence/).
+The pollution result needs a FinanceBench corpus that is not in the repository (the example exits with
+"corpus not found"), so it is not reproducible from a clean clone.
 
 ## Architecture
 
@@ -182,5 +245,5 @@ The decision layer is thin; the substrate is reused. See:
 ## Test
 
 ```bash
-pip install -e ".[dev]" && pytest      # 360+ tests; test_conformance.py == SPEC §10
+pip install -e ".[dev]" numpy httpx && pytest   # 349 collected: 338 passed, 11 skipped (2026-10-15); test_conformance.py == SPEC §10
 ```
