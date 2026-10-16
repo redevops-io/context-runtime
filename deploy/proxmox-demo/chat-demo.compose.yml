@@ -54,6 +54,9 @@ services:
       # coverage-routed heterogeneous mix. CR_CORPUS_DIR is left EMPTY so the legacy single
       # tenant is skipped and the finance tenant below is the default.
       - CR_CORPUS_DIR=
+      # Public demo: any caller may pick any of the (synthetic) demo corpora. Without this flag only the
+      # default tenant is reachable unless a credential is bound via CR_TENANT_KEYS.
+      - CR_ALLOW_ANONYMOUS_TENANTS=1
       - CR_TENANTS=context-runtime-finance=/corpus | context-runtime-medical=/medical | context-runtime-mixed=shards(finance:/corpus,medical:/medical)
       # Per-tenant cross-language retrieval (opt-in). Lists the CORPUS language(s) to translate an
       # incoming query INTO before retrieval — these corpora are English, so `=en` lets a non-English

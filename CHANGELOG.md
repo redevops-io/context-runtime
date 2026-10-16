@@ -7,4 +7,5 @@ are explained in [STATUS.md](STATUS.md#versions).
 
 ## Unreleased
 
+- Control plane: module proxy validates paths; tenants are bound to credentials (`CR_TENANT_KEYS`, `CR_ALLOW_ANONYMOUS_TENANTS`).
 - Docs: README first screen, tenant table relabelled *Illustrative/synthetic*, STATUS, evidence cards, docs check.
