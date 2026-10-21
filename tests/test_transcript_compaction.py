@@ -158,12 +158,27 @@ def test_oversized_tool_output_is_archived_whole_at_admission_so_the_middle_is_r
     assert tc.admit("bash", "short", 1000) == "short" and len(tc.archive.entries) == 1
 
 
+RAG_DOCS = {
+    "A0001": "Quarterly revenue by region: EMEA 4.2M, APAC 3.1M, Americas 7.9M. Americas grew fastest on enterprise renewals.",
+    "A0002": "Incident postmortem: the database failover took 14 minutes because the replica lagged after the storage upgrade.",
+    "A0003": "Employee onboarding checklist: laptop provisioning, badge access, security training, manager introduction in week one.",
+    "A0004": "Kubernetes cluster upgrade runbook: cordon nodes, drain workloads, upgrade the control plane, then the kubelets.",
+    "A0005": "Customer interview notes: buyers want single sign-on, audit logs and a clearer pricing page before they sign.",
+    "A0006": "Recipe for sourdough bread: mix flour, water and starter, fold every thirty minutes, bake at 240 degrees.",
+}
+RAG_QUERIES = {"sales per area of the world": "A0001", "why was the outage so long": "A0002", "new hire first week tasks": "A0003",
+               "how to update the cluster safely": "A0004", "what do prospects ask for before buying": "A0005"}
+
+
 @pytest.mark.skipif(not __import__("os").environ.get("CR_TEST_RAG"), reason="downloads an embedding model; set CR_TEST_RAG=1")
 def test_redevops_rag_backend_retrieves_paraphrases_from_the_archive(tmp_path):
+    """Paraphrase queries share no keywords with their target, so a hit means the vector leg works. Requires the
+    target in the top 2 of 6 (chance is 1 in 3 per query); with bge-small this is a recall check, not a ranking claim."""
     pytest.importorskip("redevops_rag")
     mgr = ContextRuntimeManager(tmp_path / "arch", use_redevops_rag=True)
-    mgr.archive.add("Quarterly revenue by region: EMEA 4.2M, APAC 3.1M, Americas 7.9M.", kind="tool_output", tool="bash", turn=1)
-    mgr.archive.add("Incident postmortem: database failover took 14 minutes after the storage upgrade.", kind="tool_output", tool="read", turn=1)
+    for aid, text in RAG_DOCS.items():
+        assert mgr.archive.add(text, kind="tool_output", tool="t", turn=1) == aid
     search = mgr.tools()[0]
-    assert "A0001" in search.run({"query": "sales per area of the world", "k": 1}).text      # no shared keywords: vector leg
-    assert "A0002" in search.run({"query": "why was the outage so long", "k": 1}).text
+    hits = {q: [h for h in search.run({"query": q, "k": 2}).hits] for q, target in RAG_QUERIES.items()}
+    found = sum(any(target in h.chunk_id for h in hits[q]) for q, target in RAG_QUERIES.items())
+    assert found >= 4, {q: [h.chunk_id.rsplit("/", 1)[-1][:6] for h in hs] for q, hs in hits.items()}
