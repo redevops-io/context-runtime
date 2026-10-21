@@ -82,9 +82,9 @@ def test_tools_search_and_read_back_archived_text():
     assert hit.ok and "UNIQUETOKEN2xyz" in hit.text and hit.hits
     aid = STUB.match(msgs[3 + 2 * 2]["content"]).group(1)                        # the output of call 2
     full = read.run({"id": aid, "limit": 12000})
-    assert full.text.startswith("output 2 ")
+    assert "output 2 " in full.text[:200] and "archived again" in full.text
     sliced = read.run({"id": aid, "offset": 10, "limit": 20})
-    assert len(sliced.text.split("\n[...")[0]) == 20 and "read_archive" in sliced.text
+    assert "chars 10-30 of" in sliced.text and "read_archive" in sliced.text
     bad = read.run({"id": "A9999"})
     assert not bad.ok and "unknown archive id" in bad.error
 

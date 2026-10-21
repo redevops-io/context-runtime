@@ -171,7 +171,9 @@ class TranscriptCompactor:
             return ToolResult(ok=False, error=f"unknown archive id {aid!r}; known: {', '.join(self.archive.entries) or 'none'}")
         text, off, lim = self.archive.get(aid), max(0, int(args.get("offset", 0))), max(1, min(int(args.get("limit", 6000)), 12000))
         more = f"\n[... {len(text) - off - lim} more chars: read_archive(\"{aid}\", offset={off + lim})]" if off + lim < len(text) else ""
-        return ToolResult(text=text[off:off + lim] + more)
+        head = (f"[{aid}: chars {off}-{min(off + lim, len(text))} of {len(text)}. This slice is archived again when the "
+                f"conversation moves on: use what you need from it now (note it or write it to a file).]\n")
+        return ToolResult(text=head + text[off:off + lim] + more)
 
     @staticmethod
     def _tool_names(messages: list[dict[str, Any]]) -> dict[str, str]:
