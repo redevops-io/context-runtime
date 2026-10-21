@@ -37,8 +37,8 @@ def test_manager_satisfies_the_agent_harness_interface():
 def test_compaction_is_lossless_and_keeps_the_recent_outputs():
     msgs, originals = convo()
     tc = TranscriptCompactor()
-    changed = tc.prepare(msgs, target_tokens=2000, estimated_tokens=30000)
-    assert changed > 0
+    changed = tc.prepare(msgs, target_tokens=3500, estimated_tokens=5000)       # reachable by archiving the 2 oldest
+    assert changed == 2
     tool = [m for m in msgs if m["role"] == "tool"]
     stubs = [m for m in tool if STUB.match(m["content"])]
     assert len(stubs) == changed and all("search_context" in m["content"] and "bash output" in m["content"] for m in stubs)
@@ -182,3 +182,28 @@ def test_redevops_rag_backend_retrieves_paraphrases_from_the_archive(tmp_path):
     hits = {q: [h for h in search.run({"query": q, "k": 2}).hits] for q, target in RAG_QUERIES.items()}
     found = sum(any(target in h.chunk_id for h in hits[q]) for q, target in RAG_QUERIES.items())
     assert found >= 4, {q: [h.chunk_id.rsplit("/", 1)[-1][:6] for h in hs] for q, hs in hits.items()}
+
+
+def test_prepare_relaxes_protections_to_reach_the_target_and_stays_lossless():
+    msgs, originals = convo(n_outputs=10, size=1500)
+    # the 4 newest outputs are protected by default; a target that needs them forces the relaxed steps
+    est = sum(len(m.get("content") or "") for m in msgs) // 3
+    target = est // 3                                                    # below what the 4 protected outputs alone would allow
+    tc = TranscriptCompactor()
+    changed = tc.prepare(msgs, target_tokens=target, estimated_tokens=est)
+    after = sum(len(m.get("content") or "") for m in msgs) // 3
+    tool = [m["content"] for m in msgs if m["role"] == "tool"]
+    assert changed >= 8 and after <= target                              # reached; the floor is stubs + the one newest output
+    assert tool[-1] == originals[9]                                      # the newest output is never touched here
+    assert sum(1 for t in tool if STUB.match(t)) >= 8
+    for aid in tc.archive.entries:                                       # nothing lost
+        assert tc.archive.get(aid) in originals.values()
+
+
+def test_prepare_does_nothing_extra_when_the_default_protections_already_reach_the_target():
+    msgs, _ = convo(n_outputs=10, size=1500)
+    est = sum(len(m.get("content") or "") for m in msgs) // 3
+    tc = TranscriptCompactor()
+    tc.prepare(msgs, target_tokens=int(est * 0.7), estimated_tokens=est)
+    tool = [m["content"] for m in msgs if m["role"] == "tool"]
+    assert not any(STUB.match(t) for t in tool[-4:])                      # the 4 newest stayed verbatim

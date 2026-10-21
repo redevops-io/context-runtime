@@ -92,17 +92,27 @@ class TranscriptCompactor:
 
     # ---- ContextManager ----------------------------------------------------------------------------------------
     def prepare(self, messages: list[dict[str, Any]], *, target_tokens: int, estimated_tokens: int) -> int:
-        """Archive the oldest compactable items until the estimate is at or under ``target_tokens``."""
+        """Archive the oldest compactable items until the estimate is at or under ``target_tokens``.
+
+        If the normal protections (the newest outputs and calls stay verbatim, small items are left alone) leave the
+        estimate above target, the protections are relaxed in two further steps. Still lossless: everything removed is
+        archived. Only the system prompt, the task and the single newest tool output are never touched here; going
+        beyond that is ``on_context_error``'s job.
+        """
         self._turn += 1
         est, changed = estimated_tokens, 0
-        for kind, i, extra in self._candidates(messages, self.keep_recent_outputs, self.keep_recent_calls,
-                                               self.min_archive_chars, self.arg_limit):
+        steps = [(self.keep_recent_outputs, self.keep_recent_calls, self.min_archive_chars, self.arg_limit, self.stub_head_chars),
+                 (2, 1, 300, 400, 120), (1, 1, 150, 200, 60)]       # relaxed steps also use shorter stub previews
+        for keep_out, keep_calls, min_chars, arg_limit, head in steps:
+            for kind, i, extra in list(self._candidates(messages, keep_out, keep_calls, min_chars, arg_limit)):
+                if est <= target_tokens:
+                    return changed
+                saved = self._compact(messages, kind, i, extra, head)
+                if saved:
+                    est -= saved // _CHARS_PER_TOKEN
+                    changed += 1
             if est <= target_tokens:
                 break
-            saved = self._compact(messages, kind, i, extra)
-            if saved:
-                est -= saved // _CHARS_PER_TOKEN
-                changed += 1
         return changed
 
     def on_context_error(self, messages: list[dict[str, Any]], attempt: int) -> int:
@@ -189,12 +199,13 @@ class TranscriptCompactor:
         for i, kind, extra in sorted(items):               # oldest first
             yield kind, i, extra
 
-    def _compact(self, messages, kind: str, i: int, tool: str) -> int:
+    def _compact(self, messages, kind: str, i: int, tool: str, head: int | None = None) -> int:
+        head = self.stub_head_chars if head is None else head
         m = messages[i]
         if kind == "out":
             text = m["content"]
             aid = self.archive.add(text, kind="tool_output", tool=tool, turn=self._turn)
-            stub = (f"[archived {aid}: {tool} output, {len(text)} chars. Starts: \"{_head(text, self.stub_head_chars)}\" "
+            stub = (f"[archived {aid}: {tool} output, {len(text)} chars. Starts: \"{_head(text, head)}\" "
                     f"Full text kept: search_context(query) or read_archive(\"{aid}\").]")
             messages[i] = {**m, "content": stub}
             return len(text) - len(stub)
