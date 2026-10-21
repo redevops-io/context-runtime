@@ -9,7 +9,7 @@ license = { text = "AGPL-3.0" }
 # standard-library only, so it adds no transitive dependencies. Pinned to a commit; bump deliberately.
 dependencies = [
     "pyyaml>=6.0",
-    "agent-harness @ git+https://github.com/redevops-io/agent-harness.git@077c4562e8e85493525f44a9a483254836fe7963",
+    "agent-harness @ git+https://github.com/redevops-io/agent-harness.git@dc84ebfe94bfff2d304b04cf64b7a0d4fe5bb320",
 ]
 
 [project.optional-dependencies]
