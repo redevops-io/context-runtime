@@ -156,3 +156,14 @@ def test_oversized_tool_output_is_archived_whole_at_admission_so_the_middle_is_r
     assert "NEEDLEINTHEMIDDLE" not in shown and tc.archive.get("A0001") == text
     assert "NEEDLEINTHEMIDDLE" in tc._search({"query": "NEEDLEINTHEMIDDLE"}).text
     assert tc.admit("bash", "short", 1000) == "short" and len(tc.archive.entries) == 1
+
+
+@pytest.mark.skipif(not __import__("os").environ.get("CR_TEST_RAG"), reason="downloads an embedding model; set CR_TEST_RAG=1")
+def test_redevops_rag_backend_retrieves_paraphrases_from_the_archive(tmp_path):
+    pytest.importorskip("redevops_rag")
+    mgr = ContextRuntimeManager(tmp_path / "arch", use_redevops_rag=True)
+    mgr.archive.add("Quarterly revenue by region: EMEA 4.2M, APAC 3.1M, Americas 7.9M.", kind="tool_output", tool="bash", turn=1)
+    mgr.archive.add("Incident postmortem: database failover took 14 minutes after the storage upgrade.", kind="tool_output", tool="read", turn=1)
+    search = mgr.tools()[0]
+    assert "A0001" in search.run({"query": "sales per area of the world", "k": 1}).text      # no shared keywords: vector leg
+    assert "A0002" in search.run({"query": "why was the outage so long", "k": 1}).text
