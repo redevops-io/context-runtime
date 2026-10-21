@@ -5,9 +5,11 @@ description = "Context Runtime — a database query planner for LLM context. The
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "AGPL-3.0" }
-# v0.1 core runs fully offline with the stub plugins — zero hard runtime deps.
+# v0.1 core runs fully offline with the stub plugins. agent-harness (tool contract, approval gate) is
+# standard-library only, so it adds no transitive dependencies. Pinned to a commit; bump deliberately.
 dependencies = [
     "pyyaml>=6.0",
+    "agent-harness @ git+https://github.com/redevops-io/agent-harness.git@dc84ebfe94bfff2d304b04cf64b7a0d4fe5bb320",
 ]
 
 [project.optional-dependencies]
