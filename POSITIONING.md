@@ -64,7 +64,7 @@ edge-sentinel selects **sources/tools with side effects**. Same bandit, same
 cost-model, same wrap. That is the whole bet.
 
 **Context Runtime *is* the control plane.** It supersedes the earlier `agentic-os` fleet
-controller — the routing, approval/safety, and audit-log capabilities prototyped there
+controller (`agentic-os` itself continues as the Mission kernel and Projects API) — the routing, approval/safety, and audit-log capabilities prototyped there
 now live natively in Context Runtime (`adapters/model_litellm.py`, `tools/`,
 `observability/`). The business modules that the old fleet ran become **tenants**: each
 gets a goal, a metric, and a learned policy, instead of a hand-wired controller.
