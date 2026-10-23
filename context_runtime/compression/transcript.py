@@ -82,13 +82,76 @@ def _head(text: str, n: int) -> str:
     return " ".join(text[:n].split())
 
 
+def _norm(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _lines(text: str) -> set[str]:
+    return {_norm(l) for l in text.splitlines() if len(l.strip()) > 20}
+
+
 class TranscriptCompactor:
+    """``policy="legacy"`` (default) is the behaviour the stage-1 benchmarks ran. ``policy="v2"`` changes only the stub that replaces a
+    long tool-call ARGUMENT: it is worded so it cannot be mistaken for content (a model was seen to copy the legacy stub into a new
+    ``write_file``). Pins and input-evidence pinning are opt-in and apply under either policy."""
+
     def __init__(self, archive: Archive | None = None, *, keep_recent_outputs: int = 4, keep_recent_calls: int = 2,
-                 min_archive_chars: int = 600, stub_head_chars: int = 240, arg_limit: int = 800):
+                 min_archive_chars: int = 600, stub_head_chars: int = 240, arg_limit: int = 800, policy: str = "legacy",
+                 pin_input_reads: bool = False, pin_input_max_chars: int = 8000, pin_budget_fraction: float = 0.25):
+        if policy not in ("legacy", "v2"):
+            raise ValueError(f"unknown policy {policy!r}")
         self.archive = archive or Archive()
         self.keep_recent_outputs, self.keep_recent_calls = keep_recent_outputs, keep_recent_calls
         self.min_archive_chars, self.stub_head_chars, self.arg_limit = min_archive_chars, stub_head_chars, arg_limit
+        self.policy = policy
+        self.pin_input_reads, self.pin_input_max_chars, self.pin_budget_fraction = pin_input_reads, pin_input_max_chars, pin_budget_fraction
+        self._pin_keys: list[str] = []
+        self._input_lines: dict[str, set[str]] = {}
         self._turn = 0
+
+    # ---- pins ----------------------------------------------------------------------------------------------------
+    def pin_text(self, text: str) -> None:
+        """A tool result that contains the start of ``text`` (whitespace-insensitive) is never archived by ``prepare``."""
+        key = _norm(text)[:160]
+        if len(key) >= 20 and key not in self._pin_keys:
+            self._pin_keys.append(key)
+
+    def _is_pinned(self, content: str) -> bool:
+        if not self._pin_keys or not isinstance(content, str):
+            return False
+        head = _norm(content[:5000])
+        return any(k in head for k in self._pin_keys)
+
+    def _input_line_sets(self) -> list[set[str]]:
+        for aid, e in self.archive.entries.items():
+            if e.kind == "input_file" and aid not in self._input_lines:
+                self._input_lines[aid] = _lines(self.archive.get(aid))
+        return list(self._input_lines.values())
+
+    def _is_input_read(self, content: str) -> bool:
+        """A short tool result that is (mostly) the text of an indexed input file, i.e. the agent reading its evidence."""
+        if STUB.match(content) or len(content) > self.pin_input_max_chars:
+            return False
+        got = _lines(content)
+        if len(got) < 2:
+            return False
+        return any(len(got & il) / len(got) >= 0.7 for il in self._input_line_sets())
+
+    def _evidence_pins(self, messages: list[dict[str, Any]], target_tokens: int) -> set[int]:
+        """Indices of small input-file reads to keep verbatim, newest first, within ``pin_budget_fraction`` of the target."""
+        if not self.pin_input_reads:
+            return set()
+        budget = int(self.pin_budget_fraction * target_tokens * _CHARS_PER_TOKEN)
+        pins, used = set(), 0
+        for i in range(len(messages) - 1, -1, -1):
+            m = messages[i]
+            c = m.get("content")
+            if m.get("role") == "tool" and isinstance(c, str) and self._is_input_read(c):
+                if used + len(c) > budget:
+                    continue                                # over budget: this (older) one stays compactable
+                pins.add(i)
+                used += len(c)
+        return pins
 
     # ---- ContextManager ----------------------------------------------------------------------------------------
     def prepare(self, messages: list[dict[str, Any]], *, target_tokens: int, estimated_tokens: int) -> int:
@@ -101,6 +164,7 @@ class TranscriptCompactor:
         """
         self._turn += 1
         est, changed = estimated_tokens, 0
+        self._excluded = self._evidence_pins(messages, target_tokens)
         steps = [(self.keep_recent_outputs, self.keep_recent_calls, self.min_archive_chars, self.arg_limit, self.stub_head_chars),
                  (2, 1, 300, 400, 120), (1, 1, 150, 200, 60)]       # relaxed steps also use shorter stub previews
         for keep_out, keep_calls, min_chars, arg_limit, head in steps:
@@ -119,9 +183,15 @@ class TranscriptCompactor:
         """Server said the prompt is too long: archive more aggressively (still lossless)."""
         keep_out, keep_calls, min_chars, arg_limit = {1: (2, 1, 300, 400), 2: (1, 1, 150, 200)}.get(attempt, (0, 0, 0, 120))
         changed = 0
-        for kind, i, extra in self._candidates(messages, keep_out, keep_calls, min_chars, arg_limit):
-            if self._compact(messages, kind, i, extra):
-                changed += 1
+        saved_pins = self._pin_keys
+        if attempt >= 3:                                  # last resort: honour nothing, a run must not die on a pin
+            self._pin_keys = []
+        try:
+            for kind, i, extra in self._candidates(messages, keep_out, keep_calls, min_chars, arg_limit, for_prepare=False):
+                if self._compact(messages, kind, i, extra):
+                    changed += 1
+        finally:
+            self._pin_keys = saved_pins
         if attempt >= 3:                                  # last resort: archive and clip any remaining large message
             for i, m in enumerate(messages):
                 c = m.get("content")
@@ -183,7 +253,7 @@ class TranscriptCompactor:
                 names[c["id"]] = c["function"]["name"]
         return names
 
-    def _candidates(self, messages, keep_out, keep_calls, min_chars, arg_limit):
+    def _candidates(self, messages, keep_out, keep_calls, min_chars, arg_limit, for_prepare: bool = True):
         names = self._tool_names(messages)
         outs = [i for i, m in enumerate(messages) if m.get("role") == "tool"
                 and isinstance(m.get("content"), str) and not STUB.match(m["content"]) and len(m["content"]) >= max(min_chars, 1)]
@@ -191,7 +261,9 @@ class TranscriptCompactor:
         protected = set(all_tool[-keep_out:]) if keep_out else set()
         calls = [i for i, m in enumerate(messages) if m.get("role") == "assistant" and m.get("tool_calls")]
         protected_calls = set(calls[-keep_calls:]) if keep_calls else set()
-        items = [(i, "out", names.get(messages[i].get("tool_call_id", ""), "tool")) for i in outs if i not in protected]
+        keep = getattr(self, "_excluded", set()) if for_prepare else set()
+        items = [(i, "out", names.get(messages[i].get("tool_call_id", ""), "tool")) for i in outs
+                 if i not in protected and i not in keep and not self._is_pinned(messages[i]["content"])]
         for i in calls:
             if i in protected_calls:
                 continue
@@ -218,7 +290,11 @@ class TranscriptCompactor:
             for k, v in args.items():
                 if isinstance(v, str) and len(v) > self.arg_limit:
                     aid = self.archive.add(v, kind="tool_args", tool=f"{c['function']['name']}.{k}", turn=self._turn)
-                    small[k] = f"[archived {aid}: {len(v)} chars] " + _head(v, 200) + f" ... (read_archive(\"{aid}\"))"
+                    if self.policy == "v2":
+                        small[k] = (f"<<ARCHIVED-PLACEHOLDER {aid}: {c['function']['name']}.{k}, {len(v)} chars. This is NOT the content: "
+                                    f"never reuse this text as an argument. Original: read_archive(\"{aid}\"). Starts: {_head(v, 80)}>>")
+                    else:
+                        small[k] = f"[archived {aid}: {len(v)} chars] " + _head(v, 200) + f" ... (read_archive(\"{aid}\"))"
                     saved += len(v) - len(small[k])
                 else:
                     small[k] = v
