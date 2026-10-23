@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
 """ICP scoring + the EXPLAIN-teardown message templates for outreach-engine.
 
 Who to sell the *pilot* to, how to rank the signals the connectors produce, and the actual copy to

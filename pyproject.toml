@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Context Runtime — a database query planner for LLM context. The runtime decides what a model sees before it answers."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "AGPL-3.0" }
+license = { text = "AGPL-3.0-or-later WITH Commons-Clause" }
 # v0.1 core runs fully offline with the stub plugins. agent-harness (tool contract, approval gate) is
 # standard-library only, so it adds no transitive dependencies. Pinned to a commit; bump deliberately.
 dependencies = [

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
 """Signal connectors — the account-intel feed for market-radar + outreach-engine.
 
 An outbound motion is only as good as its signals: the research is unambiguous that *signal-
