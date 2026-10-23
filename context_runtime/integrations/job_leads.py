@@ -208,7 +208,7 @@ I came across your {title} opening.
 I started with RAG. Then added reranking. Then memory, model routing, verification, permissions.
 Eventually I realized every AI application was rebuilding the same execution layer.
 
-That became Context Runtime — an open-source runtime that plans retrieval, memory, model selection,
+That became Context Runtime — a source-available runtime that plans retrieval, memory, model selection,
 verification and policy before execution, measures every decision, and continuously improves from
 production feedback. It's implemented in both Python and Go, includes heterogeneous retrieval
 benchmarks, execution observability and explainability, and is documented in an open whitepaper.
