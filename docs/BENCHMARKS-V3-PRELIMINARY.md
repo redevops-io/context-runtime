@@ -2,7 +2,7 @@
 
 > **Preliminary.** This is a forward-looking axis distinct from — and not a replacement for — the
 > shipped v1→v2 calibration results in [`BENCHMARKS.md`](../BENCHMARKS.md). It is kept in its own
-> file until promoted. Reproduce with `PYTHONPATH=. python examples/consolidated_benchmark.py --v3-doc docs/BENCHMARKS-v3-preliminary.md`.
+> file until promoted. Reproduce with `PYTHONPATH=. python examples/consolidated_benchmark.py --v3-doc docs/BENCHMARKS-V3-PRELIMINARY.md`.
 
 ## Online optimization under drift (Generation 4)
 
