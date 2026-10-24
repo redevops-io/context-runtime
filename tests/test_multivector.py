@@ -2,6 +2,10 @@
 ColPali VLM / Qdrant is needed."""
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("numpy", reason="needs the optional dependency 'numpy' (pip install -e '.[test]')")
+
 from context_runtime.adapters.store_multivector import MultiVectorRetriever, maxsim
 
 # a tiny concept space; each page is a SET of patch vectors (one hot axis per patch)

@@ -2,6 +2,10 @@
 Scene detection, ASR, and embedders are injected, so no ffmpeg/scenedetect/whisper/model."""
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("numpy", reason="needs the optional dependency 'numpy' (pip install -e '.[test]')")
+
 from context_runtime.adapters.store_video import VideoRetriever, video_available
 
 AXES = ["merger", "product", "cat"]

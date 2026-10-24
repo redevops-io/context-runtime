@@ -1,6 +1,10 @@
 """Hermetic MCP adapter tests: real stdio transport + ApprovalPolicy gating."""
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("httpx", reason="needs the optional dependency 'httpx' (pip install -e '.[test]')")
+
 import json
 import sys
 import tempfile

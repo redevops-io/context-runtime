@@ -9,10 +9,15 @@ license = { text = "AGPL-3.0-or-later WITH Commons-Clause" }
 # standard-library only, so it adds no transitive dependencies. Pinned to a commit; bump deliberately.
 dependencies = [
     "pyyaml>=6.0",
-    "agent-harness @ git+https://github.com/redevops-io/agent-harness.git@dc84ebfe94bfff2d304b04cf64b7a0d4fe5bb320",
+    "agent-harness @ git+https://github.com/redevops-io/agent-harness.git@6b8ba3a596a5e2caf0fdf009f2af013517591662",
 ]
 
 [project.optional-dependencies]
+# What the test suite needs beyond the base install: pytest, numpy (vector / multimodal / video tests) and httpx (the MCP client).
+# Tests that need a dependency skip when it is absent; CI installs this extra so none of them is skipped there.
+test = ["pytest>=8", "numpy>=1.24", "httpx>=0.27"]
+# The MCP client (context_runtime.tools.mcp) talks HTTP through httpx.
+mcp = ["httpx>=0.27"]
 # Real model transport across 100+ providers (the ModelPlugin binding).
 litellm = ["litellm>=1.40"]
 # Single-hop hybrid retrieval (DuckDB vector + BM25 + RRF + rerank).
