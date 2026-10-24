@@ -7,7 +7,7 @@
 **What it does.** A "query planner for LLM context": the application states a goal and a budget; the runtime
 decides what the model sees (what to retrieve, compress, route and verify), emits an inspectable, replayable
 plan (`explain`, `simulate`), and learns from the outcome. It is the *Context* part of ReDevOps Runtime: context
-selection and optimization. Thesis and positioning: [POSITIONING.md](./POSITIONING.md).
+selection and optimization. Overview: [OVERVIEW.md](./OVERVIEW.md).
 
 **Who it's for.** Engineers whose application makes recurring choices about which context, config or sources to
 use (top-k, rerank, which tools, which model tier) and has a measurable outcome to learn from.
@@ -55,7 +55,7 @@ runtime. Glossary: [agentic-os/docs/GLOSSARY.md](https://github.com/redevops-io/
 ## Docs
 
 [STATUS](./STATUS.md) · [ARCHITECTURE](./ARCHITECTURE.md) · [SPEC](./SPEC.md) · [BENCHMARKS](./BENCHMARKS.md) ·
-[ROADMAP](./ROADMAP.md) · [POSITIONING](./POSITIONING.md) · [SECURITY](./SECURITY.md) · [CONTRIBUTING](./CONTRIBUTING.md) ·
+[ROADMAP](./ROADMAP.md) · [OVERVIEW](./OVERVIEW.md) · [SECURITY](./SECURITY.md) · [CONTRIBUTING](./CONTRIBUTING.md) ·
 [CHANGELOG](./CHANGELOG.md)
 
 ---
