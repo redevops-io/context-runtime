@@ -2,6 +2,10 @@
 injected (deterministic), so no model download is needed."""
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("numpy", reason="needs the optional dependency 'numpy' (pip install -e '.[test]')")
+
 from context_runtime.adapters.store_image import ImageRetriever, image_embeddings_available
 from context_runtime.adapters.store_multimodal import MultimodalRetriever
 from context_runtime.types import Hit
