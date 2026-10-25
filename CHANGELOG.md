@@ -8,6 +8,14 @@ the v0.3.x work staged across the coordinated-release feature branches, so both 
 geospatial and the concurrency entries appear here on every 0.3.x branch (which is also
 what keeps this file merge-clean).
 
+### Intelligence Gateway integration (opt-in)
+
+- `context_runtime/integrations/intelligence_gateway.py`: a goal can declare a gateway need (`gateway_source(...)`); `GatewayCandidateGenerator` offers gateway retrieval plans only when the
+  gateway says the capability is served and entitled, a quote is available and fits `max_cost_usd`, and the goal is not `restricted` (nor `internal`, unless opted in).
+  `GatewayRetriever` runs only needs the planner recorded, re-quotes, refuses a price above the planned quote, and sends the quoted price as the gateway's ceiling. Only the capability, subject
+  references, fields and purpose leave: never the goal text, a provider list or a jurisdiction. Any refusal or outage yields no gateway evidence. Goals without a gateway source are unchanged.
+- Known gateway-side gap, pinned by a contract test: the stock gateway has no answer synthesizer, so `/v1/resolve` charges and returns an empty answer.
+
 ### Control plane hardening
 
 - Module proxy validates paths; tenants are bound to credentials (`CR_TENANT_KEYS`, `CR_ALLOW_ANONYMOUS_TENANTS`).
