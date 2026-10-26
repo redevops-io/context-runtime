@@ -23,8 +23,10 @@ from typing import Any
 
 from ..types import Hit
 from ..tools.base import ToolPlugin, ToolResult, function_tool
+from .contract import CLIPPED_NOTE, ResultView, is_placeholder as _is_placeholder, result_view
 
 _CHARS_PER_TOKEN = 3          # same conservative estimate agent_harness uses
+RECOVERY_TOOLS = ("read_archive", "search_context")
 STUB = re.compile(r"^\[archived (A\d+)")
 _CHUNK = 1200
 
@@ -97,7 +99,8 @@ class TranscriptCompactor:
 
     def __init__(self, archive: Archive | None = None, *, keep_recent_outputs: int = 4, keep_recent_calls: int = 2,
                  min_archive_chars: int = 600, stub_head_chars: int = 240, arg_limit: int = 800, policy: str = "legacy",
-                 pin_input_reads: bool = False, pin_input_max_chars: int = 8000, pin_budget_fraction: float = 0.25):
+                 pin_input_reads: bool = False, pin_input_max_chars: int = 8000, pin_budget_fraction: float = 0.25,
+                 recovery_keep: int = 6):
         if policy not in ("legacy", "v2"):
             raise ValueError(f"unknown policy {policy!r}")
         self.archive = archive or Archive()
@@ -108,6 +111,7 @@ class TranscriptCompactor:
         self._pin_keys: list[str] = []
         self._input_lines: dict[str, set[str]] = {}
         self._turn = 0
+        self.recovery_keep = recovery_keep
 
     # ---- pins ----------------------------------------------------------------------------------------------------
     def pin_text(self, text: str) -> None:
@@ -152,6 +156,20 @@ class TranscriptCompactor:
                 pins.add(i)
                 used += len(c)
         return pins
+
+    # ---- contract: what the model can see (owned here, asked by the harness) -----------------------------------------
+    def is_placeholder(self, value: Any) -> bool:
+        """Whether ``value`` is one of this manager's stand-ins for removed content (so a harness can refuse to run an action built from it)."""
+        return _is_placeholder(value)
+
+    def visibility(self, messages: list[dict[str, Any]], tool_call_id: str) -> ResultView:
+        """visible | clipped | archived (with the archive id) | unavailable, for the tool result of ``tool_call_id`` in the current messages."""
+        v = result_view(messages, tool_call_id)
+        if v.state == "archived" and v.archive_id in self.archive.entries:       # a clipped result that was archived later: the full text is the id its note names
+            m = CLIPPED_NOTE.search(self.archive.get(v.archive_id)[-800:])
+            if m and m.group(1) in self.archive.entries and m.group(1) != v.archive_id:
+                return ResultView("archived", m.group(1), self.archive.entries[m.group(1)].chars)
+        return v
 
     # ---- ContextManager ----------------------------------------------------------------------------------------
     def prepare(self, messages: list[dict[str, Any]], *, target_tokens: int, estimated_tokens: int) -> int:
@@ -241,8 +259,8 @@ class TranscriptCompactor:
             return ToolResult(ok=False, error=f"unknown archive id {aid!r}; known: {', '.join(self.archive.entries) or 'none'}")
         text, off, lim = self.archive.get(aid), max(0, int(args.get("offset", 0))), max(1, min(int(args.get("limit", 6000)), 12000))
         more = f"\n[... {len(text) - off - lim} more chars: read_archive(\"{aid}\", offset={off + lim})]" if off + lim < len(text) else ""
-        head = (f"[{aid}: chars {off}-{min(off + lim, len(text))} of {len(text)}. This slice is archived again when the "
-                f"conversation moves on: use what you need from it now (note it or write it to a file).]\n")
+        head = (f"[{aid}: chars {off}-{min(off + lim, len(text))} of {len(text)}. This slice stays visible for your next {self.recovery_keep} tool "
+                f"results, then it is archived again: use what you need from it now (note it or write it to a file).]\n")
         return ToolResult(text=head + text[off:off + lim] + more)
 
     @staticmethod
@@ -259,6 +277,8 @@ class TranscriptCompactor:
                 and isinstance(m.get("content"), str) and not STUB.match(m["content"]) and len(m["content"]) >= max(min_chars, 1)]
         all_tool = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
         protected = set(all_tool[-keep_out:]) if keep_out else set()
+        if for_prepare and self.recovery_keep:           # evidence the model just asked for (read_archive / search_context) is not archived again straight away
+            protected |= {i for i in all_tool[-self.recovery_keep:] if names.get(messages[i].get("tool_call_id", "")) in RECOVERY_TOOLS}
         calls = [i for i, m in enumerate(messages) if m.get("role") == "assistant" and m.get("tool_calls")]
         protected_calls = set(calls[-keep_calls:]) if keep_calls else set()
         keep = getattr(self, "_excluded", set()) if for_prepare else set()

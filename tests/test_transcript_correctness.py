@@ -56,18 +56,19 @@ def test_v2_argument_stub_says_it_is_not_content_and_the_original_stays_in_the_a
     assert c.archive.get("A0001") == doc                                                  # lossless
 
 
-def test_v2_stub_is_recognised_by_the_agent_harness_placeholder_guard():
-    ctx = pytest.importorskip("agent_harness.context")
-    if not hasattr(ctx, "placeholder_in"):
-        pytest.skip("installed agent-harness predates the placeholder guard")
+def test_both_stub_generations_are_recognised_by_the_managers_own_detector_which_the_harness_asks():
+    """The stub FORMAT is owned here. The harness no longer carries a regex for it: it asks ``is_placeholder`` (agent_harness.context.ContextAware)."""
     c = TranscriptCompactor(Archive(), policy="v2")
     msgs = convo(["r"] * 6, {0: {"content": "q" * 3000}})
     c.prepare(msgs, target_tokens=1, estimated_tokens=10**6)
-    assert ctx.placeholder_in(json.loads(msgs[2]["tool_calls"][0]["function"]["arguments"])["content"])
+    assert c.is_placeholder(json.loads(msgs[2]["tool_calls"][0]["function"]["arguments"])["content"])
     legacy = TranscriptCompactor(Archive())
     m2 = convo(["r"] * 6, {0: {"content": "q" * 3000}})
     legacy.prepare(m2, target_tokens=1, estimated_tokens=10**6)
-    assert ctx.placeholder_in(json.loads(m2[2]["tool_calls"][0]["function"]["arguments"])["content"])   # the legacy stub too
+    assert legacy.is_placeholder(json.loads(m2[2]["tool_calls"][0]["function"]["arguments"])["content"])   # the legacy stub too
+    ctx = pytest.importorskip("agent_harness.context")
+    if hasattr(ctx, "ContextAware"):
+        assert isinstance(c, ctx.ContextAware)                                         # structurally satisfies the harness's optional extension
 
 
 # -- pins ---------------------------------------------------------------------------------------------------------------
