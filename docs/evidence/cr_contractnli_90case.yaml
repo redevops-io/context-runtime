@@ -1,0 +1,13 @@
+claim_id: cr_contractnli_90case
+claim: "ContractNLI 90-case result (reported, not independently reproduced): 0.511 truncated / 0.700 naive / 0.733 closure."
+status: internally_reproduced?: UNVERIFIED - source run located in a private repository; per-case predictions were not retained; rerun planned
+code_commit: "private repository, not published (the commit is recorded internally)"
+dataset: "ContractNLI, 90 cases, 30 per gold label (Entailment, Contradiction, NotMentioned). The selection method is recorded in the private harness, not in this repository."
+protocol: "The run that produced these numbers was located in a private benchmark repository (not published). It used a 400-token context budget and the same answer model on every arm. It is not in this repository, and it has not been re-run."
+model: "gpt-4o-mini on every arm (from the private harness; not re-verified against request logs)"
+metrics: "truncated 0.511; naive 0.700; closure 0.733 (task accuracy, 90 cases). The 0.033 difference between naive and closure is 3 cases of 90. From these counts alone it cannot reach p < 0.05 under any pairing (best case, closure fixes 3 and breaks 0, exact McNemar p = 0.25). Per label: Entailment 0.600 -> 0.567 (closure lower), Contradiction 0.800 -> 0.933 (4 of 30 cases), NotMentioned 0.700 -> 0.700. No confidence interval or paired analysis exists for naive versus closure."
+baselines: "truncated context (full contract cut to the budget) and naive context (top-k by similarity); the exact definitions are in the private harness"
+reproduce: "NOT_IN_REPO. A rerun is planned that keeps per-case predictions and reports a paired bootstrap interval and McNemar test for all three arms."
+artifacts: "Per-case outputs were never kept (the harness cache was not committed), so a paired analysis cannot be computed from anything on record. Aggregate counts only."
+limitations: "Reported only. 90 cases is small. The improvement claim stays blocked: do not cite this as evidence that closure raises task accuracy until the rerun has produced per-case predictions and a paired analysis. The gain, if real, is confined to the Contradiction cases. This card exists so the number is not quoted without its caveats."
+review: "none; no external review"

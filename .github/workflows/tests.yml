@@ -1,4 +1,5 @@
 name: tests
+# The unit tests: offline, no model calls, no API keys. Installs the `test` extra so nothing is skipped for a missing optional dependency.
 on:
   push:
     branches: ["main"]
@@ -21,14 +22,12 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - name: Install
-        # Offline subset only. Extras: dev (pytest), control-plane (fastapi/httpx for
-        # test_control_plane/test_mcp), duckdb; numpy+pillow for the multimodal/multivector tests.
+        # Extras: dev (pytest, ruff), test (pytest, numpy, httpx), control-plane (fastapi/httpx for test_control_plane/test_mcp),
+        # duckdb (duckdb + sqlglot for the analytical retriever); numpy+pillow for the multimodal/multivector tests.
         # NOT installed (tests that need them are not run or skip): litellm, graphiti/hipporag,
         # redevops-rag and runtime-contracts (git extras), boto3, dagster, GPU/OCR/ASR stacks.
-        run: python -m pip install -e ".[dev,control-plane,duckdb]" numpy pillow
+        run: python -m pip install -e ".[dev,test,control-plane,duckdb]" numpy pillow
       - name: Test
-        # Verified locally with network disabled (unshare -rn) and no credentials: 556 passed,
-        # 12 skipped. Tests needing a live service are guarded by skipif on credential env vars
-        # (e.g. test_hubspot_crm::test_live_search_smoke, test_salesforce_crm::test_live_query_smoke),
-        # which are intentionally never set in CI. No docker/GPU tests are collected.
-        run: pytest -q
+        # Tests needing a live service are guarded by skipif on credential env vars, which are intentionally never set in CI.
+        # No docker/GPU tests are collected.
+        run: python -m pytest tests -q -rs
