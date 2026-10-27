@@ -31,18 +31,18 @@ model (see [ROADMAP.md](ROADMAP.md)). "Production runtime" is a **future** ROADM
 
 ## Known gaps
 
-- No CI workflow runs the test suite (only `secret-scan`). The plain `[dev]` extra is not enough to run it:
-  `numpy` and `httpx` are needed (otherwise 2 modules fail collection and 11 tests fail).
+- CI runs the unit suite (`tests.yml`, with the `dev`, `test`, `control-plane` and `duckdb` extras) and a gitleaks scan. The plain `[dev]` extra is not enough to run the suite locally:
+  `numpy` and `httpx` are needed (the `test` extra installs them).
 - No GitHub releases for most tags; not on PyPI.
 
 ## Versions
 
 | Identifier | Meaning |
 |---|---|
-| `0.1.0` | `pyproject.toml` and `context_runtime.__version__` |
-| tags `v0.1.0`, `v0.2.0`, `v0.3.0` | semver-style tags (the code still reports `0.1.0`) |
-| tags `w3`, `w4`, `w5`, `w7` | non-semver "wave" tags |
-| default branch `v4` | a branch name, not a version; unrelated to any version line |
+| `0.4.0` | `pyproject.toml` and `context_runtime.__version__` (from 2026-10-27; earlier tags carried older numbers, for example `v0.3.0` declared `0.2.0`) |
+| tags `v0.1.0` to `v0.4.0` | semver release tags; `v*` is reserved for releases. `v0.4.0` marks the merge of the `w4` line into `main` |
+| tags `w3`, `w4-snapshot-2026-07-11`, `w5`, `w7` | whitepaper tags (`w` and the whitepaper number) |
+| branch `w4` (formerly `v4`) | the whitepaper-4 line, fully merged into `main` on 2026-10-27; kept unchanged for reproducing earlier results. The default branch is `main` |
 | "v7.0" | a `git describe` string recorded in `runtime-contracts/adoption/implementations.yaml` |
 
 No tags are changed by this documentation. For reproducibility, cite a commit hash.
