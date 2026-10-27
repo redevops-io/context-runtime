@@ -1,4 +1,4 @@
-# Context Runtime — Positioning
+# Context Runtime — Overview
 
 > **Context Runtime is an efficiency optimizer for a fleet of apps.**
 >
@@ -7,7 +7,7 @@
 > config to use — the cheapest choice that still meets the goal, then learns from the
 > outcome.
 
-## The one-sentence thesis
+## Purpose
 
 Most AI systems hard-code a hundred small decisions: top_k, which model, how much to
 compress, which skill to recall, whether to rerank, how big a budget. Each is a
@@ -62,34 +62,20 @@ chooses among **discrete strategies**, redevops-rag tunes **numeric knobs**,
 edge-sentinel selects **sources/tools with side effects**, and zoning-intelligence
 does **deterministic-first spatial evidence acquisition** (geometry reconciled before
 any LLM, abstaining to `UNKNOWN` rather than risk a false conclusion). Same bandit,
-same cost-model, same wrap. That is the whole bet.
+same cost-model, same wrap.
 
-**Context Runtime *is* the control plane.** It absorbs the earlier `agentic-os` fleet-controller logic — the routing, approval/safety,
-and audit-log capabilities prototyped there now live natively in Context Runtime (agentic-os
-itself continues as the public v6 mission cockpit) (`adapters/model_litellm.py`, `tools/`,
-`observability/`). The business modules become **tenants**: each
+**Context Runtime *is* the control plane.** It supersedes the earlier `agentic-os` fleet
+controller (`agentic-os` itself continues as the Mission kernel and Projects API) — the routing, approval/safety, and audit-log capabilities prototyped there
+now live natively in Context Runtime (`adapters/model_litellm.py`, `tools/`,
+`observability/`). The business modules that the old fleet ran become **tenants**: each
 gets a goal, a metric, and a learned policy, instead of a hand-wired controller.
-
-## Why this is a more durable position
-
-- **It composes, it doesn't compete.** LangGraph/CrewAI/LlamaIndex *are* apps with
-  decision points; Context Runtime optimizes them rather than replacing them. Frameworks
-  build on top; Context Runtime sits beneath.
-- **It compounds.** Every run of every tenant produces a `(plan, outcome)` row that
-  sharpens the shared cost model. The fleet gets more efficient the more it runs —
-  the asset is the accumulated statistics, not the code.
-- **It is the fleet's control plane.** Context Runtime plans, optimizes, and learns every
-  agent's context/config decisions under one budget and one trace — the role the
-  earlier `agentic-os` controller filled, now done by a learned planner instead of
-  hand-wired routing.
 
 ## What "efficiency" concretely means
 
 Not just accuracy, and not just cost — the **frontier between them**. The reward in
 every tenant is *quality minus an efficiency penalty*, so Context Runtime converges on the
-**cheapest configuration that's still good enough**, per intent. That is the thing no
-app tunes by hand because the search space is too large and the right answer drifts —
-exactly the job a learned planner exists to do.
+**cheapest configuration that's still good enough**, per intent. The search space is too large to tune by hand and the right answer
+drifts, which is the job the learned planner takes on.
 
 Where retrieval-score **calibration** is enabled, "quality" is not the coarse per-query
 judge alone: the reward also blends the mean *calibrated* `P(relevant)` of the passages

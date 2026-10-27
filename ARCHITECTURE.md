@@ -8,8 +8,7 @@
 > *open table → scan pages → hash join → sort* with `SELECT ...`.
 >
 > That makes Context Runtime an **infrastructure layer** that higher-level frameworks
-> (LangGraph, CrewAI, LlamaIndex) build *on top of* — a far more durable position
-> than competing with them.
+> (LangGraph, CrewAI, LlamaIndex) can build *on top of*.
 
 This document is the engineering architecture. It commits to two things the
 original plan left open:
@@ -580,5 +579,5 @@ is the SQL argument made concrete.
 Not a chatbot framework, RAG library, vector DB, agent framework, prompt templater,
 or model SDK. **It is the query planner that sits *beneath* LangGraph, CrewAI,
 LlamaIndex, Haystack, and MCP** and decides how context flows through all of them —
-provider-agnostically, replayably, with `EXPLAIN`. Not a competitor to those
-frameworks; the infrastructure layer they build on.
+provider-agnostically, replayably, with `EXPLAIN`. It is the infrastructure layer
+those frameworks can build on, not a replacement for them.

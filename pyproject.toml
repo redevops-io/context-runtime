@@ -5,26 +5,33 @@ description = "Context Runtime — a database query planner for LLM context. The
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "AGPL-3.0-or-later WITH Commons-Clause" }
-# v0.1 core runs fully offline with the stub plugins — zero hard runtime deps.
+# v0.1 core runs fully offline with the stub plugins. agent-harness (tool contract, approval gate) is
+# standard-library only, so it adds no transitive dependencies. Pinned to a commit; bump deliberately.
 dependencies = [
     "pyyaml>=6.0",
+    "agent-harness @ git+https://github.com/redevops-io/agent-harness.git@6b8ba3a596a5e2caf0fdf009f2af013517591662",
 ]
 
 [project.optional-dependencies]
+# What the test suite needs beyond the base install: pytest, numpy (vector / multimodal / video tests) and httpx (the MCP client).
+# Tests that need a dependency skip when it is absent; CI installs this extra so none of them is skipped there.
+test = ["pytest>=8", "numpy>=1.24", "httpx>=0.27"]
+# The MCP client (context_runtime.tools.mcp) talks HTTP through httpx.
+mcp = ["httpx>=0.27"]
 # Real model transport across 100+ providers (the ModelPlugin binding).
 litellm = ["litellm>=1.40"]
 # Reproducible context-state views (F1) — consumes the neutral runtime-contracts types
 # (ContextView / EvidenceChange). Opt-in; importing context_runtime.context_state needs it.
 context-state = ["runtime-contracts @ git+https://github.com/redevops-io/runtime-contracts.git@v0.3.13"]
 # Single-hop hybrid retrieval (DuckDB vector + BM25 + RRF + rerank).
-rag = ["redevops-rag @ git+https://github.com/redevops-io/redevops-rag.git@v0.4.0"]
+rag = ["redevops-rag @ git+https://github.com/redevops-io/redevops-rag.git@3a6c25379b93d81124ffc80ca459ff324685f18c"]
 # Multi-hop graph retrieval (knowledge graph + Personalized PageRank).
-hipporag = ["hipporag @ git+https://github.com/redevops-io/HippoRAG.git"]
+hipporag = ["hipporag @ git+https://github.com/redevops-io/HippoRAG.git@ea601818728ad51d5841c240a43bd47a5b3f8091"]
 # Bi-temporal graph retrieval (the `temporal` method) — real Graphiti KG over Neo4j.
 # Pinned to the redevops fork for G1 source hydration (recovers the raw source turns
 # behind each lossy LLM-extracted fact); neo4j ships with graphiti-core.
 graphiti = [
-    "graphiti-core @ git+https://github.com/redevops-io/graphiti.git@redevops/g1-source-hydration",
+    "graphiti-core @ git+https://github.com/redevops-io/graphiti.git@053af50b96c5a78ac097decb88fdceb1266d8f0c",
     "sentence-transformers>=3.0",
 ]
 # Semantic (embedding) retrieval + hybrid BM25⊕semantic fusion — deterministic ONNX

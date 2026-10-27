@@ -1,0 +1,13 @@
+claim_id: cr_hetero_shards_pollution
+claim: "Coverage routing cuts cross-domain pollution 22 -> 0 docs across 8 queries with recall intact (BENCHMARKS.md)."
+status: Illustrative/synthetic
+code_commit: "6e8aa1937d8baae8f2dd84d0231e10af3b3c10e1"
+dataset: "16-note curated collision set built to maximize vocabulary overlap (examples/heterogeneous_shards.py) plus a FinanceBench corpus that is NOT_IN_REPO"
+protocol: "Documented in BENCHMARKS.md. NOT re-run on 2026-10-15: the example exits with 'FinanceBench corpus not found ... run deploy/financebench/build_corpus.py first'."
+model: "none for the retrieval measurement"
+metrics: "unknown (not re-run); documented 22 -> 0 noise docs, recall intact"
+baselines: "naive RRF fusion across all shards"
+reproduce: "Build the corpus with deploy/financebench/build_corpus.py, then PYTHONPATH=. python examples/heterogeneous_shards.py"
+artifacts: "BENCHMARKS.md; examples/heterogeneous_shards.py"
+limitations: "Not reproduced from a clean clone. The collision set is constructed to produce the effect. Small (8 queries)."
+review: "none; no external review"

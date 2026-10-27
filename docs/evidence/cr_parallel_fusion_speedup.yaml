@@ -1,0 +1,13 @@
+claim_id: cr_parallel_fusion_speedup
+claim: "Parallel sharded fusion: 5.8x faster fan-out than sequential over 6 shards."
+status: Illustrative/synthetic
+code_commit: "6e8aa1937d8baae8f2dd84d0231e10af3b3c10e1"
+dataset: "6 in-process shards with simulated I/O latency (time.sleep(SHARD_LATENCY_S))"
+protocol: "PYTHONPATH=. python examples/parallel_fusion.py; re-run 2026-10-15 printed 5.9x (parallel 50.95 ms vs sequential 300.75 ms), fused top-5 identical."
+model: "none"
+metrics: "5.9x on 2026-10-15 re-run (5.8x documented); close to the 6-shard ceiling by construction"
+baselines: "sequential fan-out in the same script"
+reproduce: "PYTHONPATH=. python examples/parallel_fusion.py"
+artifacts: "BENCHMARKS.md; examples/parallel_fusion.py"
+limitations: "The shard latency is a sleep, so the speedup approaches the shard count by construction; it shows the scheduler overlaps waits, not real-network performance. Polars not installed in the re-run (pure-Python fusion)."
+review: "none; no external review"

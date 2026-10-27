@@ -1,5 +1,14 @@
 # Changelog
 
+## Merged from the w4 line (formerly v4), 2026-10-27
+
+- Lossless transcript compaction for agent loops: `compression/transcript.py`, `compression/contract.py`, `integrations/agent_harness.py` (`ContextRuntimeManager`; offline BM25 archive search by default, `redevops-rag` optional via `use_redevops_rag=True`) and its tests (#48, #57).
+- The tool contract now comes from `agent-harness` (pinned to a commit): `tools/base.py` re-exports it (#48).
+- `[rag]` extra pinned to `redevops-rag` `3a6c253` (was the `v0.4.0` tag).
+- Test dependencies declared as the `test` extra; CI installs it and runs the whole suite; gitleaks secret scan in CI; HippoRAG and graphiti pinned to commits.
+- Docs: public-clarity pass (STATUS with a versions section, evidence cards, docs check), `docs/transcript-contract.md`.
+- Already on `main` and unchanged by this merge: the control-plane hardening of #44 and the licence of #51 (via #60).
+
 ## 0.3.x — unreleased
 
 The 0.3.x line is additive and default-serial throughout: each new path is opt-in and
