@@ -61,9 +61,9 @@ class CostOptimizer(Protocol):
     def select(self, scored: list[tuple[Candidate, PlanScore]], goal: Goal, context: str = "") -> Plan: ...
 
 
-# ──────────────────────────── governance seam (enterprise open-core) ────────────────────────────
+# ──────────────────────────── governance seam (enterprise line) ────────────────────────────
 # The optimizer optionally consults two injected providers. Both are OPTIONAL and default to None,
-# so the OSS engine runs standalone; the commercial layer (context-runtime-v3) supplies concrete
+# so the engine runs standalone; the enterprise layer (context-runtime-v3) supplies concrete
 # implementations that adapt its PolicyEngine / TrustLedger to these Protocols. The engine never
 # imports the enterprise types — it depends only on the interface, exactly like every other plugin.
 

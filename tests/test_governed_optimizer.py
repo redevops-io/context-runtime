@@ -1,6 +1,6 @@
 """The optimizer's governance seam — an injected PolicyProvider narrows the feasible space before
 cost ranking, and a TrustProvider breaks ties. Uses in-file fakes (no enterprise dependency): the
-same Protocols the commercial PolicyEngine / TrustLedger adapters satisfy.
+same Protocols the enterprise PolicyEngine / TrustLedger adapters satisfy.
 """
 from __future__ import annotations
 
