@@ -136,7 +136,7 @@ Plus **outreach-engine** (Twenty CRM), and **growth-assistant** + **agentic-priv
 reward examples shown above (`examples/<app>.py`); the rest are native realizations without a
 standalone tuner.
 
-The **enterprise line** (a separate repository that is not public) adds a commercial layer that *composes with*
+The **enterprise line** (a separate repository that is not public) adds an enterprise layer that *composes with*
 this optimizer rather than replacing it: **Policy-Constrained Planning** — provider / budget / PII /
 data-residency / mandatory-verification / human-approval predicates define the *feasible* plan set
 **before** the cost model ranks, so every execution can be proven within governance — and
@@ -275,4 +275,4 @@ pip install -e ".[dev]" numpy httpx && pytest   # the full conformance suite (te
 
 ## License
 
-**Source-available, not open source** (the wording of [LICENSE.md](LICENSE.md)): AGPL-3.0-or-later **WITH** the Commons Clause. Self-host freely, including inside a company for its own business. The Clause removes the right to *sell it*: to charge third parties for the software, for hosting it, or for services whose value derives substantially from it. Earlier versions remain available under the terms they were released with; see LICENSE.md.
+**Source-available, not open source** (the wording of [LICENSE.md](LICENSE.md)): AGPL-3.0-or-later (which includes the AGPL's network clause, section 13) **WITH** the Commons Clause. Self-host freely, including inside a company for its own business. The Clause removes the right to *sell it*: to charge third parties for the software, for hosting it, or for services whose value derives substantially from it. Earlier versions remain available under the terms they were released with; see LICENSE.md.
