@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Behaviour change (MCP):** stdio MCP servers no longer inherit the whole parent environment. `MCPClient.stdio` passes an allowlisted set of
+  variables plus the explicit `env` mapping; secrets in the parent environment do not reach the server. Servers that relied on an inherited
+  variable (for example an API key) need it in `env`, or `inherit_env=True`, or `CONTEXT_RUNTIME_MCP_INHERIT_ENV=1`. The bundled `deploy_scan` mount now passes its own `SCAN_*` settings (and `DOCKER_HOST`, `DOCKER_CONTEXT`) explicitly. See SECURITY.md.
+
 ## Merged from the w4 line (formerly v4), 2026-10-27
 
 - Lossless transcript compaction for agent loops: `compression/transcript.py`, `compression/contract.py`, `integrations/agent_harness.py` (`ContextRuntimeManager`; offline BM25 archive search by default, `redevops-rag` optional via `use_redevops_rag=True`) and its tests (#48, #57).
