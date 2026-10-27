@@ -7,4 +7,4 @@
    *Externally reproduced* or *Field validated*, plus the command that reproduces it.
 5. Security issues: [SECURITY.md](SECURITY.md), not a public issue.
 
-Contributions are under the repository [LICENSE](LICENSE).
+Contributions are under the repository licence ([LICENSE.md](LICENSE.md): AGPL-3.0-or-later with the Commons Clause).

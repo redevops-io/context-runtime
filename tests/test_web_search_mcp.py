@@ -10,6 +10,8 @@ import sys
 
 import pytest
 
+pytest.importorskip("httpx", reason="needs the optional dependency 'httpx' (pip install -e '.[test]')")
+
 from context_runtime.integrations.agent_console import AgentConsole, tool
 from context_runtime.tools.mcp import MCPClient
 

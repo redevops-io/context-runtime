@@ -11,7 +11,7 @@ model call first; optimize the *context plan*.
 ```
 v0.1 Planner split + cost scoring + knapsack + EXPLAIN  ← prove the core abstraction
 v0.2 + CP-SAT + Knowledge graph + Plan Cache             ← constrained selection + reuse
-v0.3 + Memory lifecycle + River online learning loop     ← the moat: learn from traces
+v0.3 + Memory lifecycle + River online learning loop     ← learn from traces
 v0.4 + Agent Scheduler (Execution Graph: branches/loops) ← multi-agent with contracts
 v0.5 + Policy Engine (OPA/Presidio)                       ← data-routing + approval gates
 v1.0 Production runtime                                    ← SDK, OTel, dynamic plugins, ref server
@@ -125,7 +125,7 @@ the graph informs selection; CP-SAT finds feasible plans where greedy knapsack f
 
 ---
 
-## v0.3 — Knowledge memory lifecycle + the online learning loop (the moat)
+## v0.3 — Knowledge memory lifecycle + the online learning loop
 
 **Goal:** the cost model *learns* from observed outcomes. This is where Context Runtime
 stops being a clever static planner and becomes a runtime that improves.

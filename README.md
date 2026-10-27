@@ -1,13 +1,13 @@
 # Context Runtime
 
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE) ![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB.svg) ![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8.svg) [![NVIDIA Inception](https://img.shields.io/badge/NVIDIA-Inception%20Program%20Member-76B900.svg)](https://www.nvidia.com/en-us/startups/)
+[![License: AGPL-3.0 + Commons Clause](https://img.shields.io/badge/License-AGPL--3.0%20%2B%20Commons%20Clause-blue.svg)](LICENSE.md) ![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB.svg) ![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8.svg) [![NVIDIA Inception](https://img.shields.io/badge/NVIDIA-Inception%20Program%20Member-76B900.svg)](https://www.nvidia.com/en-us/startups/)
 
 > **🚀 NVIDIA Inception Program Member** — ReDevOps is a member of the NVIDIA Inception Program, supporting startups advancing AI and accelerated computing. Membership provides access to NVIDIA technology, technical resources, and the startup ecosystem. It does not imply product endorsement by NVIDIA.
 
 **What it does.** A "query planner for LLM context": the application states a goal and a budget; the runtime
 decides what the model sees (what to retrieve, compress, route and verify), emits an inspectable, replayable
 plan (`explain`, `simulate`), and learns from the outcome. It is the *Context* part of ReDevOps Runtime: context
-selection and optimization. Thesis and positioning: [POSITIONING.md](./POSITIONING.md).
+selection and optimization. Overview: [OVERVIEW.md](./OVERVIEW.md).
 
 **Who it's for.** Engineers whose application makes recurring choices about which context, config or sources to
 use (top-k, rerank, which tools, which model tier) and has a measurable outcome to learn from.
@@ -55,7 +55,7 @@ runtime. Glossary: [agentic-os/docs/GLOSSARY.md](https://github.com/redevops-io/
 ## Docs
 
 [STATUS](./STATUS.md) · [ARCHITECTURE](./ARCHITECTURE.md) · [SPEC](./SPEC.md) · [BENCHMARKS](./BENCHMARKS.md) ·
-[ROADMAP](./ROADMAP.md) · [POSITIONING](./POSITIONING.md) · [SECURITY](./SECURITY.md) · [CONTRIBUTING](./CONTRIBUTING.md) ·
+[ROADMAP](./ROADMAP.md) · [OVERVIEW](./OVERVIEW.md) · [SECURITY](./SECURITY.md) · [CONTRIBUTING](./CONTRIBUTING.md) ·
 [CHANGELOG](./CHANGELOG.md)
 
 ---
@@ -247,3 +247,7 @@ The decision layer is thin; the substrate is reused. See:
 ```bash
 pip install -e ".[dev]" numpy httpx && pytest   # 349 collected: 338 passed, 11 skipped (2026-10-15); test_conformance.py == SPEC §10
 ```
+
+## License
+
+**Source-available, not open source** (the wording of [LICENSE.md](LICENSE.md)): AGPL-3.0-or-later **WITH** the Commons Clause. Self-host freely, including inside a company for its own business. The Clause removes the right to *sell it*: to charge third parties for the software, for hosting it, or for services whose value derives substantially from it. Earlier versions remain available under the terms they were released with; see LICENSE.md.

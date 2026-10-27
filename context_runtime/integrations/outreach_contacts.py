@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
 """Contact discovery — turn an ``AccountSignal`` (a *company* + why-now) into a **person to reach**.
 
 The signal connectors ([[signals.py]]) find *which company* and *why now*; they do NOT find the
