@@ -5,7 +5,7 @@ bundles (bandit arms) keyed by a books-question bucket and learns the cheapest r
 set that still answers the question correctly. ``examples/agentic_books.py`` drives a
 72-round offline benchmark proving Context Runtime beats a fixed full-books bundle.
 
-Licensed under AGPL-3.0 (see LICENSE).
+Licensed under AGPL-3.0-or-later with the Commons Clause (see LICENSE.md).
 """
 from __future__ import annotations
 

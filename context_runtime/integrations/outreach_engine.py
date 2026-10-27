@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
 """outreach-engine × Context Runtime — pilot-outreach tenant (Growth & Intelligence).
 
 Lands **pilot enterprise deployments** by deciding, per account, the best *outreach play* — which

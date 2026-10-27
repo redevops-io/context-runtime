@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
 """ICP scoring + the EXPLAIN-teardown message templates for outreach-engine.
 
 Who to sell the *pilot* to, how to rank the signals the connectors produce, and the actual copy to
@@ -61,7 +61,7 @@ def teardown_email(s: AccountSignal, explain_finding: str = "", planner_url: str
     body = (
         f"Hi — {hook}.\n\n"
         f"{finding}\n\n"
-        f"Context Runtime is an open-source, self-hostable query planner for LLM context — it decides "
+        f"Context Runtime is a source-available, self-hostable query planner for LLM context — it decides "
         f"what the model sees, learns which retrieval strategy wins per query, and shows its work "
         f"(EXPLAIN: {planner_url}). We benchmark v1→v2 in Python and Go.\n\n"
         f"Worth a 20-min pilot scoping call? I'll bring the full EXPLAIN of your stack.\n")
@@ -72,7 +72,7 @@ def teardown_email(s: AccountSignal, explain_finding: str = "", planner_url: str
 def teardown_linkedin(s: AccountSignal, explain_finding: str = "") -> dict:
     """A shorter LinkedIn opener (send from the founder profile for tier-1 accounts)."""
     hook = _SIGNAL_HOOK.get(s.signal, _SIGNAL_HOOK["cold"]).format(account=s.account)
-    msg = (f"{hook.capitalize()}. I ran our open-source EXPLAIN over "
+    msg = (f"{hook.capitalize()}. I ran our EXPLAIN over "
            f"{'your repo' if s.artifact else 'a public RAG path of yours'} and found something worth 3 minutes — "
            f"a calibrated, quality-routed retrieval plan changes what gets served. Open to a quick pilot chat?")
     return {"channel": "linkedin", "body": msg[:600], "account": s.account, "artifact": s.artifact}
