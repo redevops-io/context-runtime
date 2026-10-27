@@ -5,7 +5,7 @@ bundles (bandit arms) keyed by a ticket bucket and learns which bundle resolves 
 ticket at the lowest retrieval cost. ``examples/agentic_support.py`` drives a 72-round
 offline benchmark proving Context Runtime learns a better policy than a fixed bundle.
 
-Licensed under AGPL-3.0 (see LICENSE).
+Licensed under AGPL-3.0-or-later with the Commons Clause (see LICENSE.md).
 """
 from __future__ import annotations
 

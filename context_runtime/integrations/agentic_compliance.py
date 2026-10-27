@@ -5,7 +5,7 @@ bundles (bandit arms) keyed by a finding bucket and learns the cheapest evidence
 that still reaches the correct remediation. ``examples/agentic_compliance.py`` drives a
 72-round offline benchmark proving Context Runtime beats a fixed full-evidence bundle.
 
-Licensed under AGPL-3.0 (see LICENSE).
+Licensed under AGPL-3.0-or-later with the Commons Clause (see LICENSE.md).
 """
 from __future__ import annotations
 
