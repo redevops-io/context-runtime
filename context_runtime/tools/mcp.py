@@ -8,6 +8,7 @@ routed through the registry's ApprovalPolicy. Do not list tools at import time.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 from dataclasses import dataclass
@@ -17,12 +18,57 @@ import httpx
 
 from .base import ToolPlugin, ToolRegistry, ToolResult, ToolSpec
 
+_log = logging.getLogger(__name__)
+
+#: Parent environment variables a stdio MCP server receives by default: only what interpreters and common tools need to
+#: start. Credentials (API keys, tokens, passwords, cloud and database settings) are NOT in this list; pass what a server
+#: needs through the ``env`` mapping, or opt out with ``inherit_env=True``. Names are compared case-insensitively.
+SAFE_ENV_VARS = frozenset({
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LANGUAGE", "TZ", "TERM", "TMPDIR", "TEMP", "TMP",
+    "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT",
+    "PYTHONPATH", "VIRTUAL_ENV", "PYTHONUTF8", "PYTHONIOENCODING",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "NO_PROXY",
+})
+SAFE_ENV_PREFIXES = ("LC_",)
+#: Proxy settings are passed on only when the value carries no embedded credentials (no ``user:password@``).
+_PROXY_ENV_VARS = frozenset({"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"})
+#: Process-wide escape hatch that restores the old behaviour (the child inherits the whole parent environment).
+INHERIT_ENV_VAR = "CONTEXT_RUNTIME_MCP_INHERIT_ENV"
+
+
+def _truthy(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def stdio_env(
+    parent: dict[str, str] | None = None,
+    explicit: dict[str, str] | None = None,
+    inherit_env: bool = False,
+) -> dict[str, str]:
+    """The environment a stdio MCP server is started with.
+
+    Default: the allowlisted variables of ``parent`` (``os.environ`` when omitted) plus the ``explicit`` mapping, which wins.
+    With ``inherit_env`` the whole parent environment is passed on, as before.
+    """
+    parent = os.environ if parent is None else parent
+    if inherit_env:
+        out = dict(parent)
+    else:
+        out = {}
+        for key, value in parent.items():
+            name = key.upper()
+            if name in SAFE_ENV_VARS or name.startswith(SAFE_ENV_PREFIXES) or (name in _PROXY_ENV_VARS and "@" not in value):
+                out[key] = value
+    if explicit:
+        out.update({k: str(v) for k, v in explicit.items()})
+    return out
+
 
 class MCPClient:
     """Minimal JSON-RPC 2.0 MCP client.
 
     Create via classmethods:
-        MCPClient.stdio(command, env=None)
+        MCPClient.stdio(command, env=None, inherit_env=None)
         MCPClient.http(base_url, headers=None)
     """
 
@@ -35,11 +81,19 @@ class MCPClient:
         self._closed: bool = False
 
     @classmethod
-    def stdio(cls, command: list[str], env: dict[str, str] | None = None) -> MCPClient:
+    def stdio(cls, command: list[str], env: dict[str, str] | None = None, *, inherit_env: bool | None = None) -> MCPClient:
+        """Start a stdio MCP server.
+
+        The child gets an allowlisted environment (``SAFE_ENV_VARS``) plus ``env``; secrets in the parent environment do not
+        reach it. ``inherit_env=True`` passes the whole parent environment on (the previous behaviour); when ``inherit_env``
+        is None the process-wide variable ``CONTEXT_RUNTIME_MCP_INHERIT_ENV`` decides (default: off).
+        """
         self = cls()
-        env_dict = os.environ.copy()
-        if env:
-            env_dict.update({k: str(v) for k, v in env.items()})
+        if inherit_env is None:
+            inherit_env = _truthy(os.environ.get(INHERIT_ENV_VAR))
+        if inherit_env:
+            _log.warning("MCP stdio server %r starts with the full parent environment (inherit_env)", os.path.basename(command[0]))
+        env_dict = stdio_env(explicit=env, inherit_env=bool(inherit_env))
         self._stdio_proc = subprocess.Popen(
             command,
             stdin=subprocess.PIPE,
