@@ -7,6 +7,7 @@
 - `[rag]` extra pinned to `redevops-rag` `3a6c253` (was the `v0.4.0` tag).
 - Test dependencies declared as the `test` extra; CI installs it and runs the whole suite; gitleaks secret scan in CI; HippoRAG and graphiti pinned to commits.
 - Docs: public-clarity pass (STATUS with a versions section, evidence cards, docs check), `docs/transcript-contract.md`.
+- Version declared as 0.4.0 (`pyproject.toml`, `context_runtime.__version__`), matching the `v0.4.0` tag.
 - Already on `main` and unchanged by this merge: the control-plane hardening of #44 and the licence of #51 (via #60).
 
 ## 0.3.x — unreleased
