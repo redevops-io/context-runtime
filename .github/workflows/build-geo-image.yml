@@ -1,0 +1,238 @@
+name: build-geo-image
+# Builds, scans, publishes and signs the geo (geospatial / zoning-intelligence) demo image: ghcr.io/redevops-io/geo-demo
+# (Dockerfile: deploy/geo-demo/Dockerfile.aks; non-root, digest-pinned base, read-only-rootfs friendly, no datastore).
+#
+# SOURCE. The image is built from a pinned context-runtime RELEASE TAG, not from a local path or an rsync stage: a second
+# checkout of that tag is passed to the build as the named context `context_runtime_src`, and the runtime tree, the app, the
+# harvested sample and the page all come from it. On a pushed version tag the source is that tag; on a manual run it is the
+# `source_ref` input (default: the release pinned below, v0.4.1).
+#
+# THIS WORKFLOW PUBLISHES NOTHING BY ITSELF. Merging it runs nothing. It starts only
+#   * on a pushed version tag vX.Y.Z (publish = true), or
+#   * by hand (workflow_dispatch). `publish` defaults to false: the run builds the image, runs the secret/credential scan
+#     and a read-only-rootfs smoke test, then discards the image. publish=true needs a version and the run must be on `main`.
+# The signature identity is this workflow on `main` or on a `v*` tag, which is what the AKS cluster's admission policy admits.
+#
+# Convention (same as the other redevops-io image workflows): push to ghcr.io/redevops-io, cosign keyless signature by
+# DIGEST via GitHub OIDC. Added here: SBOM (buildx attestation + a cosign-attested SPDX document), SLSA provenance (buildx,
+# mode=max), a re-scan of the pushed digest before signing, and a post-sign verify.
+#
+# Tag policy: the only tag ever written is the immutable image version, vX.Y.Z or vX.Y.Z-rN (N = a wrapper revision of the
+# same source release). No :latest, no :stable, no branch or sha tags. The run refuses to overwrite an existing tag.
+# Deployments pin the DIGEST in the run summary.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Push and sign the image (must run on main)"
+        type: boolean
+        required: false
+        default: false
+      version:
+        description: "Immutable image version to publish, vX.Y.Z or vX.Y.Z-rN (required with publish=true; ignored otherwise)"
+        required: false
+        default: ""
+      source_ref:
+        description: "context-runtime release tag to build from (vX.Y.Z)"
+        required: false
+        default: "v0.4.1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-geo-image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io/redevops-io
+  IMAGE_NAME: geo-demo
+  # AKS nodes are linux/amd64.
+  PLATFORM: linux/amd64
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # only exercised when publishing; no registry login otherwise
+      id-token: write   # keyless cosign signing (GitHub OIDC), only used when publishing
+    steps:
+      - name: Plan (publish or build-only, version, source tag)
+        env:
+          EVENT: ${{ github.event_name }}
+          IN_PUBLISH: ${{ inputs.publish }}
+          IN_VERSION: ${{ inputs.version }}
+          IN_SOURCE: ${{ inputs.source_ref }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          publish=false; version=""; source="v0.4.1"
+          if [ "$EVENT" = "push" ]; then
+            publish=true; version="$REF_NAME"; source="$REF_NAME"
+          else
+            source="${IN_SOURCE:-v0.4.1}"
+            if [ "$IN_PUBLISH" = "true" ]; then
+              publish=true; version="$IN_VERSION"
+              if [ "$REF" != "refs/heads/main" ]; then
+                echo "::error::publish=true must run on main (the cluster admits signatures from main or a v* tag only); this run is on $REF"; exit 1
+              fi
+            fi
+          fi
+          if ! printf '%s' "$source" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::source_ref must be a release tag like v0.4.1 (got '$source')"; exit 1
+          fi
+          if [ "$publish" = "true" ] && ! printf '%s' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-r[0-9]+)?$'; then
+            echo "::error::version must look like v0.4.1 or v0.4.1-r1 (got '$version')"; exit 1
+          fi
+          { echo "PUBLISH=$publish"; echo "VERSION=$version"; echo "SOURCE_REF=$source"; } >> "$GITHUB_ENV"
+          echo "publish=$publish version=${version:-<none>} source=$source"
+      - uses: actions/checkout@v4
+      - name: Check out the pinned context-runtime release tag (named build context)
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.SOURCE_REF }}
+          path: src
+      - name: Record the source commit
+        run: echo "SOURCE_SHA=$(git -C src rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: The agent-harness pin in this image equals the source tag's own Dockerfile
+        run: |
+          set -euo pipefail
+          for v in AGENT_HARNESS_COMMIT AGENT_HARNESS_SHA256; do
+            a="$(grep -E "^ARG $v=" deploy/geo-demo/Dockerfile.aks | head -1)"
+            b="$(grep -E "^ARG $v=" src/Dockerfile | head -1)"
+            [ -n "$a" ] && [ "$a" = "$b" ] || { echo "::error::$v differs from the source tag's Dockerfile ('$a' vs '$b')"; exit 1; }
+          done
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Static invariants (Dockerfile, workflow)
+        run: python3 -m pip install --quiet pytest && python3 -m pytest tests/test_geo_image.py -q -p no:cacheprovider
+      - uses: docker/setup-buildx-action@v3
+
+      # 1. Build for CI only (loaded, not pushed), then scan and smoke-test the exact image that would ship.
+      - name: Build (CI image, not pushed)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/geo-demo/Dockerfile.aks
+          build-contexts: |
+            context_runtime_src=./src
+          platforms: ${{ env.PLATFORM }}
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:ci
+          provenance: false
+      - name: No secrets, credential files, deployment config or root user in the image
+        run: python3 -I deploy/geo-demo/scan_image.py "$IMAGE_NAME:ci"
+      - name: Smoke test (non-root, read-only rootfs, all capabilities dropped, deterministic output)
+        run: |
+          set -euo pipefail
+          docker run -d --name smoke --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges \
+            --user 10001:10001 "$IMAGE_NAME:ci"
+          for i in $(seq 1 45); do
+            st="$(docker inspect -f '{{.State.Health.Status}}' smoke)"
+            [ "$st" = healthy ] && break
+            [ "$(docker inspect -f '{{.State.Running}}' smoke)" = true ] || { docker logs smoke | tail -40; echo "::error::container exited"; exit 1; }
+            sleep 2
+          done
+          [ "$st" = healthy ] || { docker logs smoke | tail -40; echo "::error::not healthy (status: $st)"; exit 1; }
+          test "$(docker exec smoke id -u)" = 10001
+          if docker exec smoke sh -c 'echo x > /app/.write-test' 2>/dev/null; then echo "::error::code tree is writable"; exit 1; fi
+          docker exec -i smoke python - <<'PY'
+          import json, urllib.request
+          g = lambda p: json.load(urllib.request.urlopen("http://127.0.0.1:8098" + p))
+          a, b = g("/api/evaluate"), g("/api/evaluate")
+          assert a == b, "evaluate must be deterministic"
+          assert a["false_permits"] == 0 and a["parcels"] > 0, a["tally"]
+          sp = g("/api/spatial")
+          assert sp["point_inside_parcel"]["result"] is True and sp["point_outside_parcel"]["result"] is False
+          PY
+          echo "healthy, uid 10001, rootfs read-only, zoning evaluation deterministic with 0 false permits, point-in-polygon correct"
+      - name: Stop smoke container
+        if: always()
+        run: docker rm -f smoke >/dev/null 2>&1 || true
+
+      # 2. Publish and sign (only when publishing; the plan step validated the version and the ref).
+      - name: Log in to GHCR (publish only)
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Version tags are immutable (refuse to overwrite)
+        if: env.PUBLISH == 'true'
+        run: |
+          if docker buildx imagetools inspect "$REGISTRY/$IMAGE_NAME:$VERSION" >/dev/null 2>&1; then
+            echo "::error::$REGISTRY/$IMAGE_NAME:$VERSION already exists. Version tags are immutable: publish a new version (or a -rN revision)."
+            exit 1
+          fi
+      - name: Build and push (SBOM + SLSA provenance attestations)
+        id: push
+        if: env.PUBLISH == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/geo-demo/Dockerfile.aks
+          build-contexts: |
+            context_runtime_src=./src
+          platforms: ${{ env.PLATFORM }}
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ env.VERSION }}
+            io.redevops.context-runtime.ref=${{ env.SOURCE_REF }}
+            io.redevops.context-runtime.revision=${{ env.SOURCE_SHA }}
+          provenance: mode=max
+          sbom: true
+      - name: Re-scan the pushed digest
+        if: env.PUBLISH == 'true'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          docker pull "$REGISTRY/$IMAGE_NAME@$DIGEST"
+          python3 -I deploy/geo-demo/scan_image.py "$REGISTRY/$IMAGE_NAME@$DIGEST"
+      - name: Install cosign (publish only)
+        if: env.PUBLISH == 'true'
+        uses: sigstore/cosign-installer@v3
+      - name: Sign the image by digest (keyless)
+        if: env.PUBLISH == 'true'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "$REGISTRY/$IMAGE_NAME@$DIGEST"
+      - name: Generate the SPDX SBOM from the pushed digest
+        if: env.PUBLISH == 'true'
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Attest the SBOM (keyless)
+        if: env.PUBLISH == 'true'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign attest --yes --type spdxjson --predicate sbom.spdx.json "$REGISTRY/$IMAGE_NAME@$DIGEST"
+      - name: Verify signature and attestation as the cluster will
+        if: env.PUBLISH == 'true'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          id='^https://github.com/redevops-io/context-runtime/\.github/workflows/build-geo-image\.yml@refs/(heads/main|tags/v[0-9]+\.[0-9]+\.[0-9]+)$'
+          iss=https://token.actions.githubusercontent.com
+          cosign verify "$REGISTRY/$IMAGE_NAME@$DIGEST" --certificate-identity-regexp "$id" --certificate-oidc-issuer "$iss" >/dev/null
+          cosign verify-attestation --type spdxjson "$REGISTRY/$IMAGE_NAME@$DIGEST" --certificate-identity-regexp "$id" --certificate-oidc-issuer "$iss" >/dev/null
+          {
+            echo "### $IMAGE_NAME"
+            echo "- digest: \`$DIGEST\`"
+            echo "- version tag (immutable): \`$VERSION\`; source: context-runtime \`$SOURCE_REF\` (\`$SOURCE_SHA\`)"
+            echo "- pin in the manifest: \`$REGISTRY/$IMAGE_NAME@$DIGEST\`"
+            echo "- verify: \`cosign verify $REGISTRY/$IMAGE_NAME@$DIGEST --certificate-identity-regexp '^https://github.com/redevops-io/context-runtime/\.github/workflows/build-geo-image\.yml@' --certificate-oidc-issuer $iss\`"
+          } >> "$GITHUB_STEP_SUMMARY"
