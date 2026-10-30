@@ -31,7 +31,8 @@ its environment.
 - **Container image.** The `Dockerfile` installs `agent-harness` at the commit `pyproject.toml` pins and checks the archive's sha256; before, the image of `0.4.0` failed at
   start with `ModuleNotFoundError: agent_harness`. `deploy/proxmox-demo/Dockerfile.contextruntime` has the same fix.
 - **Deployment templates.** `deploy/librechat` and `deploy/financebench` no longer default to a known key. `deploy/proxmox-demo` requires `CONTEXT_RUNTIME_API_KEY`
-  and `CR_PUBLIC_READ_KEY`; its proxy adds the read-only tenant key to the public read and chat routes and does not forward `/librechat/ingest|judge|feedback|chat`.
+  and `CR_PUBLIC_READ_KEY`; its proxy is an allowlist: it forwards only the reader routes (below), adds the read-only tenant key, and answers every other
+  `/librechat/*` and `/v1/*` path with 404.
 
 ### MCP client
 
@@ -52,8 +53,19 @@ its environment.
    `/api/fleet` and the like. Browsers cannot add a header on their own: use a proxy or client that adds it.
 3. **LibreChat and other OpenAI-compatible clients** set the key as their endpoint `apiKey` (they send it as a Bearer token). If you serve several corpus tenants,
    give the client a tenant key bound to them in `CR_TENANT_KEYS` instead of the control-plane key, for example `CR_TENANT_KEYS="<read key>=*"`.
-4. **Public read-only front ends** (a browser panel that calls `/librechat/compare`): add a tenant key in the proxy in front of the control plane; do not ship a key in
-   page code. `deploy/proxmox-demo/Caddyfile` is an example.
+4. **Public read-only front ends** (a browser panel that calls `/librechat/compare`): put a proxy in front of the control plane that forwards only the reader routes and
+   adds a tenant key bound to the public corpora (`CR_TENANT_KEYS="<read key>=*"`); do not ship a key in page code and never give the proxy the control-plane key.
+   `deploy/proxmox-demo/Caddyfile` is an example (an allowlist; anything not listed is 404 at the proxy). What the demo needs:
+
+   | Demo feature | Route | Class | Credential the proxy adds |
+   |---|---|---|---|
+   | LibreChat model list and chat (LibreChat sends the key itself, server to server) | `GET /v1/models`, `POST /v1/chat/completions` | reader | the read key (LibreChat's endpoint `apiKey`) |
+   | Query Board panel (browser, same origin) | `POST /librechat/compare` | reader | the read key |
+   | EXPLAIN page | `POST /librechat/explain` | reader | the read key |
+   | Retrieval and policy views, image thumbnails | `POST /librechat/retrieve`, `GET /librechat/policy`, `GET /librechat/image` | reader | the read key |
+   | Learning from judge scores, explicit feedback, the self-contained chat loop | `/librechat/judge`, `/librechat/feedback`, `/librechat/chat` | admin | none: not exposed on the public demo. The shim already learns from implicit signals in `/v1/chat/completions`, so the demo's learning continues. |
+   | Corpus ingestion | `/librechat/ingest` | admin | none: never exposed through the proxy; run it directly against the control plane with the administrative key |
+   | Fleet dashboards, approvals, `/vibex/*` | admin routes | admin | none: not exposed on the public demo (they are not part of it) |
 5. **Ingestion**: set `CONTEXT_RUNTIME_CORPUS_ROOT` to the directory that holds your corpora and call `/librechat/ingest` with `{"corpus": "<directory name>"}`.
    Clients that sent an absolute path now send the path relative to the root. Corpora configured with `CR_CORPUS_DIR`, `CR_TENANTS` or `CR_SHARDS` are read at
    startup from the paths you configure and are not affected.
@@ -82,9 +94,9 @@ corpora for content you did not add.
 - Tested: the route table (every route has an access class; one public route); `503` with no key, `401` with a missing or wrong key and success with the key on every
   route; anonymous reads of the formerly open routes; unauthorised writes and approval decisions; tenant keys on the `reader` routes and refused on the `admin`
   routes; ingestion outside the corpus root, traversal, absolute paths, encoded and Windows-style separators, and symlinked files and directories; the
-  `Dockerfile` build and start on loopback (`/health` answers, a protected route is `503`, `401`, `200`); the MCP allowlist and `CONTEXT_RUNTIME_MCP_INHERIT_ENV=1`.
-- Not tested: a deployment behind your own proxy; hard links inside a corpus; a corpus directory that is modified while it is being ingested; Windows; the
-  `deploy/proxmox-demo` compose stack as a whole (its Caddyfile was validated with `caddy validate`); third-party MCP servers; timing differences of the old
+  `Dockerfile` build and start on loopback (`/health` answers, a protected route is `503`, `401`, `200`); the MCP allowlist and `CONTEXT_RUNTIME_MCP_INHERIT_ENV=1`; the demo proxy: the control plane behind the unmodified `deploy/proxmox-demo/Caddyfile` (Caddy 2.11.7) on loopback, where a client without any credential gets the model list, retrieval, comparison, explanation, policy and chat, while ingestion, judging, feedback, the chat loop and every other control-plane route are refused at the proxy, and the control plane itself answers only `/health` to a caller without a credential.
+- Not tested: a deployment behind your own proxy; the `deploy/proxmox-demo` LibreChat image (a stub stood in for it); hard links inside a corpus; a corpus directory that is modified while it is being ingested; Windows; the
+  `deploy/proxmox-demo` compose stack as a whole; third-party MCP servers; timing differences of the old
   comparison (none was measured or claimed).
 
 ## What this release does not claim

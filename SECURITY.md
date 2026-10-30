@@ -51,5 +51,5 @@ present a configured credential.
   symlink (file or directory) pointing outside itself (`404`, the same answer as for a missing corpus).
 - **Documentation routes.** `/docs`, `/redoc` and `/openapi.json` are not served.
 - **Browsers.** The dashboards cannot send a header on their own; put the control plane behind a proxy or client that adds the credential. A
-  read-only public front end can use a tenant key added by the proxy (see `deploy/proxmox-demo/Caddyfile`).
+  read-only public front end can sit behind a proxy that forwards only the `reader` routes and adds a tenant key (see `deploy/proxmox-demo/Caddyfile`; `tests/test_demo_proxy.py` runs it against the control plane with Caddy). The proxy must never hold the control-plane key.
 - Bind the service to a trusted network or to `127.0.0.1` as well; the credential is not a substitute for network placement.

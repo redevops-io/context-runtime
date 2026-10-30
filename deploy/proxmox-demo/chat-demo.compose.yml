@@ -2,7 +2,9 @@
 # Runtime control plane, fronted by one Caddy so the browser talks to a single origin
 # (chat.redevops.io). cloudflared routes chat.redevops.io → caddy:80.
 #
-#   caddy  :80   /librechat/* /v1/*  → contextruntime:8092   (Query Board + chat shim)
+#   caddy  :80   an allowlist of reader routes under /librechat/ and /v1/ → contextruntime:8092
+#                (Query Board + chat shim; Caddy adds the read-only key; everything else under those
+#                prefixes is 404 at the proxy)
 #                everything else      → librechat:3080        (the SPA)
 #
 # THREE corpus-scoped models from ONE control plane (multi-tenant, CR_TENANTS):

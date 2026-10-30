@@ -4,30 +4,31 @@
 # The Query Board panel fetches /librechat/compare and the chat hits /v1/* — both must
 # reach the CONTROL PLANE, not LibreChat. Everything else is the LibreChat SPA. Serving
 # both under one host means the panel's fetch is SAME-ORIGIN (no CORS, no 2nd subdomain).
-:80 {
-	# The control plane requires a credential on every route except /health. This public demo is
-	# read-only: the proxy adds the demo tenant key (CR_PUBLIC_READ_KEY, bound to the demo corpora
-	# only) to the read and chat routes, replacing any key the client sent, and does not forward the
-	# administrative routes at all.
-	@admin path /librechat/ingest /librechat/judge /librechat/feedback /librechat/chat
-	handle @admin {
+#
+# The control plane requires a credential on every route except GET /health. This public demo
+# is read-only, so the proxy is an ALLOWLIST: it forwards exactly the reader-class routes below,
+# adds the demo tenant key (CR_PUBLIC_READ_KEY, bound to the demo corpora only) and replaces any
+# credential the client sent. Every other /librechat/* and /v1/* path (ingest, judge, feedback,
+# chat, and anything added later) is answered 404 here, and no other control-plane route is
+# reachable: /approvals, /status, /api/fleet, /m/*, /vibex/* and the rest are not forwarded.
+# The proxy never holds CONTEXT_RUNTIME_API_KEY (the administrative key).
+#
+# The three {$...} settings have the defaults of the compose file; tests/test_demo_proxy.py sets
+# them to run this file unchanged against local processes.
+{$CR_PROXY_LISTEN::80} {
+	@reader path /librechat/retrieve /librechat/compare /librechat/explain /librechat/image /librechat/policy /v1/models /v1/chat/completions
+	handle @reader {
+		reverse_proxy {$CR_UPSTREAM:contextruntime:8092} {
+			header_up -Authorization
+			header_up X-API-Key {$CR_PUBLIC_READ_KEY}
+		}
+	}
+	@controlplane path /librechat /librechat/* /v1 /v1/*
+	handle @controlplane {
 		respond 404
-	}
-	# Context Runtime control plane: the Query Board data + the OpenAI-compatible shim.
-	handle /librechat/* {
-		reverse_proxy contextruntime:8092 {
-			header_up -Authorization
-			header_up X-API-Key {$CR_PUBLIC_READ_KEY}
-		}
-	}
-	handle /v1/* {
-		reverse_proxy contextruntime:8092 {
-			header_up -Authorization
-			header_up X-API-Key {$CR_PUBLIC_READ_KEY}
-		}
 	}
 	# Everything else → the LibreChat app (SPA + its own /api).
 	handle {
-		reverse_proxy librechat:3080
+		reverse_proxy {$LIBRECHAT_UPSTREAM:librechat:3080}
 	}
 }
