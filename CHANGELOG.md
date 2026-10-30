@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.1 — unreleased (security release; date set when tagged)
+## 0.4.1 — 2026-10-30
 
 Upgrade notes and the full list of changes: [docs/release-0.4.1.md](docs/release-0.4.1.md).
 
