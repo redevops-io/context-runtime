@@ -1,7 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 — 2026-10-30
 
+Upgrade notes and the full list of changes: [docs/release-0.4.1.md](docs/release-0.4.1.md).
+
+- **Behaviour change (control plane, authentication):** the control plane fails closed. With no `CONTEXT_RUNTIME_API_KEY` (or `AGENTIC_OS_API_KEY`) set, every route except `GET /health` answers `503`; with a key set, a missing or wrong credential is `401`. Before, the mutating routes were open when no key was set. The routes that were open with or without a key (`/approvals`, `/jobs/*`, `/status`, `/api/fleet`, `/notify/status`, `/agent/policy/*`, `/modules`, the dashboards, `/vibex/*` reads, `/librechat/retrieve|compare|explain|image|policy`, `/v1/*`) now need a credential. `GET /health` returns `{"status": "ok"}` only (no module count). `/docs`, `/redoc` and `/openapi.json` are not served. Every route has an access class (public, reader, admin); see SECURITY.md.
+- **Behaviour change (tenant keys):** the `reader` routes accept the control-plane key or a key from `CR_TENANT_KEYS`; callers without a credential no longer reach the default tenant. `CR_ALLOW_ANONYMOUS_TENANTS=1` now lets every authenticated caller use every tenant and no longer admits callers without a credential.
+- **Behaviour change (ingestion):** `POST /librechat/ingest` takes a corpus identifier (or a path relative to the root) and only indexes inside `CONTEXT_RUNTIME_CORPUS_ROOT`; with no root configured it answers `503`. Absolute paths, traversal, encoded or Windows-style separators and symlinks that leave the corpus are refused.
+- Credentials are compared with `hmac.compare_digest` (control-plane key and tenant keys).
+- `Dockerfile` (and `deploy/proxmox-demo/Dockerfile.contextruntime`): installs `agent-harness` at the commit `pyproject.toml` pins, verified by the archive's sha256, so the image starts; before, the image failed at start with `ModuleNotFoundError: agent_harness`. `tests/test_container.py` builds the image and checks 503, 401 and 200.
+- Deployment templates no longer ship a default key (`context-runtime`); the proxmox demo proxy is an allowlist of the reader routes, adds a read-only tenant key and answers every other `/librechat/*` and `/v1/*` path with 404; `tests/test_demo_proxy.py` runs it end to end with Caddy (skipped when caddy is absent).
 - **Behaviour change (MCP):** stdio MCP servers no longer inherit the whole parent environment. `MCPClient.stdio` passes an allowlisted set of
   variables plus the explicit `env` mapping; secrets in the parent environment do not reach the server. Servers that relied on an inherited
   variable (for example an API key) need it in `env`, or `inherit_env=True`, or `CONTEXT_RUNTIME_MCP_INHERIT_ENV=1`. The bundled `deploy_scan` mount now passes its own `SCAN_*` settings (and `DOCKER_HOST`, `DOCKER_CONTEXT`) explicitly. See SECURITY.md.

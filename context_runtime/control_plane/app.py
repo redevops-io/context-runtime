@@ -12,7 +12,7 @@ from pathlib import Path
 
 import httpx
 import yaml
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -22,22 +22,141 @@ from .context import Context
 from .fleet import Fleet
 from .registry import Module, Registry
 from .router import Router
-from .security import UnsafePath, allowed_tenants, env_flag, parse_tenant_keys, upstream_api_url
+from .security import (
+    Access,
+    CorpusError,
+    UnsafePath,
+    allowed_tenants,
+    authorize,
+    credential_from_headers,
+    env_flag,
+    parse_tenant_keys,
+    resolve_corpus_dir,
+    upstream_api_url,
+)
 
 CONFIG_PATH = os.environ.get("CONTEXT_RUNTIME_CONFIG") or os.environ.get("AGENTIC_OS_CONFIG", "config.yaml")
 
 
-def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
-    """Auth dependency for mutating endpoints.
+def require_api_key(request: Request) -> None:
+    """Admin dependency, kept on the mutating routes as a second check behind the access gate.
 
-    If ``AGENTIC_OS_API_KEY`` is set in the environment, every POST route requires
-    a matching ``X-API-Key`` header (401 otherwise). If it is unset, auth is
-    disabled — in that case the control plane MUST be bound to localhost only
-    (do not expose it on 0.0.0.0 without setting AGENTIC_OS_API_KEY).
+    Fails closed: with neither ``CONTEXT_RUNTIME_API_KEY`` nor ``AGENTIC_OS_API_KEY`` set the
+    answer is 503 (no access to protected operations without configured authentication); with a
+    key set, a missing or wrong ``X-API-Key`` (or ``Authorization: Bearer``) is 401.
     """
-    expected = os.environ.get("CONTEXT_RUNTIME_API_KEY") or os.environ.get("AGENTIC_OS_API_KEY")
-    if expected and x_api_key != expected:
-        raise HTTPException(401, "invalid or missing X-API-Key")
+    denied = authorize(Access.ADMIN, credential_from_headers(request.headers))
+    if denied is not None:
+        raise HTTPException(*denied)
+
+
+# ───────────────────────────── access classification ─────────────────────────────
+# Every route has exactly one access class. The AccessGate middleware below looks the matched
+# route up in this table before any handler runs; a route that is not listed is refused (fail
+# closed), and tests/test_control_plane_access.py compares the live route table with its own
+# copy of this one, so a new route cannot ship open by accident.
+#
+#   PUBLIC  no credential. Only GET /health, which answers {"status": "ok"} and nothing else.
+#   READER  the control-plane key or a tenant key from CR_TENANT_KEYS (tenant-scoped reads and chat).
+#   ADMIN   the control-plane key (CONTEXT_RUNTIME_API_KEY / AGENTIC_OS_API_KEY) only.
+#
+# With the credential a class needs not configured on the server, every caller gets 503.
+ACCESS: dict[tuple[str, str], Access] = {
+    ("GET", "/health"): Access.PUBLIC,
+    # dashboards and fleet information
+    ("GET", "/"): Access.ADMIN,
+    ("GET", "/overview"): Access.ADMIN,
+    ("GET", "/modules"): Access.ADMIN,
+    ("GET", "/status"): Access.ADMIN,
+    ("GET", "/api/fleet"): Access.ADMIN,
+    ("GET", "/notify/status"): Access.ADMIN,
+    ("GET", "/m/{name}"): Access.ADMIN,
+    ("GET", "/m/{name}/raw"): Access.ADMIN,
+    ("GET", "/m/{name}/api/{path:path}"): Access.ADMIN,
+    ("POST", "/m/{name}/api/{path:path}"): Access.ADMIN,
+    ("*", "/assets"): Access.ADMIN,
+    # control plane: lifecycle, approvals, jobs, agents, policy
+    ("POST", "/up"): Access.ADMIN,
+    ("POST", "/down"): Access.ADMIN,
+    ("GET", "/approvals"): Access.ADMIN,
+    ("POST", "/approvals/{approval_id}/{decision}"): Access.ADMIN,
+    ("POST", "/dispatch"): Access.ADMIN,
+    ("GET", "/jobs/{job_id}"): Access.ADMIN,
+    ("POST", "/agent/run"): Access.ADMIN,
+    ("POST", "/agent/outcome"): Access.ADMIN,
+    ("GET", "/agent/policy/{module}"): Access.ADMIN,
+    # video-generation planning
+    ("GET", "/vibex/criteria"): Access.ADMIN,
+    ("POST", "/vibex/scenario"): Access.ADMIN,
+    ("POST", "/vibex/plan"): Access.ADMIN,
+    ("POST", "/vibex/score"): Access.ADMIN,
+    ("GET", "/vibex/scoreboard"): Access.ADMIN,
+    # retrieval tenants: administration and learning
+    ("POST", "/librechat/ingest"): Access.ADMIN,
+    ("POST", "/librechat/judge"): Access.ADMIN,
+    ("POST", "/librechat/feedback"): Access.ADMIN,
+    ("POST", "/librechat/chat"): Access.ADMIN,
+    # retrieval tenants: reads and chat (control-plane key, or a tenant key bound to the tenant)
+    ("POST", "/librechat/retrieve"): Access.READER,
+    ("POST", "/librechat/compare"): Access.READER,
+    ("POST", "/librechat/explain"): Access.READER,
+    ("GET", "/librechat/image"): Access.READER,
+    ("GET", "/librechat/policy"): Access.READER,
+    ("GET", "/v1/models"): Access.READER,
+    ("POST", "/v1/chat/completions"): Access.READER,
+}
+_ACCESS_ORDER = {Access.PUBLIC: 0, Access.READER: 1, Access.ADMIN: 2}
+
+
+def route_access(method: str, path: str) -> Access | None:
+    """The access class of a route template, or None when it is not classified. A method that is
+    not listed for a known path (HEAD, a 405) gets the strictest class listed for that path."""
+    exact = ACCESS.get((method, path)) or ACCESS.get(("*", path))
+    if exact is not None:
+        return exact
+    same_path = [a for (_, p), a in ACCESS.items() if p == path]
+    return max(same_path, key=_ACCESS_ORDER.__getitem__) if same_path else None
+
+
+class AccessGate:
+    """Pure-ASGI gate in front of every route (mounts, documentation routes and all methods
+    included): classify the matched route, authorize the credential, and only then call the app.
+    Requests that match no route fall through to the 404 of the router."""
+
+    def __init__(self, asgi_app, fastapi_app) -> None:
+        self.app = asgi_app
+        self.fastapi_app = fastapi_app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] == "websocket":
+            await send({"type": "websocket.close", "code": 1008})
+            return
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        from starlette.responses import JSONResponse
+        from starlette.routing import Match
+        matched = None
+        for route in self.fastapi_app.router.routes:
+            match, _ = route.matches(scope)
+            if match is Match.FULL:
+                matched = route
+                break
+            if match is Match.PARTIAL and matched is None:
+                matched = route
+        if matched is None:
+            await self.app(scope, receive, send)
+            return
+        access = route_access(scope["method"], matched.path)
+        if access is None:
+            denied = (503, "route is not classified")
+        else:
+            headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
+            denied = authorize(access, credential_from_headers(headers))
+        if denied is not None:
+            await JSONResponse({"detail": denied[1]}, status_code=denied[0])(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
 
 
 def _build() -> Fleet:
@@ -53,7 +172,11 @@ def _build() -> Fleet:
     return Fleet(registry, router, ctx, home=home)   # learned policies persist under home (/data)
 
 
-app = FastAPI(title="Context Runtime control plane", version="0.1.0")
+# The generated documentation routes (/docs, /redoc, /openapi.json) would publish the route
+# inventory to anyone who can reach the port, so they are not served.
+app = FastAPI(title="Context Runtime control plane", version="0.1.0",
+              docs_url=None, redoc_url=None, openapi_url=None)
+app.add_middleware(AccessGate, fastapi_app=app)   # added before CORS so CORS wraps the gate's answers
 
 # CORS so the vibexgen web UI (a different origin) can call /vibex/* directly.
 # Configurable via CR_CORS_ORIGINS (comma-separated); defaults to the vibexgen origins.
@@ -361,7 +484,8 @@ def dashboard() -> str:
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "modules": len(fleet.registry)}
+    """Liveness only. The one unauthenticated route; it discloses nothing about the deployment."""
+    return {"status": "ok"}
 
 
 @app.get("/modules", response_model=list[ModuleList])
@@ -1336,12 +1460,7 @@ if not _TENANTS:                                    # CR_TENANTS unset ⇒ legac
 
 def _credential(request: Request) -> str | None:
     """The caller's credential: ``X-API-Key`` or an ``Authorization: Bearer`` token."""
-    key = request.headers.get("x-api-key")
-    if not key:
-        auth = request.headers.get("authorization") or ""
-        if auth.lower().startswith("bearer "):
-            key = auth[7:].strip()
-    return key or None
+    return credential_from_headers(request.headers)
 
 
 def _allowed_tenant_ids(request: Request) -> set[str]:
@@ -1376,8 +1495,9 @@ def _hits_json(hits) -> list[dict]:
 
 
 class LcIngestReq(BaseModel):
-    path: str
-    model: str | None = None   # which corpus tenant to index into (default: the default tenant)
+    corpus: str | None = None   # allowlisted corpus identifier: a directory directly under CONTEXT_RUNTIME_CORPUS_ROOT
+    path: str | None = None     # older clients: a path RELATIVE to CONTEXT_RUNTIME_CORPUS_ROOT (absolute paths are refused)
+    model: str | None = None    # which corpus tenant to index into (default: the default tenant)
 
 
 class LcRetrieveReq(BaseModel):
@@ -1393,10 +1513,16 @@ class LcJudgeReq(BaseModel):
 
 @app.post("/librechat/ingest", dependencies=[Depends(require_api_key)])
 def librechat_ingest(req: LcIngestReq, request: Request) -> dict:
-    """Index a (pre-built, normalized) corpus directory into a tenant's retriever."""
-    if not os.path.isdir(req.path):
-        raise HTTPException(400, f"not a directory: {req.path}")
-    return {"ingested": _tenant_for(req.model, request).ingest(req.path)}
+    """Index a (pre-built, normalized) corpus directory into a tenant's retriever.
+
+    Only directories inside the configured corpus root (``CONTEXT_RUNTIME_CORPUS_ROOT``) can be
+    indexed, named by identifier. With no root configured ingestion is disabled (503)."""
+    tenant = _tenant_for(req.model, request)
+    try:
+        directory = resolve_corpus_dir(req.corpus, req.path)
+    except CorpusError as e:
+        raise HTTPException(e.status, e.detail) from None
+    return {"ingested": tenant.ingest(str(directory))}
 
 
 @app.post("/librechat/retrieve")

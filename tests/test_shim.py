@@ -15,18 +15,27 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from context_runtime.control_plane.app import app  # noqa: E402
 
-client = TestClient(app)
+KEY = "shim-test-control-plane-key"
+CORPUS_ROOT = tempfile.mkdtemp(prefix="cr-shim-corpus-")
+client = TestClient(app, headers={"X-API-Key": KEY})
+
+
+@pytest.fixture(autouse=True)
+def _configured_server(monkeypatch):
+    """The control plane fails closed: the tests run against a deployment that has a key and a corpus root."""
+    monkeypatch.setenv("CONTEXT_RUNTIME_API_KEY", KEY)
+    monkeypatch.setenv("CONTEXT_RUNTIME_CORPUS_ROOT", CORPUS_ROOT)
 
 
 def _ingest_small_corpus() -> None:
-    d = tempfile.mkdtemp()
+    d = tempfile.mkdtemp(dir=CORPUS_ROOT)
     for name, text in {
         "steroid.txt": "Steroid profile: testosterone, cortisol and DHEA measured by LC-MS/MS.",
         "lipid.txt": "Lipid profile: total cholesterol, LDL, HDL and triglycerides.",
     }.items():
         with open(os.path.join(d, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    assert client.post("/librechat/ingest", json={"path": d}).status_code == 200
+    assert client.post("/librechat/ingest", json={"corpus": os.path.basename(d)}).status_code == 200
 
 
 def test_v1_models_lists_the_shim_model():
