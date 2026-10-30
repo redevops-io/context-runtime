@@ -60,9 +60,9 @@ its environment.
    | Demo feature | Route | Class | Credential the proxy adds |
    |---|---|---|---|
    | LibreChat model list and chat (LibreChat sends the key itself, server to server) | `GET /v1/models`, `POST /v1/chat/completions` | reader | the read key (LibreChat's endpoint `apiKey`) |
-   | Query Board panel (browser, same origin) | `POST /librechat/compare` | reader | the read key |
-   | EXPLAIN page | `POST /librechat/explain` | reader | the read key |
-   | Retrieval and policy views, image thumbnails | `POST /librechat/retrieve`, `GET /librechat/policy`, `GET /librechat/image` | reader | the read key |
+   | Query Board panel (browser, same origin; runs after each answer) | `POST /librechat/compare`, `POST /librechat/explain` | reader | the read key |
+   | Image thumbnails in the panel (an `<img>` request cannot send a header) | `GET /librechat/image` | reader | the read key |
+   | Retrieval and policy views | `POST /librechat/retrieve`, `GET /librechat/policy` | reader | the read key |
    | Learning from judge scores, explicit feedback, the self-contained chat loop | `/librechat/judge`, `/librechat/feedback`, `/librechat/chat` | admin | none: not exposed on the public demo. The shim already learns from implicit signals in `/v1/chat/completions`, so the demo's learning continues. |
    | Corpus ingestion | `/librechat/ingest` | admin | none: never exposed through the proxy; run it directly against the control plane with the administrative key |
    | Fleet dashboards, approvals, `/vibex/*` | admin routes | admin | none: not exposed on the public demo (they are not part of it) |
