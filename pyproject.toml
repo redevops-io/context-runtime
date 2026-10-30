@@ -1,6 +1,6 @@
 [project]
 name = "context-runtime"
-version = "0.4.0"
+version = "0.4.1"
 description = "Context Runtime — a database query planner for LLM context. The runtime decides what a model sees before it answers."
 readme = "README.md"
 requires-python = ">=3.12"

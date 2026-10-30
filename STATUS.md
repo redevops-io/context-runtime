@@ -39,8 +39,8 @@ model (see [ROADMAP.md](ROADMAP.md)). "Production runtime" is a **future** ROADM
 
 | Identifier | Meaning |
 |---|---|
-| `0.4.0` | `pyproject.toml` and `context_runtime.__version__` (from 2026-10-27; earlier tags carried older numbers, for example `v0.3.0` declared `0.2.0`) |
-| tags `v0.1.0` to `v0.4.0` | semver release tags; `v*` is reserved for releases. `v0.4.0` marks the merge of the `w4` line into `main` |
+| `0.4.1` | `pyproject.toml` and `context_runtime.__version__` (`0.4.0` from 2026-10-27; earlier tags carried older numbers, for example `v0.3.0` declared `0.2.0`) |
+| tags `v0.1.0` to `v0.4.1` | semver release tags; `v*` is reserved for releases. `v0.4.0` marks the merge of the `w4` line into `main` |
 | tags `w3`, `w4-snapshot-2026-07-11`, `w5`, `w7` | whitepaper tags (`w` and the whitepaper number) |
 | branch `w4` (formerly `v4`) | the whitepaper-4 line, fully merged into `main` on 2026-10-27; kept unchanged for reproducing earlier results. The default branch is `main` |
 | "v7.0" | a `git describe` string recorded in `runtime-contracts/adoption/implementations.yaml` |
