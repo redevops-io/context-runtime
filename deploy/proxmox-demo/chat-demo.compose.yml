@@ -24,6 +24,9 @@ services:
     restart: unless-stopped
     security_opt:
       - apparmor=docker-contextos
+    environment:
+      # The read-only credential the proxy adds to /librechat/* and /v1/* requests (see Caddyfile).
+      - CR_PUBLIC_READ_KEY=${CR_PUBLIC_READ_KEY:?set CR_PUBLIC_READ_KEY}
     ports:
       # cloudflared ingress target for chat.redevops.io (8092 is taken by erpnext on the
       # shared host, so default to 8094; override via CHAT_EDGE_PORT).
@@ -54,9 +57,13 @@ services:
       # coverage-routed heterogeneous mix. CR_CORPUS_DIR is left EMPTY so the legacy single
       # tenant is skipped and the finance tenant below is the default.
       - CR_CORPUS_DIR=
-      # Public demo: any caller may pick any of the (synthetic) demo corpora. Without this flag only the
-      # default tenant is reachable unless a credential is bound via CR_TENANT_KEYS.
-      - CR_ALLOW_ANONYMOUS_TENANTS=1
+      # The control plane fails closed: no key configured means 503 on everything but /health.
+      # CONTEXT_RUNTIME_API_KEY is the control-plane (admin) key; it is NOT given to the proxy or to LibreChat.
+      - CONTEXT_RUNTIME_API_KEY=${CONTEXT_RUNTIME_API_KEY:?set CONTEXT_RUNTIME_API_KEY}
+      # The public demo credential: a tenant key bound to every (synthetic) demo corpus. Caddy adds it to
+      # /librechat/* and /v1/* requests and LibreChat sends it as its endpoint key. It can read and chat only;
+      # ingestion, judging and feedback need the control-plane key above.
+      - CR_TENANT_KEYS=${CR_PUBLIC_READ_KEY:?set CR_PUBLIC_READ_KEY}=*
       - CR_TENANTS=context-runtime-finance=/corpus | context-runtime-medical=/medical | context-runtime-mixed=shards(finance:/corpus,medical:/medical)
       # Per-tenant cross-language retrieval (opt-in). Lists the CORPUS language(s) to translate an
       # incoming query INTO before retrieval — these corpora are English, so `=en` lets a non-English
@@ -116,7 +123,7 @@ services:
       - CREDS_IV=${CREDS_IV:?set CREDS_IV}
       # LibreChat's custom endpoint points at the control plane over the internal network.
       - CONTEXT_RUNTIME_URL=http://contextruntime:8092
-      - CONTEXT_RUNTIME_API_KEY=${CONTEXT_RUNTIME_API_KEY:-context-runtime}
+      - CONTEXT_RUNTIME_API_KEY=${CR_PUBLIC_READ_KEY:?set CR_PUBLIC_READ_KEY}
     volumes:
       - ./librechat.yaml:/app/librechat.yaml:ro
     networks: [chatdemo]

@@ -5,12 +5,26 @@
 # reach the CONTROL PLANE, not LibreChat. Everything else is the LibreChat SPA. Serving
 # both under one host means the panel's fetch is SAME-ORIGIN (no CORS, no 2nd subdomain).
 :80 {
+	# The control plane requires a credential on every route except /health. This public demo is
+	# read-only: the proxy adds the demo tenant key (CR_PUBLIC_READ_KEY, bound to the demo corpora
+	# only) to the read and chat routes, replacing any key the client sent, and does not forward the
+	# administrative routes at all.
+	@admin path /librechat/ingest /librechat/judge /librechat/feedback /librechat/chat
+	handle @admin {
+		respond 404
+	}
 	# Context Runtime control plane: the Query Board data + the OpenAI-compatible shim.
 	handle /librechat/* {
-		reverse_proxy contextruntime:8092
+		reverse_proxy contextruntime:8092 {
+			header_up -Authorization
+			header_up X-API-Key {$CR_PUBLIC_READ_KEY}
+		}
 	}
 	handle /v1/* {
-		reverse_proxy contextruntime:8092
+		reverse_proxy contextruntime:8092 {
+			header_up -Authorization
+			header_up X-API-Key {$CR_PUBLIC_READ_KEY}
+		}
 	}
 	# Everything else → the LibreChat app (SPA + its own /api).
 	handle {

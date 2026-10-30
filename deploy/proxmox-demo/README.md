@@ -63,7 +63,9 @@ docker build -t librechat-api:latest /path/to/LibreChat   # LibreQB branch check
 ```
 
 **5. Secrets.** Render `.env` from Vault (see `.env.example`): `JWT_*`, `CREDS_KEY/IV`,
-`KIMI_*`. Keep `DEMO_MODE=true`, `ALLOW_REGISTRATION=false`.
+`KIMI_*`, `CONTEXT_RUNTIME_API_KEY` (the control-plane key; keep it out of the proxy and LibreChat) and
+`CR_PUBLIC_READ_KEY` (a separate random value: the demo's read-only tenant key, used by the proxy and
+by LibreChat). Compose refuses to start without them. Keep `DEMO_MODE=true`, `ALLOW_REGISTRATION=false`.
 
 **5b. AppArmor profile (this host only).** The host runs apparmor_parser 4.1, whose
 default ABI breaks AF_UNIX socket creation under Docker's stock `docker-default`
@@ -100,8 +102,12 @@ curl -s localhost:8092/librechat/compare -H 'content-type: application/json' \
   coverage-routed mix) — no code change.
 - Tenant access is bound server-side. `CR_TENANT_KEYS="key1=tenantA,tenantB;key2=*"` maps API keys
   (`X-API-Key` or `Authorization: Bearer`) to the tenants they may use; the request `model` only selects
-  among those. Callers without a bound key get the default tenant only (403 for others), unless
-  `CR_ALLOW_ANONYMOUS_TENANTS=1` (open demo mode, set in `chat-demo.compose.yml`).
+  among those. Every route needs a credential: a tenant key works on the read and chat routes
+  (`/librechat/retrieve|compare|explain|image|policy`, `/v1/*`) for its tenants only; the control-plane key
+  (`CONTEXT_RUNTIME_API_KEY`) is required for the rest, and is treated as an unbound credential for tenant
+  selection (default tenant) unless it is also listed in `CR_TENANT_KEYS`. In this compose file the proxy
+  adds the demo tenant key (`CR_PUBLIC_READ_KEY=*`) to the public read and chat routes and does not forward
+  the administrative ones.
 - Mixed-model routing cleanliness is tunable via `CR_ROUTE_MARGIN` (default `0.15`, coverage
   router). Lower = stricter single-domain routing if a borderline query leaks.
 - **Per-tenant cross-language** (`CR_TENANT_LANGS`, opt-in): lists the CORPUS language(s) to

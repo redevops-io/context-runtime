@@ -35,8 +35,10 @@ python -m context_runtime.ingest.multimodal /path/to/files /path/to/messages --o
 
 ```bash
 pip install -e '.[control-plane]'
+# The control plane fails closed: choose a random key (for example `openssl rand -hex 24`); without one every route
+# except GET /health answers 503.
 CR_CORPUS_DIR=./corpus \
-CONTEXT_RUNTIME_API_KEY=context-runtime \
+CONTEXT_RUNTIME_API_KEY="$YOUR_RANDOM_KEY" \
 # optional: forward to a real OpenAI-compatible model instead of answering from context
 CR_UPSTREAM_BASE_URL=https://api.moonshot.ai/v1 CR_UPSTREAM_API_KEY=$KIMI_API_KEY CR_UPSTREAM_MODEL=kimi-k2.6 \
 uvicorn context_runtime.control_plane.app:app --host 0.0.0.0 --port 8091
@@ -47,12 +49,12 @@ uvicorn context_runtime.control_plane.app:app --host 0.0.0.0 --port 8091
 ```bash
 cd deploy/librechat
 CONTEXT_RUNTIME_URL=http://host.docker.internal:8091 \
-CONTEXT_RUNTIME_API_KEY=context-runtime \
+CONTEXT_RUNTIME_API_KEY="$YOUR_RANDOM_KEY" \
 docker compose up -d
 ```
 
 Open http://localhost:3080, register, pick **"Context Runtime (self-learning RAG)"**,
-and chat. Watch the policy learn: `GET http://localhost:8091/librechat/policy`.
+and chat. Watch the policy learn: `GET http://localhost:8091/librechat/policy` (send the key in `X-API-Key`).
 
 The same custom endpoint is also registered in the full fork config
 (`LibreChat/librechat.yaml`) for deploying alongside its other endpoints.
