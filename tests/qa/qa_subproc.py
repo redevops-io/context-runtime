@@ -39,8 +39,9 @@ class MutantTree:
         shutil.copytree(REPO / "context_runtime", self.root / "context_runtime",
                         ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copytree(REPO / "tests" / "qa", self.root / "tests" / "qa", ignore=shutil.ignore_patterns("__pycache__"))
-        if (REPO / "tests" / "conftest.py").exists():
-            shutil.copy(REPO / "tests" / "conftest.py", self.root / "tests" / "conftest.py")
+        for extra in ("conftest.py", "test_policy_ui_action.py"):
+            if (REPO / "tests" / extra).exists():
+                shutil.copy(REPO / "tests" / extra, self.root / "tests" / extra)
         if (REPO / "pyproject.toml").exists():
             shutil.copy(REPO / "pyproject.toml", self.root / "pyproject.toml")
 

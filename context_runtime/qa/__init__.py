@@ -13,9 +13,14 @@ from .closure import (
     node_key, resolve,
 )
 from .cost import CostModel, Estimate, bottom_levels, critical_path
+from .policy import (
+    UiActionDecision, UiActionPolicy, default_action_policy_document, default_action_policy_ref, default_action_rules,
+    default_ui_action_policy, is_local_target,
+)
 from .errors import (
     ClosureError, Code, InfeasibleBudget, PlanningRefusal, Problem, QAPlanningError, UnsupportedCoverage,
 )
+from .explain import ExplainedPlan, PlanExplanation, explain_plan, plan_with_explanation
 from .planner import (
     PLANNER_ID, PLANNER_VERSION, Candidate, CostBasedQAPlanner, PlanBudget, PlanRequest, PlanResult, QAPlanner,
     RunCaps, ScheduledItem, request_digest, require_valid_plan, verify_plan,
@@ -24,6 +29,9 @@ from .planner import (
 __all__ = [
     "Claim", "Closure", "ClosureNode", "EffectiveClaim", "Node", "NodeKind", "QAGraph", "Reason", "Ref",
     "graph_from_specs", "node_key", "resolve",
+    "UiActionDecision", "UiActionPolicy", "default_action_policy_document", "default_action_policy_ref",
+    "default_action_rules", "default_ui_action_policy", "is_local_target",
+    "ExplainedPlan", "PlanExplanation", "explain_plan", "plan_with_explanation",
     "CostModel", "Estimate", "bottom_levels", "critical_path",
     "ClosureError", "Code", "InfeasibleBudget", "PlanningRefusal", "Problem", "QAPlanningError", "UnsupportedCoverage",
     "PLANNER_ID", "PLANNER_VERSION", "Candidate", "CostBasedQAPlanner", "PlanBudget", "PlanRequest", "PlanResult",
