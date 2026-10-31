@@ -12,10 +12,20 @@ from .closure import (
     Claim, Closure, ClosureNode, EffectiveClaim, Node, NodeKind, QAGraph, Reason, Ref, graph_from_specs,
     node_key, resolve,
 )
-from .errors import ClosureError, Code, Problem, QAPlanningError
+from .cost import CostModel, Estimate, bottom_levels, critical_path
+from .errors import (
+    ClosureError, Code, InfeasibleBudget, PlanningRefusal, Problem, QAPlanningError, UnsupportedCoverage,
+)
+from .planner import (
+    PLANNER_ID, PLANNER_VERSION, Candidate, CostBasedQAPlanner, PlanBudget, PlanRequest, PlanResult, QAPlanner,
+    RunCaps, ScheduledItem, request_digest, require_valid_plan, verify_plan,
+)
 
 __all__ = [
     "Claim", "Closure", "ClosureNode", "EffectiveClaim", "Node", "NodeKind", "QAGraph", "Reason", "Ref",
     "graph_from_specs", "node_key", "resolve",
-    "ClosureError", "Code", "Problem", "QAPlanningError",
+    "CostModel", "Estimate", "bottom_levels", "critical_path",
+    "ClosureError", "Code", "InfeasibleBudget", "PlanningRefusal", "Problem", "QAPlanningError", "UnsupportedCoverage",
+    "PLANNER_ID", "PLANNER_VERSION", "Candidate", "CostBasedQAPlanner", "PlanBudget", "PlanRequest", "PlanResult",
+    "QAPlanner", "RunCaps", "ScheduledItem", "request_digest", "require_valid_plan", "verify_plan",
 ]

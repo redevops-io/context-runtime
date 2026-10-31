@@ -123,6 +123,9 @@ class Node:
             raise _invalid(subject, "a pin is a non-empty string or absent")
         if not isinstance(self.exclusive, bool):
             raise _invalid(subject, "exclusive is a boolean")
+        if self.exclusive and not _RESOURCE.match(f"{self.kind.value}:{self.id}"):
+            raise _invalid(subject, "an exclusive node is a lock named <kind>:<id>, which must be a valid resource "
+                           "name; declare an explicit exclusive Claim instead")
         reqs = tuple(sorted(set(self.requires), key=lambda r: (_sort_key(r.kind, r.id), r.pin or "", r.relation)))
         object.__setattr__(self, "requires", reqs)
         claims = tuple(sorted(self.claims, key=lambda c: c.resource))
@@ -140,7 +143,7 @@ class Node:
         out = list(self.claims)
         if self.exclusive:
             lock = f"{self.kind.value}:{self.id}"
-            if _RESOURCE.match(lock) and all(c.resource != lock for c in out):
+            if all(c.resource != lock for c in out):
                 out.append(Claim(lock, 1, True))
         return tuple(sorted(out, key=lambda c: c.resource))
 
