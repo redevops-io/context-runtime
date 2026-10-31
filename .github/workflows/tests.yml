@@ -31,3 +31,55 @@ jobs:
         # Tests needing a live service are guarded by skipif on credential env vars, which are intentionally never set in CI.
         # No docker/GPU tests are collected.
         run: python -m pytest tests -q -rs
+
+  # Mandatory QA job. It is a required check: it FAILS (never skips) when runtime-contracts cannot be fetched at the pinned
+  # revision, when the fetched revision is not the pin, when zero tests under tests/qa are collected, or when any of them is
+  # skipped (the allow-list of skips in scripts/qa_ci_gate.py is empty). No token is used: the dependency repository is public,
+  # the job has read-only permissions, and nothing is written or published.
+  qa:
+    name: qa (mandatory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      # TEMP-PIN: commit of runtime-contracts that carries the qa/v1 schemas; the same value is declared for the `qa` extra in
+      # pyproject.toml and the gate fails when the two differ. A release tag may replace the commit once one exists.
+      RUNTIME_CONTRACTS_PIN: 15a6f6cf79f22d27a920f59969dfeb2732a2d1cb
+      GIT_TERMINAL_PROMPT: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch runtime-contracts at the pinned revision (public repository, no token)
+        run: |
+          set -euo pipefail
+          dest="${RUNNER_TEMP}/runtime-contracts"
+          rm -rf "${dest}"
+          git init -q "${dest}"
+          git -C "${dest}" remote add origin https://github.com/redevops-io/runtime-contracts.git
+          if printf '%s' "${RUNTIME_CONTRACTS_PIN}" | grep -Eq '^[0-9a-f]{40}$'; then
+            git -C "${dest}" -c credential.helper= fetch --depth 1 origin "${RUNTIME_CONTRACTS_PIN}"
+            expected="${RUNTIME_CONTRACTS_PIN}"
+          else
+            git -C "${dest}" -c credential.helper= fetch --depth 1 origin "refs/tags/${RUNTIME_CONTRACTS_PIN}"
+            expected="$(git -C "${dest}" rev-parse 'FETCH_HEAD^{commit}')"
+          fi
+          git -C "${dest}" checkout -q --detach FETCH_HEAD
+          head="$(git -C "${dest}" rev-parse HEAD)"
+          if [ "${head}" != "${expected}" ]; then
+            echo "runtime-contracts HEAD ${head} is not the pin ${expected}" >&2
+            exit 1
+          fi
+          echo "runtime-contracts at ${head}"
+          echo "RUNTIME_CONTRACTS_DIR=${dest}" >> "${GITHUB_ENV}"
+      - name: Install
+        run: |
+          set -euo pipefail
+          python -m pip install "${RUNTIME_CONTRACTS_DIR}"
+          python -m pip install -e ".[test]"
+      - name: QA tests (fail on missing dependency, zero collected, or any skip)
+        run: python scripts/qa_ci_gate.py
