@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+QA planning, opt-in and additive; every existing path behaves as before. Details: [docs/qa_planning.md](docs/qa_planning.md).
+
+- New package `context_runtime.qa` (needs the `qa` extra, which installs `runtime-contracts`): dependency closure over a declared graph of tests, fixtures, environment profiles and resource claims (deterministic order, reasons per included node, typed refusals for unknown references, pin mismatches and cycles); a deterministic cost model over declared estimates; plan selection under budgets (wall time, parallelism cap, pool capacities, exclusive resources) that emits a canonical `QAPlan` with `coverage_contract = FULL` or refuses with a typed error; a planner interface; and an explanation record, hashed, attachable to the plan as `rationale_ref`.
+- Policy plane: a fail-closed `ui_action` phase (`UiActionProvider`, `Policy.decide_ui_action`). No matching rule, an unknown side-effect class, a provider error or a timeout is a deny; every decision emits a `PolicyDecision`, and `context_runtime.qa.policy` builds the canonical decision record whose hash a receipt cites. `PolicyDecision` gains an optional `ref`, omitted from `to_dict()` when empty. The other phases are unchanged.
+- CI: a new required `qa` job fetches `runtime-contracts` at the pinned revision (public repository, no token, read-only permissions), verifies the checked-out revision equals the pin, and runs `tests/qa` through `scripts/qa_ci_gate.py`, which fails (never skips) on a missing dependency, zero collected tests or any skipped test. The existing job is unchanged; `tests/conftest.py` leaves `tests/qa` out of a run only when `runtime-contracts` is absent and the run did not ask for those tests.
+- The `qa` extra pins `runtime-contracts` by commit (marked as temporary). `scripts/qa_pins.py` checks every pin declaration against `scripts/qa_pins.toml` and prepares, without applying, the move of the QA-related pins (the `qa` and `context-state` extras, the `agent-harness` dependency and the Dockerfile archive arguments) to release tags once tags exist. The existing `agent-harness` pin is unchanged.
+- Data-only boundary: Context Runtime consumes `runtime-contracts` and never imports `agent_harness.qa`; an import-boundary test enforces it.
+
 ## 0.4.1 — 2026-10-30
 
 Upgrade notes and the full list of changes: [docs/release-0.4.1.md](docs/release-0.4.1.md).

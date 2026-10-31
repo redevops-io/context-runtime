@@ -1,0 +1,18 @@
+# Pins for the QA planning code. Stdlib-only tooling reads this file: scripts/qa_pins.py.
+#
+# A commit pin is temporary (temp_pin = true): it names the exact revision the code was built against until a release tag
+# exists. Once a tag exists, `python scripts/qa_pins.py rewrite` moves every declaration to the tag and sets temp_pin to
+# false. Nothing here creates a tag or a release. See docs/qa_planning.md.
+
+[runtime-contracts]
+repository = "https://github.com/redevops-io/runtime-contracts.git"
+temp_pin = true
+commit = "15a6f6cf79f22d27a920f59969dfeb2732a2d1cb"
+tag = ""
+
+[agent-harness]
+repository = "https://github.com/redevops-io/agent-harness.git"
+temp_pin = true
+commit = "6b8ba3a596a5e2caf0fdf009f2af013517591662"
+archive_sha256 = "d67eadb33c161df00b70bad4f20c80f43d2f477031dce3259ee5d465c8844a47"
+tag = ""
