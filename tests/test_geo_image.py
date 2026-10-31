@@ -101,7 +101,9 @@ def test_tag_policy_source_checkout_and_signing():
             assert "latest" not in ln and "stable" not in ln and "github.sha" not in ln, ln
     assert "Version tags are immutable" in WF and "already exists" in WF
     assert "build-contexts: |\n            context_runtime_src=./src" in WF and WF.count("context_runtime_src=./src") == 2
-    assert "ref: refs/tags/${{ env.SOURCE_REF }}" in WF
+    # a release tag or a full commit SHA that must be an ancestor of main
+    assert 'source_full="refs/tags/$source"' in WF and "ref: ${{ env.SOURCE_REF_FULL }}" in WF
+    assert "[0-9a-f]{40}" in WF and "merge-base --is-ancestor" in WF and "not an ancestor of main" in WF
     assert "provenance: mode=max" in WF and "sbom: true" in WF
     assert 'cosign sign --yes "$REGISTRY/$IMAGE_NAME@$DIGEST"' in WF
     assert "cosign attest --yes --type spdxjson" in WF and "cosign verify-attestation" in WF

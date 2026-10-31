@@ -36,7 +36,7 @@ on:
         required: false
         default: ""
       source_ref:
-        description: "context-runtime release tag to build from (vX.Y.Z)"
+        description: "context-runtime source to build from: a release tag (vX.Y.Z) or the full 40-character commit SHA of a commit on main"
         required: false
         default: "v0.4.1"
 
@@ -83,20 +83,35 @@ jobs:
               fi
             fi
           fi
-          if ! printf '%s' "$source" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::source_ref must be a release tag like v0.4.1 (got '$source')"; exit 1
+          if printf '%s' "$source" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            source_full="refs/tags/$source"
+          elif printf '%s' "$source" | grep -Eq '^[0-9a-f]{40}$'; then
+            source_full="$source"
+          else
+            echo "::error::source_ref must be a release tag like v0.4.1 or a full 40-character commit SHA (got '$source')"; exit 1
           fi
           if [ "$publish" = "true" ] && ! printf '%s' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-r[0-9]+)?$'; then
             echo "::error::version must look like v0.4.1 or v0.4.1-r1 (got '$version')"; exit 1
           fi
-          { echo "PUBLISH=$publish"; echo "VERSION=$version"; echo "SOURCE_REF=$source"; } >> "$GITHUB_ENV"
+          { echo "PUBLISH=$publish"; echo "VERSION=$version"; echo "SOURCE_REF=$source"; echo "SOURCE_REF_FULL=$source_full"; } >> "$GITHUB_ENV"
           echo "publish=$publish version=${version:-<none>} source=$source"
       - uses: actions/checkout@v4
-      - name: Check out the pinned context-runtime release tag (named build context)
+      - name: Check out the pinned context-runtime source (a release tag or a commit on main; named build context)
         uses: actions/checkout@v4
         with:
-          ref: refs/tags/${{ env.SOURCE_REF }}
+          ref: ${{ env.SOURCE_REF_FULL }}
           path: src
+          fetch-depth: 0
+      - name: A commit source must be on main
+        run: |
+          set -euo pipefail
+          case "$SOURCE_REF" in
+            v*) ;;
+            *)
+              git -C src fetch --no-tags origin main
+              git -C src merge-base --is-ancestor "$SOURCE_REF" FETCH_HEAD \
+                || { echo "::error::source commit $SOURCE_REF is not an ancestor of main"; exit 1; } ;;
+          esac
       - name: Record the source commit
         run: echo "SOURCE_SHA=$(git -C src rev-parse HEAD)" >> "$GITHUB_ENV"
       - name: The agent-harness pin in this image equals the source tag's own Dockerfile
