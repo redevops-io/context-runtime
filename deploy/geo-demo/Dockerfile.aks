@@ -1,0 +1,59 @@
+# geo (geospatial / zoning-intelligence capability) demo image, built for Kubernetes.
+#
+# Differences from deploy/geo-demo/Dockerfile (which keeps serving the host compose file unchanged):
+#   * the SOURCE is a named build context, `context_runtime_src`: a checkout of a pinned context-runtime release tag
+#     (the workflow checks out that tag; no local path, no rsync staging as in deploy.sh). The runtime tree
+#     (context_runtime/), the demo app, the harvested sample and the page all come from that one tag, so the image is
+#     exactly that release plus this hardening wrapper. This file and healthcheck.py come from the build context proper.
+#   * the base image is pinned BY DIGEST;
+#   * non-root (uid/gid 10001); the code tree is root-owned and read-only at runtime (readOnlyRootFilesystem, PSA
+#     `restricted`); nothing is written to disk at all (no datastore), /tmp is the only scratch path;
+#   * the host AppArmor workaround (`--loop asyncio --http h11`) is NOT used: it only exists for the AppArmor 4.1
+#     socketpair() denial on that host. The default uvicorn loop is used here; smoke-tested in CI and below.
+#   * a HEALTHCHECK on /healthz; no secret, URL or credential is baked in (there is none to give: the app has no
+#     datastore and calls nothing).
+#
+# Build (the pinned source tag checked out into ./src):
+#     docker buildx build -f deploy/geo-demo/Dockerfile.aks --build-context context_runtime_src=./src \
+#       -t geo-demo:local .
+ARG PYTHON_IMAGE=python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159
+
+FROM ${PYTHON_IMAGE} AS venv
+RUN python -m venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH
+COPY --from=context_runtime_src /deploy/geo-demo/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+# context_runtime imports agent-harness (its tool contract) at import time, so the application does not start without it.
+# Pinned to the same commit as the repository's own Dockerfile and pyproject.toml, from the commit's source archive (no git in
+# this image) and verified against the archive's sha256. tests/test_geo_image.py keeps these two lines equal to the root Dockerfile.
+ARG AGENT_HARNESS_COMMIT=6b8ba3a596a5e2caf0fdf009f2af013517591662
+ARG AGENT_HARNESS_SHA256=d67eadb33c161df00b70bad4f20c80f43d2f477031dce3259ee5d465c8844a47
+RUN pip install --no-cache-dir "agent-harness @ https://github.com/redevops-io/agent-harness/archive/${AGENT_HARNESS_COMMIT}.tar.gz#sha256=${AGENT_HARNESS_SHA256}"
+
+FROM ${PYTHON_IMAGE}
+RUN groupadd --system --gid 10001 app \
+ && useradd --system --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin app
+WORKDIR /app
+COPY --from=venv /opt/venv /opt/venv
+COPY --from=context_runtime_src /context_runtime ./context_runtime
+COPY --from=context_runtime_src /deploy/geo-demo/data ./data
+COPY --from=context_runtime_src /deploy/geo-demo/static ./static
+COPY --from=context_runtime_src /deploy/geo-demo/app.py ./app.py
+COPY --from=context_runtime_src /LICENSE /LICENSE-COMMONS-CLAUSE /LICENSE.md /licenses/
+COPY deploy/geo-demo/healthcheck.py /opt/healthcheck.py
+# Bytecode is compiled once so the read-only tree imports quickly (PYTHONDONTWRITEBYTECODE is set below).
+RUN python -m compileall -q /app
+
+ENV PATH=/opt/venv/bin:$PATH \
+    PYTHONPATH=/app \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    HOME=/tmp \
+    PORT=8098
+LABEL org.opencontainers.image.title="geo-demo" \
+      org.opencontainers.image.source="https://github.com/redevops-io/context-runtime" \
+      org.opencontainers.image.vendor="RedevOps"
+EXPOSE 8098
+USER 10001:10001
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD ["python", "/opt/healthcheck.py"]
+CMD ["sh", "-c", "exec uvicorn app:app --host 0.0.0.0 --port ${PORT}"]
