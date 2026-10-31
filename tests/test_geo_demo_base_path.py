@@ -112,14 +112,33 @@ def page_urls(page: str, base: str) -> list[str]:
     return urls
 
 
+def route_paths(routes, prefix: str = ""):
+    """Every registered path, descending into included routers and mounts. A route object that has neither a path nor
+    sub-routes is reported by type, so the check fails closed instead of skipping it (newer FastAPI keeps an included
+    router as an object without a path of its own)."""
+    for r in routes:
+        path = getattr(r, "path", None)
+        if path is not None:
+            yield prefix + path
+            continue
+        sub = getattr(r, "routes", None)
+        if sub is None:
+            sub = getattr(getattr(r, "router", None), "routes", None)
+        if sub is None:
+            yield f"<unknown route object {type(r).__name__}>"
+            continue
+        yield from route_paths(sub, prefix + (getattr(r, "prefix", "") or ""))
+
+
 def check_contract(mod: types.ModuleType, base: str) -> None:
     """The prefix behaviour, stated once. Raises AssertionError on the first violation."""
     app = mod.create_app(base)
     responses: list[Resp] = []
     # no registered route (page, API, docs, health, redirect, static mount) lies outside the prefix
-    paths = [getattr(r, "path", None) for r in app.routes]
-    assert paths and all(p is not None and (p == base or p.startswith(base + "/")) for p in paths), \
-        [(type(r).__name__, getattr(r, "path", None), getattr(r, "path_format", None), getattr(r, "name", None)) for r in app.routes]
+    paths = list(route_paths(app.routes))
+    assert paths and all(isinstance(p, str) and (p == base or p.startswith(base + "/")) for p in paths), paths
+    schema_paths = list(app.openapi().get("paths", {}))          # includes the routes of included routers
+    assert schema_paths and all(p == base or p.startswith(base + "/") for p in schema_paths), schema_paths
 
     def fetch(target: str, **kw) -> Resp:
         r = get(app, target, **kw)
