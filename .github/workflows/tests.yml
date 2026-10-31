@@ -43,8 +43,10 @@ jobs:
     permissions:
       contents: read
     env:
-      # TEMP-PIN: commit of runtime-contracts that carries the qa/v1 schemas; the same value is declared for the `qa` extra in
-      # pyproject.toml and the gate fails when the two differ. A release tag may replace the commit once one exists.
+      # The runtime-contracts revision that carries the qa/v1 schemas. The same value is declared for the `qa` extra in
+      # pyproject.toml and the gate fails when the two differ. A commit pin carries the marker on the next line; a release
+      # tag may replace it (scripts/qa_pins.py).
+      # TEMP-PIN
       RUNTIME_CONTRACTS_PIN: 15a6f6cf79f22d27a920f59969dfeb2732a2d1cb
       GIT_TERMINAL_PROMPT: "0"
     steps:
@@ -81,5 +83,7 @@ jobs:
           set -euo pipefail
           python -m pip install "${RUNTIME_CONTRACTS_DIR}"
           python -m pip install -e ".[test]"
+      - name: Pin declarations are consistent (offline)
+        run: python scripts/qa_pins.py check
       - name: QA tests (fail on missing dependency, zero collected, or any skip)
         run: python scripts/qa_ci_gate.py
