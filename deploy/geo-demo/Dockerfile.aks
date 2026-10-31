@@ -10,8 +10,9 @@
 #     `restricted`); nothing is written to disk at all (no datastore), /tmp is the only scratch path;
 #   * the host AppArmor workaround (`--loop asyncio --http h11`) is NOT used: it only exists for the AppArmor 4.1
 #     socketpair() denial on that host. The default uvicorn loop is used here; smoke-tested in CI and below.
-#   * a HEALTHCHECK on /healthz; no secret, URL or credential is baked in (there is none to give: the app has no
-#     datastore and calls nothing).
+#   * a HEALTHCHECK on <PUBLIC_BASE_PATH>/healthz (healthcheck.py reads the same variable as the app; empty means
+#     /healthz); no secret, URL or credential is baked in (there is none to give: the app has no datastore and calls
+#     nothing).
 #
 # Build (the pinned source tag checked out into ./src):
 #     docker buildx build -f deploy/geo-demo/Dockerfile.aks --build-context context_runtime_src=./src \

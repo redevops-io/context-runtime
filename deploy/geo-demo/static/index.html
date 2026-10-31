@@ -57,13 +57,16 @@ fail-safe land-use resolver — over <b>real</b> parcels harvested from official
 
 <p class="sub" style="margin-top:26px">Data: parcels harvested by <b>zoning-sources-mcp</b> from official Census/ArcGIS
 sources (a cross-country sample of the full sweep). Dispositions computed live by the deterministic-first resolver;
-the geometry engine is dependency-free. <a href="/enterprise-plugins">Enterprise plugins</a> &middot;
+the geometry engine is dependency-free. <a href="__SITE_ROOT__enterprise-plugins">Enterprise plugins</a> &middot;
 <a href="https://redevops.io/architecture">architecture</a>.</p>
 
 <script>
+// BASE is the URL prefix this page is served under (empty at the root); every request is built from it.
+const BASE = __BASE_PATH_JSON__;
+const api = name => `${BASE}/api/${name}`;
 const D = m => `<span class="pill ${m}">${m}</span>`;
 async function load(){
-  const s = await (await fetch('/api/summary')).json();
+  const s = await (await fetch(api('summary'))).json();
   document.getElementById('stat').innerHTML = `
     <div><div class="n">${s.harvest.districts.toLocaleString()}</div><div class="l">districts harvested</div></div>
     <div><div class="n">${s.harvest.services.toLocaleString()}</div><div class="l">official ArcGIS services</div></div>
@@ -76,7 +79,7 @@ async function load(){
     <div class="kv"><span>fixed-thorough</span><span>+${L.vs_thorough_reward.toFixed(3)} · cost ${L.vs_thorough_cost.toFixed(2)}u</span></div>
     <div class="kv"><span>learned vs thorough</span><b class="ok">1.4× cheaper at equal correctness</b></div>`;
 
-  const e = await (await fetch('/api/evaluate')).json();
+  const e = await (await fetch(api('evaluate'))).json();
   document.getElementById('slo').innerHTML =
     `false-permits: <span class="ok">${e.false_permits}</span> across ${e.parcels} parcels × ${e.uses} uses ` +
     `&mdash; the SLO holds &nbsp; <span class="mono">${e.tally.PERMITTED} permitted · ${e.tally.PROHIBITED} prohibited · ${e.tally.UNKNOWN} unknown</span>`;
@@ -86,7 +89,7 @@ async function load(){
       <td>${D(d.RESIDENTIAL_SINGLE_FAMILY)}</td><td>${D(d.OFFICE)}</td><td>${D(d.RETAIL)}</td><td>${D(d.WAREHOUSE)}</td><td>${D(d.LIGHT_INDUSTRIAL)}</td></tr>`;
   }).join('');
 
-  const sp = await (await fetch('/api/spatial')).json();
+  const sp = await (await fetch(api('spatial'))).json();
   document.getElementById('spatial').innerHTML = `
     <div class="kv"><span>build point (60, 50) inside parcel?</span><b class="ok">${sp.point_inside_parcel.result}</b></div>
     <div class="kv"><span>build point (140, 50) inside parcel?</span><b>${sp.point_outside_parcel.result}</b></div>
