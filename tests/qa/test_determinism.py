@@ -54,3 +54,36 @@ def test_plan_and_plan_hash_are_identical_across_hash_seeds_and_locales(seed, lo
     reference = run_py(code, seed="0", locale="C")
     assert reference.splitlines()[0].startswith("rcv1:")
     assert run_py(code, seed=seed, locale=locale) == reference
+
+
+EXPLAIN_SCRIPT = """
+import sys
+sys.path.insert(0, {tests!r})
+from qa_fixtures import random_dag
+from context_runtime.qa import (CostBasedQAPlanner, CostModel, Estimate, PlanBudget, PlanRequest, RunCaps,
+                                UiActionPolicy, default_action_policy_ref, default_ui_action_policy,
+                                plan_with_explanation)
+g = random_dag(33, 50, p_edge=0.1)
+names = [f"t{{i:03d}}" for i in range(50)]
+est = CostModel({{n: Estimate(40 + (i * 53) % 300, i % 5, (i * 777) % 10001) for i, n in enumerate(names)}})
+req = PlanRequest(g, tuple(names), est, PlanBudget(max_parallel=5), RunCaps(deadline_ms=900000, max_recovery_attempts=1, recovery_ceiling=1),
+                  action_policy_ref=default_action_policy_ref())
+ex = plan_with_explanation(CostBasedQAPlanner(), req)
+print(ex.plan.plan_hash)
+print(ex.explanation.hash)
+print(default_action_policy_ref())
+up = UiActionPolicy(default_ui_action_policy(app="shop"), clock=lambda: "2026-01-01T00:00:00+00:00")
+for i, effect in enumerate(["NONE", "WRITES_INTERNAL", "WRITES_EXTERNAL", "bogus"]):
+    print(up.decide(principal=None, run_id="run-1", step_id=f"s-{{i}}", action_kind="click", side_effect=effect).decision_hash)
+"""
+
+
+@pytest.mark.parametrize("seed", ["0", "3", "99999", "random"])
+@pytest.mark.parametrize("locale", ["C", "C.UTF-8", "tr_TR.UTF-8"])
+def test_explanation_policy_reference_and_decision_hashes_are_identical_across_seeds_and_locales(seed, locale):
+    from pathlib import Path
+
+    code = EXPLAIN_SCRIPT.format(tests=str(Path(__file__).parent))
+    reference = run_py(code, seed="0", locale="C")
+    assert reference.count("rcv1:") == 7
+    assert run_py(code, seed=seed, locale=locale) == reference
