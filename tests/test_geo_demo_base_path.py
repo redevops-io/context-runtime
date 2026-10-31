@@ -118,7 +118,8 @@ def check_contract(mod: types.ModuleType, base: str) -> None:
     responses: list[Resp] = []
     # no registered route (page, API, docs, health, redirect, static mount) lies outside the prefix
     paths = [getattr(r, "path", None) for r in app.routes]
-    assert paths and all(p is not None and (p == base or p.startswith(base + "/")) for p in paths), paths
+    assert paths and all(p is not None and (p == base or p.startswith(base + "/")) for p in paths), \
+        [(type(r).__name__, getattr(r, "path", None), getattr(r, "path_format", None), getattr(r, "name", None)) for r in app.routes]
 
     def fetch(target: str, **kw) -> Resp:
         r = get(app, target, **kw)
