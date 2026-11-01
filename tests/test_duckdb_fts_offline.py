@@ -1,4 +1,4 @@
-"""The DuckDB store never downloads native code by default and falls back to in-memory BM25 visibly."""
+"""The DuckDB store never downloads native code by default and falls back, visibly, to an approximate in-memory lexical search."""
 
 from __future__ import annotations
 
@@ -54,6 +54,10 @@ class _FakeDuckDB:
         return self._conn
 
 
+def _warnings(caplog):
+    return [r for r in caplog.records if r.name == "context_runtime.duckdb" and r.levelno == logging.WARNING]
+
+
 def test_default_path_never_issues_install(monkeypatch, caplog):
     monkeypatch.delenv(store_duckdb.INSTALL_FTS_ENV, raising=False)
     monkeypatch.delenv(store_duckdb.FTS_EXTENSION_ENV, raising=False)
@@ -64,7 +68,7 @@ def test_default_path_never_issues_install(monkeypatch, caplog):
     assert not any("INSTALL" in s for s in conn.statements), conn.statements
     assert any(s == "LOAD fts" for s in conn.statements)
     assert store.fts_available is False
-    assert any("in-memory BM25" in r.getMessage() for r in caplog.records)
+    assert any("in-memory lexical fallback" in r.getMessage() for r in caplog.records)
 
 
 def test_install_is_only_attempted_when_explicitly_enabled(monkeypatch):
@@ -106,7 +110,7 @@ def test_fallback_serves_bm25_and_recency_from_the_same_rows(tmp_path, caplog):
     with caplog.at_level(logging.WARNING, logger="context_runtime.duckdb"):
         store = DuckDBStore(DOCS, fts_extension=str(missing))
     assert store.fts_available is False
-    assert sum("in-memory BM25" in r.getMessage() for r in caplog.records) == 1     # one visible line
+    assert sum("in-memory lexical fallback" in r.getMessage() for r in caplog.records) == 1     # one visible line
     hits = store.search("revenue", 5)
     assert {h.chunk_id for h in hits} == {"a::0", "c::0"}
     assert [h.chunk_id for h in store.search("anything", 2, "recency")] == ["c::0", "b::0"]
@@ -129,3 +133,84 @@ def test_engine_fts_path_when_the_extension_may_be_installed():
     store = DuckDBStore(DOCS)
     assert store.fts_available is True
     assert {h.chunk_id for h in store.search("revenue", 5)} == {"a::0", "c::0"}
+
+
+# ───────────────────────── the fallback is approximate, not the engine's BM25 (pinned) ─────────────────────────
+
+DIFF_DOCS = [
+    {"chunk_id": "a", "filename": "a", "text": "the server returned error 404 for the request", "ts": 1.0},
+    {"chunk_id": "b", "filename": "b", "text": "errors in 2024 revenue reports were corrected", "ts": 2.0},
+    {"chunk_id": "c", "filename": "c", "text": "revenue grew and revenue targets were met", "ts": 3.0},
+]
+
+
+def _ids(store, q):
+    return [h.chunk_id for h in store.search(q, 5)]
+
+
+def test_fallback_behaviour_that_differs_from_the_engine_is_pinned(tmp_path):
+    """Documented (docs/native-portability.md): the fallback does not drop stop words or digits and does not
+    stem. These assertions pin that, so the behaviour cannot change silently."""
+    fb = DuckDBStore(DIFF_DOCS, fts_extension=str(tmp_path / "absent.duckdb_extension"))
+    assert fb.fts_available is False
+    assert _ids(fb, "the") == ["a"]                  # a stop word still matches
+    assert _ids(fb, "404") == ["a"]                  # digits are tokens
+    assert _ids(fb, "2024") == ["b"]
+    assert _ids(fb, "errors") == ["b"] and _ids(fb, "error") == ["a"]    # no stemming: the two do not meet
+    top = fb.search("revenue", 2)
+    assert [h.chunk_id for h in top] == ["c", "b"]
+    assert top[0].score == pytest.approx(0.671, abs=0.01)                # the fallback's own score scale
+
+
+def test_the_warning_says_the_fallback_is_approximate(tmp_path, caplog):
+    with caplog.at_level(logging.WARNING, logger="context_runtime.duckdb"):
+        DuckDBStore(fts_extension=str(tmp_path / "absent.duckdb_extension"))
+    msg = _warnings(caplog)[0].getMessage()
+    assert "APPROXIMATE" in msg and "not score-compatible" in msg
+
+
+def test_engine_behaviour_that_differs_from_the_fallback_is_pinned(tmp_path):
+    engine = DuckDBStore(DIFF_DOCS, install_fts=True)
+    if not engine.fts_available:
+        pytest.skip("UNVERIFIED on this platform: the DuckDB fts extension could not be loaded or installed here")
+    fb = DuckDBStore(DIFF_DOCS, fts_extension=str(tmp_path / "absent.duckdb_extension"))
+    assert _ids(engine, "the") == [] and _ids(engine, "404") == [] and _ids(engine, "2024") == []   # stop word, digits
+    assert set(_ids(engine, "errors")) == {"a", "b"} == set(_ids(engine, "error"))                   # Porter stemming
+    e_top, f_top = engine.search("revenue", 1)[0], fb.search("revenue", 1)[0]
+    assert e_top.chunk_id == f_top.chunk_id == "c"
+    assert f_top.score > 1.5 * e_top.score                                  # the scales are not comparable
+
+
+# ───────────────────────── a stale snapshot must never replace a concurrent insert ─────────────────────────
+
+def test_a_search_snapshot_cannot_overwrite_a_concurrent_insert(tmp_path, monkeypatch):
+    """Forced interleaving: the reader has read the rows and is building its snapshot when a writer inserts a
+    row and resets the cache. The writer must wait for the reader (they share the lock), so the cache that is
+    left behind is never the stale one and the new row is searchable."""
+    import threading
+    from context_runtime.adapters import store_inmemory
+    store = DuckDBStore(DIFF_DOCS[:2], fts_extension=str(tmp_path / "absent.duckdb_extension"))
+    entered, release = threading.Event(), threading.Event()
+    real = store_inmemory.InMemoryStore
+
+    class Slow(real):
+        def __init__(self, *a, **k):
+            entered.set()
+            release.wait(10)                      # the rows were already read; now the writer tries to get in
+            super().__init__(*a, **k)
+
+    monkeypatch.setattr(store_inmemory, "InMemoryStore", Slow)
+    reader = threading.Thread(target=lambda: store.search("revenue", 5))
+    reader.start()
+    assert entered.wait(10)
+    writer = threading.Thread(target=lambda: store._insert(
+        [{"chunk_id": "d", "filename": "d", "text": "revenue forecast revised", "ts": 4.0}]))
+    writer.start()
+    writer.join(0.3)
+    assert writer.is_alive()                      # blocked behind the reader, not racing it
+    release.set()
+    reader.join(10)
+    writer.join(10)
+    assert not reader.is_alive() and not writer.is_alive()
+    monkeypatch.setattr(store_inmemory, "InMemoryStore", real)
+    assert "d" in _ids(store, "revenue")           # the insert is visible: no stale cache survived
