@@ -102,6 +102,40 @@ def test_every_directory_is_visited_in_place(corpus):
     assert "alpha/nested/deep.rst" in rels and "mixed/lines.md" in rels and ".hidden.md" in rels
 
 
+# ───────────────────────── duplicate names and single-file roots ─────────────────────────
+
+def test_duplicate_file_names_are_reported_once_and_the_chunk_id_format_is_unchanged(tmp_path, caplog):
+    import logging
+    root = tmp_path / "c"
+    for rel in ("x/notes.md", "y/notes.md", "z/other.md"):
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(rel, encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="context_runtime.corpus"):
+        names = [c.name for c in iter_corpus_files(root, (".md",))]
+    msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(msgs) == 1 and "x/notes.md and y/notes.md" in msgs[0] and "same chunk id" in msgs[0]
+    assert names == ["notes.md", "notes.md", "other.md"]
+    from context_runtime.adapters.store_inmemory import InMemoryStore
+    store = InMemoryStore()
+    store.index(str(root))
+    assert [d["chunk_id"] for d in store.docs] == ["notes.md::0", "notes.md::0", "other.md::0"]   # format kept
+
+
+def test_a_corpus_without_duplicate_names_logs_nothing(corpus, caplog):
+    import logging
+    with caplog.at_level(logging.WARNING, logger="context_runtime.corpus"):
+        list(iter_corpus_files(corpus))
+    assert not [r for r in caplog.records if r.levelno == logging.WARNING]
+
+
+def test_a_single_file_root_is_indexed_by_the_text_stores(corpus):
+    """Behaviour change: store.index(<file>) used to find nothing (rglob of a file is empty); it now indexes it."""
+    from context_runtime.adapters.store_inmemory import InMemoryStore
+    store = InMemoryStore()
+    assert store.index(str(corpus / "B.md")) == {"files": 1, "chunks": 1}
+    assert [d["chunk_id"] for d in store.docs] == ["B.md::0"]
+
+
 # ───────────────────────── golden outputs of the stores and sources ─────────────────────────
 
 def _digest(text: str) -> str:
