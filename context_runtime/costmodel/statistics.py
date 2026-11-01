@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ..platform_services import atomic_write
 from ..types import CostModelStatistics, FieldStatistics
 
 # the PlanScore fields we track calibration for (raw-valued ones most useful to callers)
@@ -105,7 +106,7 @@ class StatisticsStore:
             }
             for f, a in self._accum.items()
         }
-        Path(self.path).write_text(json.dumps(data, indent=2), encoding="utf-8")
+        atomic_write(self.path, json.dumps(data, indent=2))
 
     def _load(self) -> None:
         data = json.loads(Path(self.path).read_text(encoding="utf-8"))

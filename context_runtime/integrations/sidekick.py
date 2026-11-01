@@ -25,6 +25,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from ..platform_services import atomic_write, file_lock, lock_path_for
 from ..runtime.runtime import ContextRuntime
 from ..types import Goal, Plan, Trace
 from .bandit import EpsilonGreedyBandit  # shared fleet-pattern learning core (re-exported)
@@ -146,7 +147,7 @@ class ContextRuntimeSkillStore:
     def save(self, skill) -> Path:
         p = self._path(skill.name)
         data = asdict(skill) if hasattr(skill, "__dataclass_fields__") else dict(skill)
-        p.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        atomic_write(p, json.dumps(data, indent=2))
         self.reindex()
         return p
 
@@ -163,9 +164,10 @@ class ContextRuntimeSkillStore:
         p = self._path(name)
         if p.exists():
             try:
-                d = json.loads(p.read_text(encoding="utf-8"))
-                d["uses"] = int(d.get("uses", 0)) + 1
-                p.write_text(json.dumps(d, indent=2), encoding="utf-8")
+                with file_lock(lock_path_for(p)):      # read-modify-write of one skill file
+                    d = json.loads(p.read_text(encoding="utf-8"))
+                    d["uses"] = int(d.get("uses", 0)) + 1
+                    atomic_write(p, json.dumps(d, indent=2))
             except (json.JSONDecodeError, OSError):
                 pass
 

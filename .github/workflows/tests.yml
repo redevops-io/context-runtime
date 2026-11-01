@@ -34,6 +34,10 @@ jobs:
         # Tests needing a live service are guarded by skipif on credential env vars, which are intentionally never set in CI.
         # No docker/GPU tests are collected. -X warn_default_encoding + the pytest filterwarnings turn an implicit
         # locale encoding in our own code into an error.
+        env:
+          # The one deliberate network use: let the DuckDB store INSTALL its fts extension once, so the engine
+          # BM25 path is exercised on this OS. Without it the store falls back to in-memory BM25 (also tested).
+          CONTEXT_RUNTIME_DUCKDB_INSTALL_FTS: "1"
         run: python -X warn_default_encoding -m pytest tests -q -rs
 
   # Native-OS lanes: the same suite and install recipe as the Ubuntu job, on GitHub-hosted Windows and
@@ -53,6 +57,10 @@ jobs:
       - name: Install
         run: python -m pip install -e ".[dev,test,control-plane,duckdb]" numpy pillow
       - name: Test
+        env:
+          # The one deliberate network use: let the DuckDB store INSTALL its fts extension once, so the engine
+          # BM25 path is exercised on this OS. Without it the store falls back to in-memory BM25 (also tested).
+          CONTEXT_RUNTIME_DUCKDB_INSTALL_FTS: "1"
         run: python -X warn_default_encoding -m pytest tests -q -rs
 
   pytest-macos:
@@ -69,4 +77,8 @@ jobs:
       - name: Install
         run: python -m pip install -e ".[dev,test,control-plane,duckdb]" numpy pillow
       - name: Test
+        env:
+          # The one deliberate network use: let the DuckDB store INSTALL its fts extension once, so the engine
+          # BM25 path is exercised on this OS. Without it the store falls back to in-memory BM25 (also tested).
+          CONTEXT_RUNTIME_DUCKDB_INSTALL_FTS: "1"
         run: python -X warn_default_encoding -m pytest tests -q -rs

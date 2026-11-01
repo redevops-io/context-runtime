@@ -17,6 +17,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from ..platform_services import config_file, ensure_private_dir, state_dir
 from . import channels, views
 from .context import Context
 from .fleet import Fleet
@@ -35,7 +36,7 @@ from .security import (
     upstream_api_url,
 )
 
-CONFIG_PATH = os.environ.get("CONTEXT_RUNTIME_CONFIG") or os.environ.get("AGENTIC_OS_CONFIG", "config.yaml")
+CONFIG_PATH = str(config_file())
 
 
 def require_api_key(request: Request) -> None:
@@ -167,7 +168,7 @@ def _build() -> Fleet:
     router = Router.from_config(cfg.get("router", {"tiers": []}))
     # Hermes 0.17 chat notifier — no-op until a Telegram/Slack token is configured.
     notifier = channels.Notifier()
-    home = os.environ.get("CONTEXT_RUNTIME_HOME") or os.environ.get("AGENTIC_OS_HOME", ".context-runtime")
+    home = ensure_private_dir(state_dir())
     ctx = Context(home, notifier=notifier)
     return Fleet(registry, router, ctx, home=home)   # learned policies persist under home (/data)
 

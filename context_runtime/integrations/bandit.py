@@ -108,13 +108,9 @@ class EpsilonGreedyBandit:
     def _write_snapshot(self, data: str) -> None:
         """Atomically write an already-serialized stats snapshot. Serialized by its own
         lock (not the stats lock) so persistence I/O stays off the learning hot path."""
-        import os
+        from ..platform_services import atomic_write
         with self._save_lock:
-            os.makedirs(os.path.dirname(self.persist_path) or ".", exist_ok=True)
-            tmp = self.persist_path + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                f.write(data)
-            os.replace(tmp, self.persist_path)   # atomic
+            atomic_write(self.persist_path, data)
 
     def policy(self) -> dict[str, str]:
         """Current best arm key per context — the learned policy, for inspection."""

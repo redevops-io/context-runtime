@@ -16,9 +16,10 @@ count, k) bucketed coarsely so the table stays tiny.
 from __future__ import annotations
 
 import json
-import os
 import threading
 from pathlib import Path
+
+from ..platform_services import atomic_write
 
 
 def _bucket(size: int) -> int:
@@ -81,11 +82,7 @@ class CostProfile:
     # ── persistence ──
     def _save_locked(self) -> None:
         assert self.path is not None
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = str(self.path) + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(self._cells, f)
-        os.replace(tmp, self.path)
+        atomic_write(self.path, json.dumps(self._cells))
 
     def _load(self) -> None:
         try:
