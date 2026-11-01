@@ -12,19 +12,21 @@ from __future__ import annotations
 from pathlib import Path
 
 from .. import jsonio
+from ..platform_services import locked_append
 from ..types import Trace
 
 
 class JsonlExporter:
-    """Append each trace as one JSON line — zero deps, always available."""
+    """Append each trace as one JSON line — zero deps, always available. Safe for concurrent threads and
+    processes: each line is appended under an inter-process lock (a bare append can lose lines on Windows)."""
 
     def __init__(self, path: str = ".context_runtime/traces.jsonl"):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def export(self, trace: Trace) -> None:
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(jsonio.dumps(trace) + "\n")
+        # one write, explicit newline; not fsync-ed per trace (diagnostic data)
+        locked_append(self.path, jsonio.dumps(trace) + "\n", durable=False)
 
 
 class MultiExporter:

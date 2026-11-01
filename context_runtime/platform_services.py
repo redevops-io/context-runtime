@@ -381,17 +381,26 @@ def atomic_write(path: str | os.PathLike[str], data: str | bytes, *, encoding: s
 
 
 def locked_append(path: str | os.PathLike[str], text: str, *, encoding: str = "utf-8",
-                  timeout: float = 10.0, mode: int | None = None) -> None:
-    """Append ``text`` to ``path`` under :func:`file_lock` as one write, flushed and ``fsync``-ed, so lines
-    from concurrent processes are never interleaved."""
+                  timeout: float = 10.0, mode: int | None = None, durable: bool = True) -> None:
+    """Append ``text`` to ``path`` under :func:`file_lock` as one write, so lines from concurrent threads and
+    processes are never lost or interleaved.
+
+    A bare ``open(path, "a")`` is not enough on Windows: the C runtime implements append as "seek to the end, then
+    write", so two writers that seek before either writes overwrite each other's line (observed: lines lost in
+    nearly every barrier-released round of three threads on a Windows runner; none on Linux or macOS). The lock
+    makes the seek and the write one critical section on every platform. ``text`` is written as given (end it with
+    ``"\n"`` for a line-oriented log) in a single ``write`` call, flushed, and ``fsync``-ed unless
+    ``durable=False`` (for diagnostic logs where losing the last line in a crash is acceptable).
+    """
     target = Path(path)
     ensure_private_dir(target.parent)
-    with file_lock(lock_path_for(target), timeout=timeout):
+    with file_lock(lock_path_for(target), timeout=timeout, poll=0.005):
         existed = target.exists()
         with open(target, "ab") as fh:
             fh.write(text.encode(encoding))
             fh.flush()
-            os.fsync(fh.fileno())
+            if durable:
+                os.fsync(fh.fileno())
         if not existed and os.name == "posix":
             with contextlib.suppress(OSError):
                 os.chmod(target, default_file_mode() if mode is None else mode)
