@@ -23,6 +23,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from ..platform_services import atomic_write, ensure_private_dir, locked_append, state_path
+
+
+def _radar_path(*parts: str) -> Path:
+    """market-radar state: ``/data/market-radar`` in a container (as before), else under the state directory."""
+    return state_path("market-radar", *parts,
+                      container_default=str(Path("/data/market-radar").joinpath(*parts)))
+
+
 # ── signals ───────────────────────────────────────────────────────────────────────────────────────
 # A company hiring for these builds AI in-house → a lead.
 _AI_ROLE = re.compile(
@@ -119,7 +128,7 @@ class ProfileStore:
     template; everyone else gets a blank-target profile they configure via chat."""
 
     def __init__(self, dir: str | None = None, owner: str | None = None):
-        self.dir = dir or os.getenv("LEAD_PROFILE_DIR", "/data/market-radar/profiles")
+        self.dir = dir or os.getenv("LEAD_PROFILE_DIR") or str(_radar_path("profiles"))
         self.owner = (owner or os.getenv("LEAD_OWNER_USER", "alex")).strip()
 
     def _path(self, user: str):
@@ -142,11 +151,7 @@ class ProfileStore:
         return self.default_for(user)
 
     def save(self, profile: LeadProfile) -> None:
-        p = self._path(profile.user)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = str(p) + ".tmp"
-        Path(tmp).write_text(json.dumps(profile.to_dict(), indent=2), encoding="utf-8")
-        os.replace(tmp, p)
+        atomic_write(self._path(profile.user), json.dumps(profile.to_dict(), indent=2))
 
 
 def classify_for(listing: JobListing, profile: LeadProfile) -> Classification:
@@ -236,7 +241,7 @@ class PitchTemplate:
     one. Placeholders: ``{title}``, ``{company}``, ``{match}`` (the listing-tailored paragraph)."""
 
     def __init__(self, path: str | None = None):
-        self.path = path or os.getenv("PITCH_TEMPLATE_PATH", "/data/market-radar/pitch_template.txt")
+        self.path = path or os.getenv("PITCH_TEMPLATE_PATH") or str(_radar_path("pitch_template.txt"))
 
     def load(self) -> str:
         p = Path(self.path)
@@ -248,11 +253,7 @@ class PitchTemplate:
         return DEFAULT_TEMPLATE
 
     def save(self, text: str) -> None:
-        p = Path(self.path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = str(p) + ".tmp"
-        Path(tmp).write_text(text, encoding="utf-8")
-        os.replace(tmp, self.path)     # atomic; all users see the update
+        atomic_write(self.path, text)     # atomic; all users see the update
 
     def reset(self) -> None:
         self.save(DEFAULT_TEMPLATE)
@@ -303,7 +304,7 @@ class OutreachLedger:
     reappears months later is not re-pitched."""
 
     def __init__(self, path: str | None = None, window_days: int = 3650):
-        self.path = path or os.getenv("OUTREACH_LEDGER_PATH", "/data/market-radar/outreach_ledger.jsonl")
+        self.path = path or os.getenv("OUTREACH_LEDGER_PATH") or str(_radar_path("outreach_ledger.jsonl"))
         self.window_s = window_days * 86400
         self._seen: dict[str, float] = {}
         self._urls: dict[str, float] = {}
@@ -334,11 +335,9 @@ class OutreachLedger:
         self._seen[listing.key()] = at
         if listing.url:
             self._urls[listing.url] = at
-        p = Path(self.path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.path, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"key": listing.key(), "url": listing.url, "company": listing.company,
-                                "title": listing.title, "channel": channel, "at": at}) + "\n")
+        locked_append(self.path, json.dumps({"key": listing.key(), "url": listing.url,
+                                             "company": listing.company, "title": listing.title,
+                                             "channel": channel, "at": at}) + "\n")
 
 
 # ── sourcing (pluggable) ───────────────────────────────────────────────────────────────────────────
@@ -443,15 +442,13 @@ class DraftDistributor:
     SMTP/CRM sender is a deployment concern behind explicit approval; this never sends on its own."""
 
     def __init__(self, outbox: str | None = None):
-        self.outbox = outbox or os.getenv("OUTREACH_OUTBOX", "/data/market-radar/outbox")
+        self.outbox = outbox or os.getenv("OUTREACH_OUTBOX") or str(_radar_path("outbox"))
 
     def send(self, listing: JobListing, pitch: dict, *, to: str = "") -> dict:
-        p = Path(self.outbox)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.mkdir(parents=True, exist_ok=True)
+        p = ensure_private_dir(self.outbox)
         fname = re.sub(r"[^a-z0-9]+", "-", listing.key().replace("|", "-")).strip("-") + ".txt"
         doc = (f"To: {to or '(find via ' + (listing.url or 'company site') + ')'}\n"
                f"Subject: {pitch['subject']}\n"
                f"Attach: {pitch['attach'] or '(none)'}\n\n{pitch['body']}\n")
-        (p / fname).write_text(doc, encoding="utf-8")
+        atomic_write(p / fname, doc)
         return {"mode": "draft", "path": str(p / fname), "subject": pitch["subject"], "attach": pitch["attach"]}

@@ -14,6 +14,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..platform_services import atomic_write, file_lock, lock_path_for, state_path
+
 
 @dataclass
 class Rule:
@@ -52,7 +54,8 @@ class RuleStore:
     ``<app>/users/<user>.jsonl``."""
 
     def __init__(self, dir: str | None = None):
-        self.dir = dir or os.getenv("POLICY_DIR", "/data/context-runtime/policy")
+        self.dir = dir or os.getenv("POLICY_DIR") or str(
+            state_path("policy", container_default="/data/context-runtime/policy"))
 
     # ── scope → file ──
     def _path(self, scope: str) -> Path:
@@ -78,22 +81,22 @@ class RuleStore:
         return out
 
     def _write(self, scope: str, rules: list[Rule]) -> None:
-        p = self._path(scope)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = str(p) + ".tmp"
-        Path(tmp).write_text("".join(json.dumps(r.to_dict()) + "\n" for r in rules), encoding="utf-8")
-        os.replace(tmp, p)
+        atomic_write(self._path(scope), "".join(json.dumps(r.to_dict()) + "\n" for r in rules))
+
+    def _locked(self, scope: str):
+        """Inter-process lock around a read-modify-write of one scope file."""
+        return file_lock(lock_path_for(self._path(scope)))
 
     # ── CRUD ──
     def add(self, scope: str, kind: str, text: str, *, action: str = "deny", match: dict | None = None,
             meta: dict | None = None, created_by: str = "") -> Rule:
-        rules = self._read(scope)
         rid = rule_id(scope, kind, text)
-        rules = [r for r in rules if r.id != rid]        # idempotent by content
         rule = Rule(id=rid, scope=scope, kind=kind, text=text, action=action, match=match or {},
                     meta=meta or {}, created_by=created_by, at=time.time())
-        rules.append(rule)
-        self._write(scope, rules)
+        with self._locked(scope):
+            rules = [r for r in self._read(scope) if r.id != rid]   # idempotent by content
+            rules.append(rule)
+            self._write(scope, rules)
         return rule
 
     def list(self, *, scope: str | None = None, kind: str | None = None) -> list[Rule]:
@@ -104,28 +107,30 @@ class RuleStore:
         return next((r for r in self.list(scope=scope) if r.id == rule_id), None)
 
     def remove(self, rule_id: str, *, scope: str) -> bool:
-        rules = self._read(scope)
-        kept = [r for r in rules if r.id != rule_id]
-        if len(kept) == len(rules):
-            return False
-        self._write(scope, kept)
-        return True
+        with self._locked(scope):
+            rules = self._read(scope)
+            kept = [r for r in rules if r.id != rule_id]
+            if len(kept) == len(rules):
+                return False
+            self._write(scope, kept)
+            return True
 
     def modify(self, rule_id: str, *, scope: str, text: str | None = None, action: str | None = None,
                match: dict | None = None) -> Rule | None:
-        rules = self._read(scope)
-        for i, r in enumerate(rules):
-            if r.id == rule_id:
-                if text is not None:
-                    r.text = text
-                if action is not None:
-                    r.action = action
-                if match is not None:
-                    r.match = match
-                rules[i] = r
-                self._write(scope, rules)
-                return r
-        return None
+        with self._locked(scope):
+            rules = self._read(scope)
+            for i, r in enumerate(rules):
+                if r.id == rule_id:
+                    if text is not None:
+                        r.text = text
+                    if action is not None:
+                        r.action = action
+                    if match is not None:
+                        r.match = match
+                    rules[i] = r
+                    self._write(scope, rules)
+                    return r
+            return None
 
     def _all(self) -> list[Rule]:
         base = Path(self.dir)

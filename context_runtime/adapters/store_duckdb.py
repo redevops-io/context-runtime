@@ -16,9 +16,21 @@ chat-memory recall modes all sit on one DuckDB file.
 """
 from __future__ import annotations
 
+import logging
+import os
 from pathlib import Path
 
 from ..types import Hit, PluginInfo
+
+_log = logging.getLogger("context_runtime.duckdb")
+
+#: Absolute path of a pre-provisioned ``fts.duckdb_extension`` (for example one shipped with an installer).
+FTS_EXTENSION_ENV = "CONTEXT_RUNTIME_DUCKDB_FTS_EXTENSION"
+#: A directory holding pre-provisioned extensions (DuckDB's ``extension_directory`` layout).
+EXTENSION_DIR_ENV = "CONTEXT_RUNTIME_DUCKDB_EXTENSION_DIR"
+#: Set to 1 to let the store ``INSTALL fts`` from the network when it is not already present. Off by default:
+#: the default path never downloads native code.
+INSTALL_FTS_ENV = "CONTEXT_RUNTIME_DUCKDB_INSTALL_FTS"
 
 
 def _duckdb():
@@ -35,7 +47,8 @@ class DuckDBStore:
     """BM25 retrieval over a DuckDB `fts` index. Persistent when given a file path."""
 
     def __init__(self, docs: list[dict] | None = None, *, path: str = ":memory:",
-                 source: str = "duckdb"):
+                 source: str = "duckdb", fts_extension: str | None = None,
+                 install_fts: bool | None = None):
         import threading
         self.source = source
         # A DuckDB connection object is not safe for concurrent use; reads go through
@@ -43,7 +56,10 @@ class DuckDBStore:
         # reindex) are serialized by this lock so the control plane can serve concurrently.
         self._write_lock = threading.Lock()
         self._db = _duckdb().connect(path)
-        self._db.execute("INSTALL fts; LOAD fts;")
+        # BM25 runs in the engine when the `fts` extension loads; otherwise the same BM25 runs in-process
+        # (see _fallback_search). Nothing is downloaded unless install_fts / INSTALL_FTS_ENV says so.
+        self._fts = self._load_fts(fts_extension, install_fts)
+        self._fallback = None
         self._db.execute(
             "CREATE TABLE IF NOT EXISTS docs "
             "(chunk_id VARCHAR PRIMARY KEY, filename VARCHAR, text VARCHAR, ts DOUBLE)")
@@ -52,6 +68,47 @@ class DuckDBStore:
             self._insert(docs)
             self._reindex()
 
+    def _load_fts(self, extension: str | None, install: bool | None) -> bool:
+        """Load the `fts` extension without touching the network unless explicitly allowed.
+
+        Order: an explicit extension file (argument or ``FTS_EXTENSION_ENV``) > a pre-provisioned extension
+        directory (``EXTENSION_DIR_ENV``) > an extension DuckDB already has installed > an opt-in
+        ``INSTALL fts`` (``install_fts=True`` or ``INSTALL_FTS_ENV=1``). When none works the store logs one
+        line and uses the in-memory BM25 path.
+        """
+        db = self._db
+        ext_file = extension or os.environ.get(FTS_EXTENSION_ENV, "").strip()
+        ext_dir = os.environ.get(EXTENSION_DIR_ENV, "").strip()
+        if install is None:
+            install = os.environ.get(INSTALL_FTS_ENV, "").strip().lower() in ("1", "true", "yes")
+        try:
+            db.execute("SET autoinstall_known_extensions=false")   # never fetch behind our back
+            if ext_file:
+                db.execute(f"LOAD '{ext_file.replace(chr(39), chr(39) * 2)}'")
+                _log.info("duckdb: fts extension loaded from %s", ext_file)
+                return True
+            if ext_dir:
+                db.execute(f"SET extension_directory='{ext_dir.replace(chr(39), chr(39) * 2)}'")
+            try:
+                db.execute("LOAD fts")
+            except Exception:  # noqa: BLE001 - not installed yet
+                if not install:
+                    raise
+                db.execute("INSTALL fts")
+                db.execute("LOAD fts")
+            return True
+        except Exception as e:  # noqa: BLE001
+            _log.warning("duckdb: the fts extension is not available (%s: %s); using the in-memory BM25 path "
+                         "(set %s to a bundled fts.duckdb_extension, or %s=1 to allow a one-time download)",
+                         type(e).__name__, str(e).splitlines()[0][:160] if str(e) else "", FTS_EXTENSION_ENV,
+                         INSTALL_FTS_ENV)
+            return False
+
+    @property
+    def fts_available(self) -> bool:
+        """True when BM25 runs in DuckDB's `fts` index, False on the in-memory fallback."""
+        return self._fts
+
     def _insert(self, docs: list[dict]) -> int:
         rows = [(d["chunk_id"], d.get("filename", ""), d.get("text", ""),
                  float(d.get("ts") or 0.0)) for d in docs]
@@ -59,12 +116,26 @@ class DuckDBStore:
             self._db.executemany(
                 "INSERT OR REPLACE INTO docs (chunk_id, filename, text, ts) VALUES (?,?,?,?)", rows)
             self._n = self._db.execute("SELECT count(*) FROM docs").fetchone()[0]
+            self._fallback = None
         return len(rows)
 
     def _reindex(self) -> None:
         # (re)build the BM25 index over the text column; overwrite so re-index is idempotent.
         with self._write_lock:
-            self._db.execute("PRAGMA create_fts_index('docs','chunk_id','text', overwrite=1)")
+            self._fallback = None
+            if self._fts:
+                self._db.execute("PRAGMA create_fts_index('docs','chunk_id','text', overwrite=1)")
+
+    def _fallback_search(self, query: str, k: int) -> list[Hit]:
+        """BM25 over the same rows in process (no extension). Rebuilt after any change to the table."""
+        fb = self._fallback
+        if fb is None:
+            from .store_inmemory import InMemoryStore
+            rows = self._db.cursor().execute("SELECT chunk_id, filename, text FROM docs ORDER BY chunk_id").fetchall()
+            fb = InMemoryStore([{"chunk_id": r[0], "filename": r[1], "text": r[2], "created_at": None}
+                                for r in rows], source=self.source)
+            self._fallback = fb
+        return fb.search(query, k, method="bm25")
 
     def index(self, path: str) -> dict:
         """Index a corpus. Fast path: a `corpus.parquet` (or a .parquet file) is bulk-loaded
@@ -103,6 +174,8 @@ class DuckDBStore:
                     [k]).fetchall()
                 return [Hit(chunk_id=r[0], filename=r[1], text=r[2], score=0.0,
                             created_at=str(r[3])) for r in rows]
+            if not self._fts:
+                return self._fallback_search(query, k)
             rows = cur.execute(
                 "SELECT chunk_id, filename, text, score FROM "
                 "(SELECT *, fts_main_docs.match_bm25(chunk_id, ?) AS score FROM docs) sq "

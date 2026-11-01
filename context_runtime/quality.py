@@ -24,10 +24,11 @@ concurrently). Deterministic ⇒ trivially unit-testable.
 from __future__ import annotations
 
 import json
-import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+
+from .platform_services import atomic_write
 
 DEFAULT_COST_WEIGHT = 0.15   # same trade-off as the reward's COST_LAMBDA, kept comparable
 
@@ -123,11 +124,7 @@ class QualityLedger:
                 pass
 
     def _write(self, data: str) -> None:
-        os.makedirs(self.path.parent or ".", exist_ok=True)
-        tmp = str(self.path) + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(data)
-        os.replace(tmp, self.path)   # atomic
+        atomic_write(self.path, data)
 
     def to_dict(self) -> dict:
         with self._lock:

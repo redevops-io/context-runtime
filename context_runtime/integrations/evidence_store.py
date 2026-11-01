@@ -27,6 +27,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
+from ..platform_services import locked_append
 from .local_gov import RevenueOpportunity, correlation_key, opportunity_digest, opportunity_material
 
 
@@ -81,9 +82,7 @@ class EvidenceStore:
                 self._opp_material[rec["opportunity_id"]] = rec.get("material", {})
 
     def _append(self, rec: dict) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(rec, sort_keys=True, separators=(",", ":")) + "\n")
+        locked_append(self.path, json.dumps(rec, sort_keys=True, separators=(",", ":")) + "\n")
 
     # ── observations: immutable, content-addressed, written once ──
     def put_observation(self, obs, *, now: Optional[str] = None) -> bool:
