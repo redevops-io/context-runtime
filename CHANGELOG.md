@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Fix (Windows):** `JsonlExporter` appends each trace through `locked_append` (inter-process lock, one write, explicit newline, no per-trace `fsync`). A bare `open(path, "a")` loses lines when writers overlap on Windows, where the C runtime appends as seek-then-write. `locked_append` gains `durable=False`. A test fails on any new lock-free append writer in the package.
+- **Fix (Windows):** `JsonlExporter` appends each trace through `locked_append` (inter-process and in-process lock, one write, explicit newline, no per-trace `fsync`). A bare `open(path, "a")` loses lines when writers overlap on Windows, where the C runtime appends as seek-then-write. `locked_append` gains `durable=False`. The exporter waits at most 1 s for the lock; if it cannot get it the trace is dropped and one warning is logged per exporter. A test fails on any new lock-free append writer in the repository's Python code. **Visible differences:** a `<name>.jsonl.lock` sidecar file (0600) is created next to the trace file; in a read-only directory, or one holding a sidecar owned by another user, `export` now raises `PermissionError` where the bare append worked (the runtime and `MultiExporter` swallow exporter errors, so the trace is lost; one warning is logged); on Windows each line now ends in LF, where text-mode append wrote CRLF, so a trace file written by an older version and then appended to can mix the two (`splitlines()` and `json.loads` accept both).
 
 Native Windows and macOS portability of the core library. Details and the verification status of each item: [docs/native-portability.md](docs/native-portability.md).
 

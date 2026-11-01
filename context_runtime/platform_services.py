@@ -394,16 +394,26 @@ def locked_append(path: str | os.PathLike[str], text: str, *, encoding: str = "u
     """
     target = Path(path)
     ensure_private_dir(target.parent)
-    with file_lock(lock_path_for(target), timeout=timeout, poll=0.005):
-        existed = target.exists()
-        with open(target, "ab") as fh:
-            fh.write(text.encode(encoding))
-            fh.flush()
-            if durable:
-                os.fsync(fh.fileno())
-        if not existed and os.name == "posix":
-            with contextlib.suppress(OSError):
-                os.chmod(target, default_file_mode() if mode is None else mode)
+    lock_file = lock_path_for(target)
+    # Threads of this process queue on an in-process lock first (cheap, no polling) and only the winner takes the
+    # file lock. Some network file systems emulate flock with per-process byte-range locks, which do not exclude
+    # two threads of one process; this lock does.
+    thread_lock = _append_lock_for(lock_file)
+    if not thread_lock.acquire(timeout=max(0.0, timeout)):
+        raise LockTimeout(f"could not lock {lock_file} within {timeout:g}s")
+    try:
+        with file_lock(lock_file, timeout=timeout, poll=0.005):
+            existed = target.exists()
+            with open(target, "ab") as fh:
+                fh.write(text.encode(encoding))
+                fh.flush()
+                if durable:
+                    os.fsync(fh.fileno())
+            if not existed and os.name == "posix":
+                with contextlib.suppress(OSError):
+                    os.chmod(target, default_file_mode() if mode is None else mode)
+    finally:
+        thread_lock.release()
 
 
 # ───────────────────────────────── file lock ─────────────────────────────────
@@ -438,6 +448,15 @@ def locking_strict(governance: bool = False, env: Mapping[str, str] | None = Non
     if v in ("strict", "best-effort", "besteffort", "best_effort"):
         return v == "strict"
     return governance
+
+
+_append_locks: dict[str, threading.Lock] = {}
+
+
+def _append_lock_for(path: Path) -> threading.Lock:
+    key = os.path.abspath(path)
+    with _thread_locks_guard:
+        return _append_locks.setdefault(key, threading.Lock())
 
 
 _thread_locks: dict[str, threading.Lock] = {}
