@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 
+from ..ingest import corpus_files
 from ..pathnames import is_windows_reserved
 
 # One path segment: unreserved + a few sub-delims. No '%' (no second decoding upstream),
@@ -241,6 +242,13 @@ def resolve_corpus_dir(corpus: str | None, path: str | None, root: str | None = 
     segments = corpus_segments(ref)
     if corpus is not None and len(segments) != 1:
         raise CorpusError(400, "invalid corpus reference")
+    # A junction (or other directory reparse point) on the way is not a symlink, so the resolved-path check
+    # below would silently follow it; refuse it with the same answer as a missing corpus.
+    walk = root_real
+    for seg in segments:
+        walk = walk / seg
+        if corpus_files.is_junction(walk) or (corpus_files.is_reparse_point(walk) and not walk.is_symlink()):
+            raise CorpusError(404, _UNKNOWN_CORPUS)
     try:
         target = root_real.joinpath(*segments).resolve(strict=True)
     except (OSError, RuntimeError):
@@ -252,8 +260,14 @@ def resolve_corpus_dir(corpus: str | None, path: str | None, root: str | None = 
 
 
 def _assert_no_symlink_escape(directory: Path) -> None:
-    """Refuse a corpus directory that holds a symlink (file or directory) whose target is outside it."""
+    """Refuse a corpus directory that holds a symlink (file or directory) whose target is outside it, or a
+    Windows junction / directory reparse point (not a symlink, so ``is_symlink()`` cannot see it and it may
+    lead anywhere)."""
     for dirpath, dirnames, filenames in os.walk(directory, followlinks=False):
+        for name in dirnames:
+            entry = Path(dirpath, name)
+            if corpus_files.is_junction(entry) or (corpus_files.is_reparse_point(entry) and not entry.is_symlink()):
+                raise CorpusError(404, _UNKNOWN_CORPUS)
         for name in [*dirnames, *filenames]:
             entry = Path(dirpath, name)
             if entry.is_symlink():

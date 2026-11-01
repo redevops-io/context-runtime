@@ -1,0 +1,26 @@
+{
+  "binary_files_hex": {
+    "image.png": "89504e470d0a1a0a",
+    "notes.bin": "0001feff"
+  },
+  "description": "Files of the synthetic corpus the determinism tests materialise in a temporary directory. A manifest (not a checked-in tree) because names that differ only in case or Unicode normalisation cannot coexist on every file system, and a checkout can rewrite line endings.",
+  "text_files": {
+    ".hidden.md": "hidden dot file revenue\n",
+    "B.md": "Bravo report quarterly revenue table\n",
+    "C.md": "Charlie incident review outage\n",
+    "README.md": "Corpus readme. Cafe and resume notes.\n",
+    "UPPER.TXT": "upper case suffix revenue\n",
+    "Zeta/z.md": "zeta nested upper case directory\n",
+    "a-b.md": "hyphen file about margins\n",
+    "a.md": "alpha revenue growth outlook\n",
+    "a.txt": "alpha plain text revenue forecast\n",
+    "a/x.md": "nested under a: revenue recognition policy\n",
+    "alpha/nested/deep.rst": "deep reStructuredText revenue note\n",
+    "cafe\u0301.md": "caf\u00e9 accent file stored decomposed, revenue\n",
+    "dir with space/file name.md": "spaces in names revenue\n",
+    "emoji-\ud83d\ude00.txt": "emoji in the file name\n",
+    "mixed/lines.md": "line one\r\nline two\r\nline three\n",
+    "\u00fcn\u00ef.txt": "unicode umlaut file stored composed\n",
+    "\u65e5\u672c\u8a9e.md": "japanese file name revenue\n"
+  }
+}

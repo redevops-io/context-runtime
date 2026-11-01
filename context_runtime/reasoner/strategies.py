@@ -405,7 +405,7 @@ def priors_from_ablation(results_dir: str, *, dataset_bucket: dict | None = None
 
     dataset_bucket = dataset_bucket or DATASET_BUCKET
     agg: dict[str, dict[str, list]] = {}
-    for f in glob.glob(os.path.join(results_dir, "*.json")):
+    for f in sorted(glob.glob(os.path.join(results_dir, "*.json"))):   # glob order is OS-dependent
         try:
             with open(f, encoding="utf-8") as fh:
                 cell = json.load(fh)
@@ -443,7 +443,7 @@ def model_competence_from_ablation(results_dir: str, *, dataset_bucket: dict | N
 
     dataset_bucket = dataset_bucket or DATASET_BUCKET
     agg: dict[str, dict[str, list]] = {}
-    for f in glob.glob(os.path.join(results_dir, "*.json")):
+    for f in sorted(glob.glob(os.path.join(results_dir, "*.json"))):   # glob order is OS-dependent
         try:
             with open(f, encoding="utf-8") as fh:
                 cell = json.load(fh)

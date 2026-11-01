@@ -25,6 +25,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+from ..ingest.corpus_files import iter_corpus_files
 from ..types import Hit, PluginInfo, Retrieval
 from .store_inmemory import _token_list, _tokens
 
@@ -245,11 +246,10 @@ class CommunityRetriever:
     def index(self, path: str) -> dict:
         p = Path(path).expanduser()
         n = 0
-        for fp in sorted(p.rglob("*")):
-            if fp.suffix.lower() in (".md", ".txt", ".rst") and fp.is_file():
-                self.docs.append({"chunk_id": f"{fp.name}::0", "filename": fp.name,
-                                  "text": fp.read_text(encoding="utf-8", errors="ignore"), "created_at": None})
-                n += 1
+        for cf in iter_corpus_files(p, (".md", ".txt", ".rst")):
+            self.docs.append({"chunk_id": f"{cf.name}::0", "filename": cf.name,
+                              "text": cf.path.read_text(encoding="utf-8", errors="ignore"), "created_at": None})
+            n += 1
         self._cache_key = None
         return {"files": n, "chunks": n, "communities": len(self._build())}
 

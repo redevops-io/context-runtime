@@ -22,6 +22,7 @@ import importlib.util
 import os
 from pathlib import Path
 
+from ..ingest.corpus_files import iter_corpus_files
 from ..types import Hit, PluginInfo
 from .store_image import _default_image_embed, _default_text_embed
 
@@ -83,8 +84,7 @@ class VideoRetriever:
         p = Path(path).expanduser()
         if not self.available:
             return {"files": 0, "segments": 0}
-        vids = [fp for fp in (sorted(p.rglob("*")) if p.is_dir() else [p])
-                if fp.is_file() and fp.suffix.lower() in _VIDEO_EXTS]
+        vids = [cf.path for cf in iter_corpus_files(p, _VIDEO_EXTS)]
         import numpy as np
         n_seg = 0
         for fp in vids:

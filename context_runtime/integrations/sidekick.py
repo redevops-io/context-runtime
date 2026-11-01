@@ -25,6 +25,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from ..ingest.corpus_files import nfc
 from ..platform_services import atomic_write, file_lock, lock_path_for
 from ..runtime.runtime import ContextRuntime
 from ..types import Goal, Plan, Trace
@@ -153,7 +154,7 @@ class ContextRuntimeSkillStore:
 
     def all(self) -> list[Skill]:
         out: list[Skill] = []
-        for p in sorted(self.dir.glob("*.json")):
+        for p in sorted(self.dir.glob("*.json"), key=lambda q: (nfc(q.name), q.name)):
             try:
                 out.append(Skill(**json.loads(p.read_text(encoding="utf-8"))))
             except (json.JSONDecodeError, TypeError):

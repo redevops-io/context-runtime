@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
+from ..ingest.corpus_files import iter_corpus_files, nfc
 from ..types import PluginInfo, RawAsset
 
 
@@ -26,15 +27,10 @@ class LocalFolderSource:
             base = Path(src)
             entries: list[tuple[Path, str]] = []
             if base.is_file():
-                entries.append((base, base.name))
+                entries.append((base, nfc(base.name)))
             else:
-                for p in sorted(base.rglob("*")):
-                    try:
-                        if p.is_file() or (self.follow_symlinks and p.is_symlink()
-                                           and p.resolve().is_file()):
-                            entries.append((p, str(p.relative_to(base))))
-                    except OSError:
-                        continue
+                for cf in iter_corpus_files(base):
+                    entries.append((cf.path, cf.rel))
             for path, label in entries:
                 if self.limit is not None and n >= self.limit:
                     return
