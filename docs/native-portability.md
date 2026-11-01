@@ -130,18 +130,33 @@ location grants nothing to those groups. Mode bits (`0700`, `0600`) are POSIX on
 
 ## What is verified, and where
 
-Each item names the test; the pull request that introduced it lists the CI runs observed per operating system.
+Observed in the CI run of the pull request that introduced this page (GitHub-hosted runners: `ubuntu-latest`,
+`windows-latest`, `macos-15` and `macos-26`, both Apple Silicon, Python 3.12). "pass" means the tests ran and passed on
+that runner; "UNVERIFIED" means they did not run there, with the reason. Nothing here is a claim about other
+Windows or macOS versions, other CPUs, or about behaviour no test exercises. This page does not claim full native
+parity.
 
-| item | test | runs on |
-|---|---|---|
-| Explicit UTF-8, no stray state in the working directory | `test_encoding_explicit.py`, `conftest.py` | Linux, Windows, macOS |
-| Atomic write, retry, lock exclusion across processes | `test_platform_services.py` | Linux, Windows, macOS |
-| Deterministic enumeration, byte-identical goldens | `test_corpus_files.py`, `tests/golden/` | Linux, Windows, macOS |
-| Junction refusal (real junctions) | `test_corpus_files.py` | Windows only |
-| Windows ACLs | `test_windows_acl.py` | Windows only |
-| DuckDB fts unavailable paths, provisioning, parity | `test_duckdb_fts_offline.py` | Linux, Windows, macOS |
-| Vector ranking parity (semantic with injected vectors, turbovec, a real ONNX model) | `test_vector_parity.py` | Linux, Windows, macOS where the optional packages install |
-| Caddy demo proxy | `test_demo_proxy.py` | skipped, with the reason `UNVERIFIED on this platform: caddy unavailable`, where caddy is absent |
+| item (test file) | Ubuntu | Windows | macOS 15 | macOS 26 |
+|---|---|---|---|---|
+| Explicit UTF-8; no stray state in the working directory (`test_encoding_explicit.py`, `conftest.py`) | pass | pass | pass | pass |
+| Atomic write, retry logic, lock exclusion across processes, container detection branches, state and config precedence (`test_platform_services.py`) | pass | pass | pass | pass |
+| `atomic_write` through a symlink; read-only target refusal (`test_platform_services.py`) | pass | UNVERIFIED: POSIX-only tests (symlinks, permission bits, unprivileged POSIX user) | pass | pass |
+| `0600` / `0700` and `CONTEXT_RUNTIME_SHARED` permission bits (`test_platform_services.py`) | pass | UNVERIFIED: POSIX permission bits do not apply | pass | pass |
+| Locking on a file system that cannot lock (`test_platform_services.py`, monkeypatched `flock`) | pass | pass | pass | pass |
+| Deterministic enumeration; byte-identical golden outputs (`test_corpus_files.py`, `tests/golden/`) | pass | pass | pass | pass |
+| Junction refusal with real junctions (`test_corpus_files.py`) | UNVERIFIED: NTFS junctions only exist on Windows | pass | UNVERIFIED: same | UNVERIFIED: same |
+| Windows ACLs (`test_windows_acl.py`) | UNVERIFIED: Windows only | pass | UNVERIFIED: Windows only | UNVERIFIED: Windows only |
+| DuckDB fts: unavailable-extension paths, provisioning, engine/fallback differences (`test_duckdb_fts_offline.py`; the engine tests install `fts` once over the network) | pass | pass | pass | pass |
+| Vector ranking parity: semantic store with injected vectors, turbovec, a real ONNX model (`test_vector_parity.py`; goldens generated on macOS arm64) | pass | pass | pass | pass |
+| Caddy demo proxy, 43 tests (`test_demo_proxy.py`; caddy 2.11.7 installed from a pinned, SHA-512-verified release) | UNVERIFIED on this platform: caddy unavailable (the Ubuntu job has no caddy step) | pass | pass | pass |
+| Linux container image build (`test_container.py`) | UNVERIFIED: no Docker engine on the lane | UNVERIFIED: Windows-containers daemon | UNVERIFIED: no Docker | UNVERIFIED: no Docker |
+
+Not verified on any lane: GPU paths, the optional extras that are not installed in CI (`runtime_contracts`,
+pandas, OCR, dlt, embeddings through the `rag` extra), credentialed integrations, file systems without `flock`
+(only a patched `flock` is tested), real ECS / Cloud Run / cgroup container detection (only the variables, files and
+text a container shows are simulated), the retry loop for a Windows target held open by another process (the retry
+logic is tested with a fake `os.name` and the "briefly held reader" test passes without needing a retry on POSIX),
+mode bits on Windows, and Windows ACLs of locations other than the temporary directory and `%LOCALAPPDATA%`.
 
 Every test run prints a skip summary at the end; skips whose reason starts with `UNVERIFIED` are behaviour that run
 did not verify.
