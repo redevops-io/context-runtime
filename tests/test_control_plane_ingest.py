@@ -8,7 +8,6 @@ and symlinks that leave the corpus are refused. Synthetic data only.
 from __future__ import annotations
 
 import os
-import sys
 
 import pytest
 
@@ -28,13 +27,13 @@ def world(tmp_path, monkeypatch):
     root = tmp_path / "corpus-root"
     served = root / "served"
     served.mkdir(parents=True)
-    (served / "note.md").write_text(f"# Note\n\n{INSIDE}\n")
+    (served / "note.md").write_text(f"# Note\n\n{INSIDE}\n", encoding="utf-8")
     (served / "sub").mkdir()
-    (served / "sub" / "nested.txt").write_text("nested synthetic text KESTREL-77")
+    (served / "sub" / "nested.txt").write_text("nested synthetic text KESTREL-77", encoding="utf-8")
     outside = tmp_path / "outside"
     outside.mkdir()
-    (outside / "synthetic-note.md").write_text(f"# Synthetic note\n\n{SENTENCE}\n")
-    (outside / "b.txt").write_text("synthetic text")
+    (outside / "synthetic-note.md").write_text(f"# Synthetic note\n\n{SENTENCE}\n", encoding="utf-8")
+    (outside / "b.txt").write_text("synthetic text", encoding="utf-8")
     monkeypatch.setenv("CONTEXT_RUNTIME_API_KEY", KEY)
     monkeypatch.setenv("CONTEXT_RUNTIME_CORPUS_ROOT", str(root))
     monkeypatch.delenv("CR_TENANT_KEYS", raising=False)
@@ -155,7 +154,22 @@ def test_an_unknown_corpus_and_a_file_are_404(world, client):
 
 # ───────────────────────────── symlinks ─────────────────────────────
 
-pytestmark_symlink = pytest.mark.skipif(sys.platform == "win32" or not hasattr(os, "symlink"), reason="needs symlinks")
+def _can_symlink() -> bool:
+    """True when this process may create symlinks (always on POSIX; on Windows only with the symlink
+    privilege, which administrator runners and Developer Mode have). Probed, not assumed from the OS."""
+    if not hasattr(os, "symlink"):
+        return False
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        try:
+            os.symlink(os.path.join(d, "target"), os.path.join(d, "link"))
+        except (OSError, NotImplementedError):
+            return False
+    return True
+
+
+pytestmark_symlink = pytest.mark.skipif(
+    not _can_symlink(), reason="this process cannot create symlinks (Windows without the symlink privilege)")
 
 
 @pytestmark_symlink
@@ -190,7 +204,7 @@ def test_a_dangling_symlink_is_refused(world, client):
 def test_a_symlink_to_another_corpus_in_the_root_is_refused(world, client):
     other = world.root / "other"
     other.mkdir()
-    (other / "x.md").write_text("another corpus under the same root")
+    (other / "x.md").write_text("another corpus under the same root", encoding="utf-8")
     os.symlink(other, world.served / "other-link")
     assert _ingest(client, corpus="served").status_code == 404
 

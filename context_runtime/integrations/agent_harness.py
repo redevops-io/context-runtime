@@ -31,6 +31,6 @@ class ContextRuntimeManager(TranscriptCompactor):
         n = 0
         for fp in sorted(Path(root).rglob("*")):
             if fp.is_file() and fp.suffix.lower() in suffixes and fp.stat().st_size < 5_000_000:
-                self.archive.add(fp.read_text(errors="ignore"), kind="input_file", tool=fp.name, turn=0)
+                self.archive.add(fp.read_text(encoding="utf-8", errors="ignore"), kind="input_file", tool=fp.name, turn=0)
                 n += 1
         return n

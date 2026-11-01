@@ -13,9 +13,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 GEO = REPO / "deploy" / "geo-demo"
-DOCKERFILE = (GEO / "Dockerfile.aks").read_text()
-IGNORE = (GEO / "Dockerfile.aks.dockerignore").read_text()
-WF = (REPO / ".github" / "workflows" / "build-geo-image.yml").read_text()
+DOCKERFILE = (GEO / "Dockerfile.aks").read_text(encoding="utf-8")
+IGNORE = (GEO / "Dockerfile.aks.dockerignore").read_text(encoding="utf-8")
+WF = (REPO / ".github" / "workflows" / "build-geo-image.yml").read_text(encoding="utf-8")
 SECRET_SHAPED = re.compile(r"(SECRET|TOKEN|PASSWORD|PASSWD|API_?KEY|PRIVATE_?KEY|CREDENTIAL|_KEY$|_B64$)", re.I)
 
 
@@ -73,12 +73,12 @@ def test_nothing_secret_shaped_or_credential_like_is_baked_in():
 
 
 def test_agent_harness_pin_equals_the_repository_dockerfile_and_pyproject():
-    root = (REPO / "Dockerfile").read_text()
+    root = (REPO / "Dockerfile").read_text(encoding="utf-8")
     for var in ("AGENT_HARNESS_COMMIT", "AGENT_HARNESS_SHA256"):
         mine = re.search(rf"^ARG {var}=(\S+)$", DOCKERFILE, re.M).group(1)
         assert mine == re.search(rf"^ARG {var}=(\S+)$", root, re.M).group(1), var
     commit = re.search(r"^ARG AGENT_HARNESS_COMMIT=(\S+)$", DOCKERFILE, re.M).group(1)
-    assert commit in (REPO / "pyproject.toml").read_text()
+    assert commit in (REPO / "pyproject.toml").read_text(encoding="utf-8")
 
 
 def test_build_context_is_deny_by_default():

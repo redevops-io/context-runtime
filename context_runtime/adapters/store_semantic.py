@@ -102,7 +102,7 @@ class SemanticRetriever:
         for fp in sorted(p.rglob("*")) if p.is_dir() else [p]:
             if fp.is_file() and fp.suffix.lower() in _EMBED_EXTS:
                 self.docs.append({"chunk_id": f"{fp.name}::0", "filename": fp.name,
-                                  "text": fp.read_text(errors="ignore"), "created_at": None})
+                                  "text": fp.read_text(encoding="utf-8", errors="ignore"), "created_at": None})
                 n += 1
         self._emb = None  # invalidate
         self._ann = None  # invalidate any cuVS index built over the old matrix

@@ -383,7 +383,8 @@ def load_priors(path: str) -> dict:
     the compact ``{bucket: [strategies]}`` map, or the richer ``{"strategies": {...},
     "model_competence": {...}}``. Returns the parsed object."""
     import json
-    data = json.load(open(path))
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
     if isinstance(data, dict) and ("strategies" in data or "model_competence" in data):
         set_priors(data.get("strategies") or {})
         set_model_competence(data.get("model_competence") or {})
@@ -406,7 +407,8 @@ def priors_from_ablation(results_dir: str, *, dataset_bucket: dict | None = None
     agg: dict[str, dict[str, list]] = {}
     for f in glob.glob(os.path.join(results_dir, "*.json")):
         try:
-            cell = json.load(open(f))
+            with open(f, encoding="utf-8") as fh:
+                cell = json.load(fh)
         except Exception:  # noqa: BLE001
             continue
         bucket = dataset_bucket.get(cell.get("dataset"))
@@ -443,7 +445,8 @@ def model_competence_from_ablation(results_dir: str, *, dataset_bucket: dict | N
     agg: dict[str, dict[str, list]] = {}
     for f in glob.glob(os.path.join(results_dir, "*.json")):
         try:
-            cell = json.load(open(f))
+            with open(f, encoding="utf-8") as fh:
+                cell = json.load(fh)
         except Exception:  # noqa: BLE001
             continue
         bucket = dataset_bucket.get(cell.get("dataset"))

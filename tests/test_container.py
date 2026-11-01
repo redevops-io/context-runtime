@@ -26,15 +26,19 @@ def _docker_ready() -> bool:
     if shutil.which("docker") is None:
         return False
     try:
-        return subprocess.run(["docker", "info"], capture_output=True, timeout=30).returncode == 0
+        # The image is a Linux image (python:3.12-slim): a daemon in Windows-containers mode (the default on
+        # GitHub-hosted Windows runners) cannot build it, so only a Linux engine counts as "ready".
+        info = subprocess.run(["docker", "info", "--format", "{{.OSType}}"], capture_output=True, text=True,
+                              encoding="utf-8", timeout=30)
+        return info.returncode == 0 and info.stdout.strip() == "linux"
     except (OSError, subprocess.TimeoutExpired):
         return False
 
 
 def test_dockerfile_pins_the_same_agent_harness_commit_as_pyproject():
     """Runs without docker: the image installs agent-harness at the commit pyproject.toml pins."""
-    pyproject = (ROOT / "pyproject.toml").read_text()
-    dockerfile = (ROOT / "Dockerfile").read_text()
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     pinned = re.search(r"agent-harness @ git\+https://github\.com/redevops-io/agent-harness\.git@([0-9a-f]{40})", pyproject)
     commit = re.search(r"^ARG AGENT_HARNESS_COMMIT=([0-9a-f]{40})$", dockerfile, re.M)
     digest = re.search(r"^ARG AGENT_HARNESS_SHA256=([0-9a-f]{64})$", dockerfile, re.M)
@@ -57,9 +61,9 @@ def _run(image: str, env: dict[str, str], started: list[str]) -> str:
     args = ["docker", "run", "-d", "-p", "127.0.0.1::8080"]
     for k, v in env.items():
         args += ["-e", f"{k}={v}"]
-    cid = subprocess.run([*args, image], capture_output=True, text=True, check=True).stdout.strip()
+    cid = subprocess.run([*args, image], capture_output=True, text=True, encoding="utf-8", check=True).stdout.strip()
     started.append(cid)
-    port_line = subprocess.run(["docker", "port", cid, "8080/tcp"], capture_output=True, text=True, check=True).stdout
+    port_line = subprocess.run(["docker", "port", cid, "8080/tcp"], capture_output=True, text=True, encoding="utf-8", check=True).stdout
     port = port_line.strip().splitlines()[0].rsplit(":", 1)[1]
     base = f"http://127.0.0.1:{port}"
     for _ in range(120):
@@ -69,20 +73,22 @@ def _run(image: str, env: dict[str, str], started: list[str]) -> str:
         except OSError:
             pass
         if subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", cid],
-                          capture_output=True, text=True).stdout.strip() != "true":
-            logs = subprocess.run(["docker", "logs", "--tail", "20", cid], capture_output=True, text=True)
+                          capture_output=True, text=True,
+                          encoding="utf-8").stdout.strip() != "true":
+            logs = subprocess.run(["docker", "logs", "--tail", "20", cid], capture_output=True, text=True,
+                          encoding="utf-8")
             raise AssertionError("container exited: " + (logs.stdout + logs.stderr)[-800:])
         time.sleep(0.5)
     raise AssertionError("container did not answer /health")
 
 
-@pytest.mark.skipif(not _docker_ready(), reason="docker is not available")
+@pytest.mark.skipif(not _docker_ready(), reason="a Linux docker engine is not available (no docker, or a Windows-containers daemon)")
 def test_image_builds_starts_and_fails_closed():
     image = f"context-runtime-control-plane-test:{uuid.uuid4().hex[:12]}"
     cids: list[str] = []
     try:
         build = subprocess.run(["docker", "build", "-q", "-t", image, str(ROOT)],
-                               capture_output=True, text=True, timeout=900)
+                               capture_output=True, text=True, encoding="utf-8", timeout=900)
         assert build.returncode == 0, build.stderr[-1500:]
 
         # no key configured: the health route answers, everything else is 503

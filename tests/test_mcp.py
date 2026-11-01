@@ -90,7 +90,7 @@ def _run_with_client_and_registry(policy: ApprovalPolicy | None = None):
     reg = ToolRegistry(policy=policy)
     with tempfile.TemporaryDirectory() as td:
         fake_path = f"{td}/fake_mcp_server.py"
-        with open(fake_path, "w") as f:
+        with open(fake_path, "w", encoding="utf-8") as f:
             f.write(FAKE_SERVER)
         client = MCPClient.stdio([sys.executable, fake_path])
         try:
@@ -137,7 +137,7 @@ def test_mcp_tools_are_gated_by_approval_policy():
     reg2 = ToolRegistry(ApprovalPolicy(mode="allowlist", allow=["echo", "web_search"]))
     with tempfile.TemporaryDirectory() as td:
         fake_path = f"{td}/fake_mcp_server.py"
-        with open(fake_path, "w") as f:
+        with open(fake_path, "w", encoding="utf-8") as f:
             f.write(FAKE_SERVER)
         client2 = MCPClient.stdio([sys.executable, fake_path])
         try:

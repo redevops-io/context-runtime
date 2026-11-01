@@ -146,7 +146,11 @@ class RuleStore:
 
 def _safe(s: str) -> str:
     import re
-    return re.sub(r"[^a-z0-9_-]+", "_", (s or "default").lower())
+
+    from ..pathnames import portable_component
+    # Only [a-z0-9_-] survives; Windows device names (con, nul, com1 ...) get a trailing underscore and the
+    # component is capped, so every scope maps to a valid file name on every OS.
+    return portable_component(re.sub(r"[^a-z0-9_-]+", "_", (s or "default").lower()))
 
 
 def scopes_for(principal, app: str) -> list[str]:

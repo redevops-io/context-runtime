@@ -158,7 +158,7 @@ def test_athena_analytical_end_to_end():
 def _vectors():
     import json
     from pathlib import Path
-    doc = json.loads((Path(__file__).parent / "vectors" / "sql_guard.json").read_text())
+    doc = json.loads((Path(__file__).parent / "vectors" / "sql_guard.json").read_text(encoding="utf-8"))
     return doc["max_rows"], doc["vectors"]
 
 

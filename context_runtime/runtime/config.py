@@ -31,7 +31,7 @@ class Config:
     def from_yaml(cls, path: str) -> "Config":
         import yaml  # pyyaml is a core dep
 
-        data = yaml.safe_load(Path(path).expanduser().read_text()) or {}
+        data = yaml.safe_load(Path(path).expanduser().read_text(encoding="utf-8")) or {}
         rt = data.get("runtime", {})
         plugins = rt.get("plugins", {})
         budgets = data.get("budgets", {})

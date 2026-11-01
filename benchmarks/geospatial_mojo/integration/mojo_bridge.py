@@ -24,7 +24,7 @@ def mojo_version() -> str:
     m = _mojo()
     if not m:
         return "unavailable"
-    return subprocess.check_output([m, "--version"], text=True).strip()
+    return subprocess.check_output([m, "--version"], text=True, encoding="utf-8").strip()
 
 
 class MojoArm:
@@ -50,10 +50,10 @@ class MojoArm:
 
     def _invoke(self, workload, tokens):
         path = os.path.join(tempfile.gettempdir(), f"geo_in_{workload}_{os.getpid()}.txt")
-        with open(path, "w") as fh:
+        with open(path, "w", encoding="utf-8") as fh:
             fh.write(" ".join(tokens))
         try:
-            out = subprocess.run([self.binary, workload, path], text=True, capture_output=True, check=True).stdout
+            out = subprocess.run([self.binary, workload, path], text=True, encoding="utf-8", capture_output=True, check=True).stdout
         finally:
             try: os.unlink(path)
             except OSError: pass

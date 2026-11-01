@@ -3,8 +3,8 @@ name: tests
 on:
   push:
     branches: ["main"]
+  # No base-branch filter: a pull request stacked on another branch is tested too.
   pull_request:
-    branches: ["main"]
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -27,7 +27,46 @@ jobs:
         # NOT installed (tests that need them are not run or skip): litellm, graphiti/hipporag,
         # redevops-rag and runtime-contracts (git extras), boto3, dagster, GPU/OCR/ASR stacks.
         run: python -m pip install -e ".[dev,test,control-plane,duckdb]" numpy pillow
+      - name: Lint (explicit text encoding)
+        # PLW1514 is a preview rule; tests/test_encoding_explicit.py is the complete (AST) guard.
+        run: python -m ruff check --preview --select PLW1514 context_runtime scripts tests examples eval benchmarks
       - name: Test
         # Tests needing a live service are guarded by skipif on credential env vars, which are intentionally never set in CI.
-        # No docker/GPU tests are collected.
-        run: python -m pytest tests -q -rs
+        # No docker/GPU tests are collected. -X warn_default_encoding + the pytest filterwarnings turn an implicit
+        # locale encoding in our own code into an error.
+        run: python -X warn_default_encoding -m pytest tests -q -rs
+
+  # Native-OS lanes: the same suite and install recipe as the Ubuntu job, on GitHub-hosted Windows and
+  # macOS (Apple Silicon; macOS 14 images are being retired, so the lane uses macos-15) runners. They are separate jobs with their own check names so the
+  # Ubuntu `pytest` check is untouched; they are not required checks (yet). No secrets are used.
+  pytest-windows:
+    name: "pytest (windows-latest, native, non-required)"
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: python -m pip install -e ".[dev,test,control-plane,duckdb]" numpy pillow
+      - name: Test
+        run: python -X warn_default_encoding -m pytest tests -q -rs
+
+  pytest-macos:
+    name: "pytest (macos-15, Apple Silicon, native, non-required)"
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: python -m pip install -e ".[dev,test,control-plane,duckdb]" numpy pillow
+      - name: Test
+        run: python -X warn_default_encoding -m pytest tests -q -rs

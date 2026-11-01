@@ -91,7 +91,8 @@ class EpsilonGreedyBandit:
         import os
         if self.persist_path and os.path.exists(self.persist_path):
             try:
-                raw = json.load(open(self.persist_path, encoding="utf-8"))
+                with open(self.persist_path, encoding="utf-8") as fh:
+                    raw = json.load(fh)
                 with self._lock:
                     self.stats = {ctx: {k: list(v) for k, v in arms.items()} for ctx, arms in raw.items()}
             except Exception:

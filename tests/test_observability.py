@@ -15,7 +15,7 @@ def test_jsonl_exporter_writes_a_line(tmp_path):
                                   "text": "alpha beta deploy failed", "created_at": None}],
                                 exporter=exp)
     rt.run("why did deploy fail")
-    lines = (tmp_path / "traces.jsonl").read_text().strip().splitlines()
+    lines = (tmp_path / "traces.jsonl").read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 1
     rec = json.loads(lines[0])
     assert rec["plan_id"] and rec["spans"]
@@ -46,7 +46,7 @@ def test_jsonl_exporter_appends_across_runs(tmp_path):
                                   "text": "alpha beta deploy failed", "created_at": None}], exporter=exp)
     rt.run("why did deploy fail")
     rt.run("what is alpha")
-    lines = path.read_text().strip().splitlines()
+    lines = path.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 2                          # append mode accumulates (training log), not truncates
     for ln in lines:
         rec = json.loads(ln)

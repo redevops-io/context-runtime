@@ -105,9 +105,9 @@ class StatisticsStore:
             }
             for f, a in self._accum.items()
         }
-        Path(self.path).write_text(json.dumps(data, indent=2))
+        Path(self.path).write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     def _load(self) -> None:
-        data = json.loads(Path(self.path).read_text())
+        data = json.loads(Path(self.path).read_text(encoding="utf-8"))
         for f, d in data.items():
             self._accum[f] = _Accum(**d)

@@ -101,7 +101,7 @@ def test_verify_does_not_retry_a_grounded_answer():
 def _cell(tmp, dataset, model, strategy, oracle):
     (tmp / f"{dataset}__hybrid__{model}__{strategy}.json").write_text(json.dumps(
         {"dataset": dataset, "method": "hybrid", "model": model, "strategy": strategy,
-         "n": 10, "acc_oracle": oracle}))
+         "n": 10, "acc_oracle": oracle}), encoding="utf-8")
 
 
 def test_model_competence_from_ablation_ranks_models_per_class(tmp_path):
@@ -120,7 +120,7 @@ def test_load_priors_richer_format_applies_strategies_and_competence(tmp_path):
     p.write_text(json.dumps({
         "strategies": {"multi_hop": ["decompose", "reason"]},
         "model_competence": {"multi_hop": {"qwen": 0.8, "deepseek": 0.0}},
-    }))
+    }), encoding="utf-8")
     gs.load_priors(str(p))
     assert gs.strategies_for("multi_hop") == ("reason", "decompose")   # cost-ordered
     assert gs.competent_model("multi_hop") == "qwen"

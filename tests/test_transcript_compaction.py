@@ -99,7 +99,7 @@ def test_context_errors_escalate_and_stay_lossless():
 
 
 def test_index_files_makes_inputs_searchable(tmp_path):
-    (tmp_path / "data.csv").write_text("id,name\n1,Zanzibar\n")
+    (tmp_path / "data.csv").write_text("id,name\n1,Zanzibar\n", encoding="utf-8")
     (tmp_path / "img.png").write_bytes(b"\x89PNG")
     mgr = ContextRuntimeManager(tmp_path / "arch")
     assert mgr.index_files(tmp_path) == 1

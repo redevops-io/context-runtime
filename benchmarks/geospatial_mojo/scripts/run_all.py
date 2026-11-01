@@ -35,7 +35,7 @@ PROFILES = {  # (item cap per case, repetitions, sub-ms repetitions)
 
 def load(name):
     p = os.path.join(CORPUS, f"{name}.jsonl")
-    with open(p) as fh:
+    with open(p, encoding="utf-8") as fh:
         return [json.loads(ln) for ln in fh if ln.strip()]
 
 
@@ -95,7 +95,7 @@ def environment():
            "platform": platform.platform(), "processor": platform.processor(),
            "cpu_count": os.cpu_count()}
     try:
-        env["git_commit"] = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=HERE, text=True).strip()
+        env["git_commit"] = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=HERE, text=True, encoding="utf-8").strip()
     except Exception:
         env["git_commit"] = "unknown"
     try:
@@ -138,7 +138,8 @@ def main():
     env = environment()
     if "mojo" in arms and getattr(arms["mojo"], "build_ns", None):
         env["mojo_build_seconds"] = round(arms["mojo"].build_ns / 1e9, 3)  # T6 clean optimized build
-    json.dump(env, open(os.path.join(outdir, "environment.json"), "w"), indent=2)
+    with open(os.path.join(outdir, "environment.json"), "w", encoding="utf-8") as fh:
+        json.dump(env, fh, indent=2)
 
     # ---- correctness gate (§8): every arm vs python reference, per corpus item ----
     print("== correctness gate ==")
@@ -175,7 +176,8 @@ def main():
                 correctness[a]["cases"].append({"workload": "adversarial", "fixture": it["case"], "python": r, "arm": x})
         correctness[a]["adversarial"] = len(adv)
         correctness[a]["adversarial_mismatch"] = am
-    json.dump(correctness, open(os.path.join(outdir, "correctness.json"), "w"), indent=2)
+    with open(os.path.join(outdir, "correctness.json"), "w", encoding="utf-8") as fh:
+        json.dump(correctness, fh, indent=2)
     for a, c in correctness.items():
         print(f"   {a}: {c['general']} general ({c['mismatch']} mismatch), "
               f"{c.get('adversarial',0)} adversarial ({c.get('adversarial_mismatch',0)} mismatch)")
@@ -185,7 +187,7 @@ def main():
 
     # ---- benchmark (§9): interleaved arms, repetitions, per case ----
     print("== benchmark ==")
-    raw = open(os.path.join(outdir, "benchmark_raw.jsonl"), "w")
+    raw = open(os.path.join(outdir, "benchmark_raw.jsonl"), "w", encoding="utf-8")
     summary = {}  # wl -> case -> arm -> stats(+digest)
     for wl, (src, fn) in WORKLOADS.items():
         by_case = {}
@@ -215,7 +217,8 @@ def main():
             print(f"   {wl}/{case}: " + " ".join(
                 f"{a}={summary[wl][case][a]['median']/1e6:.3f}ms" for a in summary[wl][case]))
     raw.close()
-    json.dump(summary, open(os.path.join(outdir, "summary.json"), "w"), indent=2)
+    with open(os.path.join(outdir, "summary.json"), "w", encoding="utf-8") as fh:
+        json.dump(summary, fh, indent=2)
     write_summary_md(os.path.join(outdir, "summary.md"), env, correctness, summary, args.profile)
     print(f"\nresults: {outdir}")
 
@@ -263,7 +266,8 @@ def write_summary_md(path, env, correctness, summary, profile):
             if py and mj and mj < py:
                 first = case; break
         L.append(f"| {wl} | {first} |")
-    open(path, "w").write("\n".join(L) + "\n")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(L) + "\n")
 
 
 if __name__ == "__main__":
