@@ -43,3 +43,23 @@ def _no_stray_state_in_cwd():
     yield
     created = [str(p / s) for p in places for s in _STRAY if (p / s).exists() and (p / s) not in before]
     assert not created, f"tests wrote state into the working tree: {created}"
+
+
+def pytest_terminal_summary(terminalreporter):
+    """Print every skip reason once with its count, so a run states plainly what it did NOT verify.
+    Reasons that contain ``UNVERIFIED`` mark behaviour that is untested on this platform."""
+    skipped = terminalreporter.stats.get("skipped", [])
+    if not skipped:
+        return
+    counts: dict[str, int] = {}
+    for rep in skipped:
+        lr = rep.longrepr
+        reason = lr[2] if isinstance(lr, tuple) and len(lr) == 3 else str(lr)
+        reason = reason.removeprefix("Skipped: ").strip()
+        counts[reason] = counts.get(reason, 0) + 1
+    tr = terminalreporter
+    tr.section("skip summary (what this run did not verify)")
+    for reason, n in sorted(counts.items(), key=lambda kv: (not kv[0].startswith("UNVERIFIED"), -kv[1], kv[0])):
+        tr.write_line(f"{n:4d}  {reason[:200]}")
+    unverified = sum(n for r, n in counts.items() if "UNVERIFIED" in r)
+    tr.write_line(f"{unverified} skipped item(s) are marked UNVERIFIED on this platform; {len(skipped) - unverified} other skip(s).")

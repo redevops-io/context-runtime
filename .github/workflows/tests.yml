@@ -27,6 +27,11 @@ jobs:
         # NOT installed (tests that need them are not run or skip): litellm, graphiti/hipporag,
         # redevops-rag and runtime-contracts (git extras), boto3, dagster, GPU/OCR/ASR stacks.
         run: python -m pip install -e ".[dev,test,control-plane,duckdb]" numpy pillow
+      - name: Optional vector stack (fastembed, turbovec)
+        # For tests/test_vector_parity.py. If either wheel cannot be installed on this runner the step is reported
+        # but not fatal, and the tests that need it skip with "UNVERIFIED on this platform".
+        continue-on-error: true
+        run: python -m pip install fastembed turbovec
       - name: Lint (explicit text encoding)
         # PLW1514 is a preview rule; tests/test_encoding_explicit.py is the complete (AST) guard.
         run: python -m ruff check --preview --select PLW1514 context_runtime scripts tests examples eval benchmarks
@@ -38,11 +43,15 @@ jobs:
           # The one deliberate network use: let the DuckDB store INSTALL its fts extension once, so the engine
           # BM25 path is exercised on this OS. Without it the store falls back to in-memory BM25 (also tested).
           CONTEXT_RUNTIME_DUCKDB_INSTALL_FTS: "1"
+          # Download and run a small real ONNX embedding model in the vector-parity test (second network use).
+          CR_TEST_PARITY_MODEL: "1"
+          HF_HUB_DISABLE_SYMLINKS_WARNING: "1"
         run: python -X warn_default_encoding -m pytest tests -q -rs
 
   # Native-OS lanes: the same suite and install recipe as the Ubuntu job, on GitHub-hosted Windows and
-  # macOS (Apple Silicon; macOS 14 images are being retired, so the lane uses macos-15) runners. They are separate jobs with their own check names so the
-  # Ubuntu `pytest` check is untouched; they are not required checks (yet). No secrets are used.
+  # macOS (Apple Silicon; macOS 14 images are being retired, so the lanes use macos-15 and macos-26) runners. They are
+  # separate jobs with their own check names so the Ubuntu `pytest` check is untouched; they are not required
+  # checks (yet). No secrets are used.
   pytest-windows:
     name: "pytest (windows-latest, native, non-required)"
     runs-on: windows-latest
@@ -56,11 +65,31 @@ jobs:
           cache-dependency-path: pyproject.toml
       - name: Install
         run: python -m pip install -e ".[dev,test,control-plane,duckdb]" numpy pillow
+      - name: Optional vector stack (fastembed, turbovec)
+        # For tests/test_vector_parity.py. If either wheel cannot be installed on this runner the step is reported
+        # but not fatal, and the tests that need it skip with "UNVERIFIED on this platform".
+        continue-on-error: true
+        run: python -m pip install fastembed turbovec
+      - name: Install caddy (pinned release, SHA-512 verified) so tests/test_demo_proxy.py runs on this OS
+        shell: pwsh
+        run: |
+          $v = "2.11.7"
+          $f = "caddy_${v}_windows_amd64.zip"
+          Invoke-WebRequest "https://github.com/caddyserver/caddy/releases/download/v$v/$f" -OutFile $f
+          $want = "c308154504e53755958ffc62d8a2657ab17eefd6dd25c45dbb2c3d93d29519971f77ca652f7d0f2bcb7f980b9ba3822478865e29969d0272d7613550a43152b1"
+          $got = (Get-FileHash $f -Algorithm SHA512).Hash.ToLower()
+          if ($got -ne $want) { throw "caddy checksum mismatch: $got" }
+          Expand-Archive $f -DestinationPath "$env:RUNNER_TEMP\caddy"
+          "$env:RUNNER_TEMP\caddy" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          & "$env:RUNNER_TEMP\caddy\caddy.exe" version
       - name: Test
         env:
           # The one deliberate network use: let the DuckDB store INSTALL its fts extension once, so the engine
           # BM25 path is exercised on this OS. Without it the store falls back to in-memory BM25 (also tested).
           CONTEXT_RUNTIME_DUCKDB_INSTALL_FTS: "1"
+          # Download and run a small real ONNX embedding model in the vector-parity test (second network use).
+          CR_TEST_PARITY_MODEL: "1"
+          HF_HUB_DISABLE_SYMLINKS_WARNING: "1"
         run: python -X warn_default_encoding -m pytest tests -q -rs
 
   pytest-macos:
@@ -76,9 +105,64 @@ jobs:
           cache-dependency-path: pyproject.toml
       - name: Install
         run: python -m pip install -e ".[dev,test,control-plane,duckdb]" numpy pillow
+      - name: Optional vector stack (fastembed, turbovec)
+        # For tests/test_vector_parity.py. If either wheel cannot be installed on this runner the step is reported
+        # but not fatal, and the tests that need it skip with "UNVERIFIED on this platform".
+        continue-on-error: true
+        run: python -m pip install fastembed turbovec
+      - name: Install caddy (pinned release, SHA-512 verified) so tests/test_demo_proxy.py runs on this OS
+        run: |
+          v="2.11.7"
+          f="caddy_${v}_mac_arm64.tar.gz"
+          curl -fsSL -o "$f" "https://github.com/caddyserver/caddy/releases/download/v${v}/${f}"
+          echo "68f592df8f0ec058fbdb9b137b64e9a0aa792d28c06e1e3b9ec12d0e7fb371683a54e73ef6d8e6d0dd70dc6b941a5b5d5b73faedd3f89de119ad2eb78bdc668e  ${f}" | shasum -a 512 -c -
+          mkdir -p "$RUNNER_TEMP/caddy" && tar -xzf "$f" -C "$RUNNER_TEMP/caddy" caddy
+          echo "$RUNNER_TEMP/caddy" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/caddy/caddy" version
       - name: Test
         env:
           # The one deliberate network use: let the DuckDB store INSTALL its fts extension once, so the engine
           # BM25 path is exercised on this OS. Without it the store falls back to in-memory BM25 (also tested).
           CONTEXT_RUNTIME_DUCKDB_INSTALL_FTS: "1"
+          # Download and run a small real ONNX embedding model in the vector-parity test (second network use).
+          CR_TEST_PARITY_MODEL: "1"
+          HF_HUB_DISABLE_SYMLINKS_WARNING: "1"
+        run: python -X warn_default_encoding -m pytest tests -q -rs
+
+  # The newest Apple Silicon image GitHub offers today (macos-latest points here); macos-15 above stays as well.
+  pytest-macos-26:
+    name: "pytest (macos-26, Apple Silicon, native, non-required)"
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: python -m pip install -e ".[dev,test,control-plane,duckdb]" numpy pillow
+      - name: Optional vector stack (fastembed, turbovec)
+        # For tests/test_vector_parity.py. If either wheel cannot be installed on this runner the step is reported
+        # but not fatal, and the tests that need it skip with "UNVERIFIED on this platform".
+        continue-on-error: true
+        run: python -m pip install fastembed turbovec
+      - name: Install caddy (pinned release, SHA-512 verified) so tests/test_demo_proxy.py runs on this OS
+        run: |
+          v="2.11.7"
+          f="caddy_${v}_mac_arm64.tar.gz"
+          curl -fsSL -o "$f" "https://github.com/caddyserver/caddy/releases/download/v${v}/${f}"
+          echo "68f592df8f0ec058fbdb9b137b64e9a0aa792d28c06e1e3b9ec12d0e7fb371683a54e73ef6d8e6d0dd70dc6b941a5b5d5b73faedd3f89de119ad2eb78bdc668e  ${f}" | shasum -a 512 -c -
+          mkdir -p "$RUNNER_TEMP/caddy" && tar -xzf "$f" -C "$RUNNER_TEMP/caddy" caddy
+          echo "$RUNNER_TEMP/caddy" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/caddy/caddy" version
+      - name: Test
+        env:
+          # The one deliberate network use: let the DuckDB store INSTALL its fts extension once, so the engine
+          # BM25 path is exercised on this OS. Without it the store falls back to in-memory BM25 (also tested).
+          CONTEXT_RUNTIME_DUCKDB_INSTALL_FTS: "1"
+          # Download and run a small real ONNX embedding model in the vector-parity test (second network use).
+          CR_TEST_PARITY_MODEL: "1"
+          HF_HUB_DISABLE_SYMLINKS_WARNING: "1"
         run: python -X warn_default_encoding -m pytest tests -q -rs

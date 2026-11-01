@@ -102,9 +102,10 @@ class ImageRetriever:
         self.bit_width = int(os.getenv("CR_TURBOVEC_BITS", bit_width))
         self._ann = None
         self._ann_n = -1
+        self._ann_unsupported = False   # turbovec refused this embedding width (it needs a multiple of 8)
 
     def _turbovec_ok(self) -> bool:
-        if self._use_tv is False:
+        if self._use_tv is False or self._ann_unsupported:
             return False
         try:
             import importlib.util
@@ -164,7 +165,13 @@ class ImageRetriever:
             return None
         from turbovec import TurboQuantIndex
         mat = np.vstack(self._image_embed([d["path"] for d in self.docs])).astype("float32")
-        idx = TurboQuantIndex(dim=mat.shape[1], bit_width=self.bit_width)
+        try:
+            idx = TurboQuantIndex(dim=mat.shape[1], bit_width=self.bit_width)
+        except ValueError:
+            # e.g. "dim must be a positive multiple of 8": use the exact numpy cosine instead of failing
+            self._ann_unsupported = True
+            self._ann, self._ann_n = None, len(self.docs)
+            return None
         idx.add(mat)
         self._ann, self._ann_n = idx, len(self.docs)
         return idx
@@ -185,8 +192,8 @@ class ImageRetriever:
         qv = np.asarray(qvs[0], dtype="float32")
         # TurboVec quantized ANN over the image vectors when installed (drop-in for scale);
         # otherwise exact numpy cosine (fine up to ~10^4-10^5 images).
+        idx = self._ann_index() if self._turbovec_ok() else None
         if self._turbovec_ok():
-            idx = self._ann_index()
             if idx is None:
                 return []
             scores, indices = idx.search(qv.reshape(1, -1), k=max(k, 1))

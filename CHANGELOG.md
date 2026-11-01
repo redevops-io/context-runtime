@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+Native Windows and macOS portability of the core library. Details and the verification status of each item: [docs/native-portability.md](docs/native-portability.md).
+
+- **Breaking change (corpus identifiers, all operating systems):** a corpus reference whose path segment is a Windows device name (`con`, `prn`, `aux`, `nul`, `conin$`, `conout$`, `com1`-`com9`, `lpt1`-`lpt9`, case-insensitive, with or without an extension such as `nul.txt`) is refused: `POST /librechat/ingest` answers `400 {"detail": "invalid corpus reference"}`. These names were accepted on Linux and macOS before. The policy store stores a scope with such a name under `<name>_` (for example `con_/app.jsonl`) and caps file-name components at 128 characters; nothing is migrated automatically.
+- Explicit `encoding="utf-8"` for every text-mode file access and text subprocess call; a test and a lint step keep it that way.
+- New `context_runtime/platform_services.py`: per-user state, config and cache directories (macOS Application Support and Caches, Windows `%LOCALAPPDATA%`, XDG on Linux; containers and the existing environment variables keep their behaviour), `atomic_write`, `file_lock`, `locked_append`, `ensure_private_dir`. The rename-based stores and append-only logs use them.
+- `DuckDBStore` no longer runs `INSTALL fts` by default; it loads a configured or already installed extension, or falls back to in-memory BM25 with one log line. `CONTEXT_RUNTIME_DUCKDB_INSTALL_FTS=1` allows a one-time download; `CONTEXT_RUNTIME_DUCKDB_FTS_EXTENSION` and `CONTEXT_RUNTIME_DUCKDB_EXTENSION_DIR` point at a pre-provisioned extension.
+- `iter_corpus_files(root)`: one deterministic enumeration (NFC, POSIX-style labels, component-wise code point order) for every corpus scan; Windows junctions and other directory reparse points are not entered and are refused by ingestion.
+- CI: Windows and macOS (Apple Silicon) test lanes next to the Ubuntu job.
+
 ## 0.4.1 — 2026-10-30
 
 Upgrade notes and the full list of changes: [docs/release-0.4.1.md](docs/release-0.4.1.md).

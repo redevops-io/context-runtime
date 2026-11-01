@@ -56,7 +56,7 @@ runtime. Glossary: [agentic-os/docs/GLOSSARY.md](https://github.com/redevops-io/
 
 [STATUS](./STATUS.md) · [ARCHITECTURE](./ARCHITECTURE.md) · [SPEC](./SPEC.md) · [BENCHMARKS](./BENCHMARKS.md) ·
 [ROADMAP](./ROADMAP.md) · [OVERVIEW](./OVERVIEW.md) · [SECURITY](./SECURITY.md) · [CONTRIBUTING](./CONTRIBUTING.md) ·
-[CHANGELOG](./CHANGELOG.md)
+[CHANGELOG](./CHANGELOG.md) · [Native Windows and macOS](./docs/native-portability.md)
 
 ---
 

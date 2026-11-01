@@ -34,7 +34,17 @@ READ_KEY = "synthetic-READ-key-1b8e5d0a9c47"
 SENTENCE = "The synthetic project codename is BLUE-HERON-4471."
 STUB_BODY = "librechat-stub"
 
-pytestmark = pytest.mark.skipif(shutil.which("caddy") is None, reason="caddy is not installed")
+pytestmark = pytest.mark.skipif(shutil.which("caddy") is None, reason="UNVERIFIED on this platform: caddy unavailable")
+
+
+def _os_basics() -> dict[str, str]:
+    """The few variables a child process needs to start at all on Windows (the test otherwise passes a minimal
+    environment on purpose); empty elsewhere."""
+    if os.name != "nt":
+        return {}
+    keep = ("SYSTEMROOT", "SystemRoot", "SystemDrive", "TEMP", "TMP", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+            "COMSPEC", "PATHEXT", "WINDIR")
+    return {k: os.environ[k] for k in keep if k in os.environ}
 
 
 def _port() -> int:
@@ -85,7 +95,7 @@ class Stack:
         self.procs: list[subprocess.Popen] = []
         self.stub = http.server.HTTPServer(("127.0.0.1", self.stub_port), _Stub)
         threading.Thread(target=self.stub.serve_forever, daemon=True).start()
-        base = {"HOME": str(home), "PATH": os.pathsep.join([os.path.dirname(sys.executable), *(["/usr/bin", "/bin"] if os.name == "posix" else [])]),
+        base = {**_os_basics(), "HOME": str(home), "PATH": os.pathsep.join([os.path.dirname(sys.executable), *(["/usr/bin", "/bin"] if os.name == "posix" else [])]),
                 "PYTHONDONTWRITEBYTECODE": "1", "XDG_DATA_HOME": str(home / "d"), "XDG_CONFIG_HOME": str(home / "c")}
         app_env = {**base, "CONTEXT_RUNTIME_HOME": str(home / "cr"),
                    "CONTEXT_RUNTIME_API_KEY": ADMIN_KEY, "CR_TENANT_KEYS": f"{READ_KEY}=*",
@@ -96,7 +106,7 @@ class Stack:
              "--port", str(self.app_port), "--log-level", "warning"],
             env=app_env, cwd=str(home), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
         wrapper = tmp / "Caddyfile.test"
-        wrapper.write_text(f"{{\n\tadmin off\n\tauto_https off\n}}\nimport {CADDYFILE}\n", encoding="utf-8")
+        wrapper.write_text(f"{{\n\tadmin off\n\tauto_https off\n}}\nimport \"{CADDYFILE.as_posix()}\"\n", encoding="utf-8")
         caddy_env = {**base, "CR_PROXY_LISTEN": f"http://127.0.0.1:{self.proxy_port}",
                      "CR_UPSTREAM": f"127.0.0.1:{self.app_port}", "LIBRECHAT_UPSTREAM": f"127.0.0.1:{self.stub_port}",
                      "CR_PUBLIC_READ_KEY": READ_KEY}      # the proxy gets the read key and nothing else
