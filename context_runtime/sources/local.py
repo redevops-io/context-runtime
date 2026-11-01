@@ -29,7 +29,7 @@ class LocalFolderSource:
             if base.is_file():
                 entries.append((base, nfc(base.name)))
             else:
-                for cf in iter_corpus_files(base):
+                for cf in iter_corpus_files(base, warn_duplicates=False):
                     entries.append((cf.path, cf.rel))
             for path, label in entries:
                 if self.limit is not None and n >= self.limit:

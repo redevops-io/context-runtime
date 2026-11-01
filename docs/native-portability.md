@@ -12,16 +12,33 @@ A corpus reference whose path segment is a Windows device name is refused on **e
 identifier maps to the same, valid file name everywhere. The match is case-insensitive and applies with or without
 an extension (`nul.txt` and `com1.tar.gz` are refused too).
 
-Refused names: `con`, `prn`, `aux`, `nul`, `conin$`, `conout$`, `com1` to `com9`, `lpt1` to `lpt9` (the superscript
+Refused names: `con`, `prn`, `aux`, `nul`, `conin$`, `conout$`, `com0` to `com9`, `lpt0` to `lpt9` (the superscript
 digits `com¹ com² com³ lpt¹ lpt² lpt³` as well).
 
 Error: `POST /librechat/ingest` answers `400` with `{"detail": "invalid corpus reference"}` (the same answer as any
 other invalid reference). Before, `con`, `nul` and the others were accepted on Linux and macOS.
 
-Related: the policy store maps a scope name that is a device name to `<name>_` for its file name (`con` is stored
-under `con_/app.jsonl`), and caps a file-name component at 128 characters (a short digest is appended when a name
-is shortened). Rules that were saved under a scope named like a device name before this change are not found under
-the new file name; rename the directory or file by hand if you have such a scope. Nothing is migrated automatically.
+Related: the policy store maps a scope name that is a device name to `<name>~` for its file name (`con` is stored
+under `con~/app.jsonl`; `con` and `con_` remain two different files), and shortens a file-name component over 128
+characters to `...~<digest>`. Rules that were saved under a scope named like a device name, or under a name longer
+than 128 characters, before this change are not found under the new file name; rename the directory or file by hand
+if you have such a scope. Nothing is migrated automatically.
+
+### A default `Archive()` is temporary
+
+`Archive()` without a `directory` now lives in a `TemporaryDirectory` that is deleted when the archive is
+garbage-collected or the interpreter exits. Before, the `mkdtemp` directory and the archived tool outputs survived
+the process. Pass an explicit `directory` to keep them; an explicit directory is never deleted.
+
+### Other behaviour changes
+
+- Outside a container, state and configuration default to the platform locations below instead of the working directory.
+- State files and lock files are created `0600` and directories `0700` (POSIX); see "Atomic writes and locks".
+- `DuckDBStore` does not download `fts` unless asked, and its fallback is approximate (below).
+- A single file passed as the root of a text store's `index()` is now indexed (it returned nothing before); NFD file
+  names get NFC labels and chunk ids; files that share a name still get the same chunk id and one warning says so.
+- Windows junctions and other directory reparse points are not entered by corpus scans and are refused by ingestion
+  (this includes cloud-sync placeholder directories, if they carry the reparse attribute: not verified).
 
 ## Where state, configuration and caches live
 
@@ -34,27 +51,50 @@ the new file name; rename the directory or file by hand if you have such a scope
 | config file | `CONTEXT_RUNTIME_CONFIG`, `AGENTIC_OS_CONFIG` | `config.yaml` in the config directory | same | same |
 | cache | `CONTEXT_RUNTIME_CACHE_DIR` | `~/Library/Caches/context-runtime` | `%LOCALAPPDATA%\context-runtime\cache` | `$XDG_CACHE_HOME` or `~/.cache/context-runtime` |
 
-In a container (`/.dockerenv`, `/run/.containerenv`, a Kubernetes pod, or `CONTEXT_RUNTIME_CONTAINER=1`) the earlier
-layout is kept (working-directory `.context-runtime` and `config.yaml`, `/data/context-runtime/policy`,
-`/data/market-radar/...`), each still overridable by its own variable. Outside a container, an existing
-working-directory `.context-runtime` or `config.yaml` is still used, with a log line, until the platform location
-exists. Directories created by `ensure_private_dir` are `0700` on POSIX.
+In a container the earlier layout is kept: working-directory `.context-runtime` and `config.yaml`,
+`/data/context-runtime/policy`, `/data/market-radar/...`. The fixed `/data/...` locations apply **even when
+`CONTEXT_RUNTIME_HOME` is set** (the compose files set it to `/data`): that variable never moved them. An item's own
+variable (`POLICY_DIR`, `LEAD_PROFILE_DIR`, `PITCH_TEMPLATE_PATH`, `OUTREACH_LEDGER_PATH`, `OUTREACH_OUTBOX`) still wins.
+
+A container is recognised by `CONTEXT_RUNTIME_CONTAINER=1` (`0` forces "not a container": this is the explicit
+override when detection is wrong), `/.dockerenv`, `/run/.containerenv`, `KUBERNETES_SERVICE_HOST`, Amazon ECS / Fargate
+(`ECS_CONTAINER_METADATA_URI`, `ECS_CONTAINER_METADATA_URI_V4`, `AWS_EXECUTION_ENV=AWS_ECS*`), Google Cloud Run
+(`K_SERVICE`), or a container runtime named in `/proc/1/cgroup`.
+
+Outside a container a non-empty `.context-runtime` (or a `config.yaml`) in the working directory is still used, even
+when the platform location also exists; one warning names both paths and says how to migrate. Nothing is moved or merged
+automatically, and a start never silently switches to an empty location.
 
 ## Atomic writes and locks
 
-`atomic_write` writes a uniquely named temporary file in the target's directory, flushes and `fsync`s it, replaces
-the target with `os.replace` (on Windows, retrying a bounded number of times when the target is briefly open
-elsewhere) and `fsync`s the directory on POSIX. `file_lock` is an exclusive inter-process lock (`fcntl.flock` or
-`msvcrt.locking`) with a timeout; it is not re-entrant.
+`atomic_write` writes a uniquely named temporary file in the target's directory (its name is shortened so it never
+exceeds the file system's name limit), flushes and `fsync`s it, replaces the target with `os.replace` (on Windows,
+retrying a bounded number of times when the target is briefly open elsewhere) and `fsync`s the directory on POSIX.
+A symlink at the target is written through (the link survives); an existing file keeps its permissions and a
+read-only target is refused as `Path.write_text` refused it. **Deliberate change:** new state files, lock files
+and log files are `0600` and new directories `0700` on POSIX (before: the umask, typically `0644` / `0755`). Set
+`CONTEXT_RUNTIME_SHARED=1` for a directory that other users or containers must read: files, lock files and
+directories then get the umask defaults.
+
+`file_lock` is an exclusive inter-process lock (`fcntl.flock` or `msvcrt.locking`) with a timeout; it is not
+re-entrant. On a file system that cannot lock (`ENOLCK`, `ENOTSUP`, `EOPNOTSUPP`: some NFS, FUSE, 9p and SMB mounts),
+`CONTEXT_RUNTIME_LOCKING=best-effort` logs **one** warning naming the path and falls back to a lock between the
+threads of the process only (other processes are not excluded); `CONTEXT_RUNTIME_LOCKING=strict` raises instead.
+Unset, the policy store (governance data) is strict and the other stores best-effort.
 
 ## DuckDB `fts` extension (explicit installation)
 
 `DuckDBStore` runs BM25 inside DuckDB when the `fts` extension can be loaded. By default it **never downloads
 anything**. If the extension cannot be loaded it logs one warning line
-(`duckdb: the fts extension is not available (...); using the in-memory BM25 path ...`) and serves BM25 from the same rows
-with the in-memory implementation (`DuckDBStore.fts_available` is `False`). Recency queries are unaffected. Scores
-of the two implementations differ (different tokenisers and stemming); the top-ranked chunks agree on unambiguous
-queries (tested).
+(`duckdb: the fts extension is not available (...); using the APPROXIMATE in-memory lexical fallback (not
+score-compatible with the engine) ...`) and searches the same rows with the in-memory store's BM25
+(`DuckDBStore.fts_available` is `False`). Recency queries are unaffected.
+
+The fallback is **not** the engine's BM25 and not score-compatible with it. Measured differences, pinned by tests:
+the engine drops English stop words and digit tokens and stems with Porter, the fallback does neither (`the` and
+`404` match in the fallback and not in the engine; `errors` matches `error` in the engine and not in the fallback),
+and the score scales differ. For queries without those cases the best-ranked chunk agreed on the small corpus tested;
+do not compare scores across the two paths or apply one score threshold to both.
 
 Order in which an extension is looked for:
 

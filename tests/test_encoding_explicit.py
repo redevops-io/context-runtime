@@ -2,7 +2,8 @@
 
 Without ``encoding=`` Python uses the locale code page (cp1252 on Windows), so the same corpus file
 decodes differently from one operating system to the next. This scans the source with ``ast`` (which also
-sees calls that a type-based linter cannot attribute to ``pathlib``) and fails on any ``open()``,
+sees calls that a type-based linter cannot attribute to ``pathlib``; it covers the common call forms, not every
+possible spelling, e.g. ``gzip.open(p, 'rt')`` or ``os.fdopen``) and fails on any ``open()``,
 ``Path.open()``, ``read_text()``, ``write_text()`` or text-mode ``NamedTemporaryFile`` without it.
 """
 

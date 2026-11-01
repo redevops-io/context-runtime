@@ -72,10 +72,13 @@ def test_container_keeps_its_historical_layout(tmp_path, monkeypatch):
     # an item with a fixed container location keeps it ...
     assert ps.state_path("policy", container_default="/data/context-runtime/policy", env={}, platform="linux",
                          home=HOME, container=True) == Path("/data/context-runtime/policy")
-    # ... unless the operator pointed the home somewhere
+    # ... and keeps it when CONTEXT_RUNTIME_HOME is set (the compose files set it to /data): that variable never
+    # moved the policy directory and must not start to (rules already stored there would be orphaned)
     assert ps.state_path("policy", container_default="/data/context-runtime/policy",
-                         env={"CONTEXT_RUNTIME_HOME": "/h"}, platform="linux", home=HOME,
-                         container=True) == Path("/h/policy")
+                         env={"CONTEXT_RUNTIME_HOME": "/data"}, platform="linux", home=HOME,
+                         container=True) == Path("/data/context-runtime/policy")
+    assert ps.state_dir(env={"CONTEXT_RUNTIME_HOME": "/data"}, platform="linux", home=HOME,
+                        container=True) == Path("/data")
     assert ps.config_file(env={}, platform="linux", home=HOME, container=True) == Path("config.yaml")
     assert ps.config_file(env={"CONTEXT_RUNTIME_CONFIG": "/etc/cr.yaml"}, platform="linux", home=HOME,
                           container=True) == Path("/etc/cr.yaml")
@@ -86,6 +89,37 @@ def test_outside_a_container_no_item_uses_a_data_root_directory(tmp_path, monkey
     p = ps.state_path("policy", container_default="/data/context-runtime/policy", env={}, platform="darwin",
                       home=HOME, container=False)
     assert p == HOME / "Library" / "Application Support" / "context-runtime" / "policy"
+
+
+def test_container_detection_real_branches(monkeypatch):
+    """No forcing: the environment variables, marker files and cgroup text a real container shows."""
+    monkeypatch.setattr(ps.os.path, "exists", lambda p: False)
+    monkeypatch.setattr(ps, "_cgroup_text", lambda: "")
+    assert not ps.in_container({}, "linux")
+    for env in ({"ECS_CONTAINER_METADATA_URI": "http://169.254.170.2/v3"},
+                {"ECS_CONTAINER_METADATA_URI_V4": "http://169.254.170.2/v4"},
+                {"AWS_EXECUTION_ENV": "AWS_ECS_FARGATE"}, {"K_SERVICE": "svc"},
+                {"KUBERNETES_SERVICE_HOST": "10.0.0.1"}):
+        assert ps.in_container(env, "linux"), env
+    assert not ps.in_container({"AWS_EXECUTION_ENV": "AWS_Lambda_python3.12"}, "linux")     # not claimed
+    for marker in ("/.dockerenv", "/run/.containerenv"):
+        monkeypatch.setattr(ps.os.path, "exists", lambda p, m=marker: p == m)
+        assert ps.in_container({}, "linux"), marker
+    monkeypatch.setattr(ps.os.path, "exists", lambda p: False)
+    for cg in ("12:memory:/docker/abc", "0::/kubepods/burstable/pod1", "1:name=systemd:/ecs/task/abc"):
+        monkeypatch.setattr(ps, "_cgroup_text", lambda cg=cg: cg)
+        assert ps.in_container({}, "linux"), cg
+    monkeypatch.setattr(ps, "_cgroup_text", lambda: "0::/user.slice/user-1000.slice/session-3.scope")
+    assert not ps.in_container({}, "linux")
+    # the explicit override beats every signal in both directions
+    assert not ps.in_container({"CONTEXT_RUNTIME_CONTAINER": "0", "K_SERVICE": "svc"}, "linux")
+    assert ps.in_container({"CONTEXT_RUNTIME_CONTAINER": "1"}, "linux")
+    assert not ps.in_container({"K_SERVICE": "svc"}, "darwin")
+
+
+def test_cgroup_text_is_empty_when_unreadable(monkeypatch):
+    monkeypatch.setattr("builtins.open", lambda *a, **k: (_ for _ in ()).throw(OSError("no /proc")))
+    assert ps._cgroup_text() == ""
 
 
 def test_container_detection_can_be_forced():
@@ -99,17 +133,59 @@ def test_existing_working_directory_state_is_kept_not_orphaned(tmp_path, monkeyp
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".context-runtime").mkdir()
     got = ps.state_dir(env={}, platform="linux", home=tmp_path / "home", container=False)
+    assert got == Path(".context-runtime")       # empty legacy directory and no platform directory: legacy
+    # an EMPTY legacy directory no longer wins once the platform directory exists
+    platform_dir = tmp_path / "home" / ".local" / "share" / "context-runtime"
+    platform_dir.mkdir(parents=True)
+    assert ps.state_dir(env={}, platform="linux", home=tmp_path / "home", container=False) == platform_dir
+
+
+def test_a_non_empty_legacy_directory_beats_an_existing_platform_directory_with_one_warning(
+        tmp_path, monkeypatch, caplog):
+    """Never start with empty state: pending approvals and policies in ./.context-runtime must not vanish
+    because another run created the platform directory."""
+    import logging
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(ps, "_warned", set())
+    legacy = tmp_path / ".context-runtime"
+    legacy.mkdir()
+    (legacy / "approvals.jsonl").write_text("{}\n", encoding="utf-8")
+    platform_dir = tmp_path / "home" / ".local" / "share" / "context-runtime"
+    platform_dir.mkdir(parents=True)
+    with caplog.at_level(logging.WARNING, logger="context_runtime.platform"):
+        for _ in range(3):
+            got = ps.state_dir(env={}, platform="linux", home=tmp_path / "home", container=False)
     assert got == Path(".context-runtime")
-    # once the platform directory exists it takes over
-    (tmp_path / "home" / ".local" / "share" / "context-runtime").mkdir(parents=True)
-    assert ps.state_dir(env={}, platform="linux", home=tmp_path / "home", container=False) == \
-        tmp_path / "home" / ".local" / "share" / "context-runtime"
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert str(legacy.resolve()) in warnings[0] and str(platform_dir) in warnings[0]
+    assert "copy its contents" in warnings[0]                       # says how to migrate
+    # an explicit variable still decides
+    assert ps.state_dir(env={"CONTEXT_RUNTIME_HOME": str(platform_dir)}, platform="linux", home=tmp_path / "home",
+                        container=False) == platform_dir
+
+
+def test_a_working_directory_config_file_beats_an_existing_platform_one_with_a_warning(tmp_path, monkeypatch, caplog):
+    import logging
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(ps, "_warned", set())
+    (tmp_path / "config.yaml").write_text("router: {}\n", encoding="utf-8")
+    cfg = tmp_path / "h" / ".config" / "context-runtime"
+    cfg.mkdir(parents=True)
+    (cfg / "config.yaml").write_text("router: {tiers: []}\n", encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="context_runtime.platform"):
+        got = ps.config_file(env={}, platform="linux", home=tmp_path / "h", container=False)
+    assert got == Path("config.yaml")
+    msg = [r.getMessage() for r in caplog.records][0]
+    assert str(cfg / "config.yaml") in msg and "NOT used" in msg
 
 
 def test_config_file_legacy_working_directory_file(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "config.yaml").write_text("router: {}\n", encoding="utf-8")
     assert ps.config_file(env={}, platform="linux", home=tmp_path / "h", container=False) == Path("config.yaml")
+    # with no working-directory file the platform one is used
+    (tmp_path / "config.yaml").unlink()
     cfg = tmp_path / "h" / ".config" / "context-runtime"
     cfg.mkdir(parents=True)
     (cfg / "config.yaml").write_text("router: {}\n", encoding="utf-8")
@@ -349,6 +425,24 @@ def test_market_radar_defaults_come_from_the_resolver(tmp_path, monkeypatch):
     assert Path(OutreachLedger().path) == tmp_path / "home" / "market-radar" / "outreach_ledger.jsonl"
 
 
+def test_compose_scenario_policy_and_market_radar_stay_under_data_when_the_home_is_data(monkeypatch):
+    """deploy/proxmox-demo/chat-demo.compose.yml: a container with CONTEXT_RUNTIME_HOME=/data and no other
+    path variable. Policy rules and market-radar files live where they always did."""
+    from context_runtime.integrations.job_leads import OutreachLedger, PitchTemplate, ProfileStore
+    for v in ("POLICY_DIR", "LEAD_PROFILE_DIR", "PITCH_TEMPLATE_PATH", "OUTREACH_LEDGER_PATH", "OUTREACH_OUTBOX",
+              "AGENTIC_OS_HOME"):
+        monkeypatch.delenv(v, raising=False)
+    monkeypatch.setenv("CONTEXT_RUNTIME_CONTAINER", "1")
+    monkeypatch.setenv("CONTEXT_RUNTIME_HOME", "/data")
+    assert Path(RuleStore().dir) == Path("/data/context-runtime/policy")
+    assert Path(ProfileStore().dir) == Path("/data/market-radar/profiles")
+    assert Path(PitchTemplate().path) == Path("/data/market-radar/pitch_template.txt")
+    assert Path(OutreachLedger().path) == Path("/data/market-radar/outreach_ledger.jsonl")
+    # an item's own variable still wins
+    monkeypatch.setenv("POLICY_DIR", "/elsewhere")
+    assert Path(RuleStore().dir) == Path("/elsewhere")
+
+
 def test_market_radar_container_defaults_are_unchanged(monkeypatch):
     from context_runtime.integrations.job_leads import ProfileStore
     for v in ("LEAD_PROFILE_DIR", "CONTEXT_RUNTIME_HOME", "AGENTIC_OS_HOME"):
@@ -370,3 +464,163 @@ def test_control_plane_state_defaults_to_no_working_directory_path(tmp_path, mon
     fleet = Fleet(Registry.load())
     assert fleet.home.is_absolute() and str(tmp_path / "h") in str(fleet.home)
     assert not (tmp_path / ".context-runtime").exists()
+
+
+# ───────────────────────── atomic_write: Linux file semantics ─────────────────────────
+
+@pytest.mark.skipif(not POSIX, reason="symlinks and permission bits")
+def test_atomic_write_writes_through_a_symlink(tmp_path):
+    real = tmp_path / "real" / "state.json"
+    real.parent.mkdir()
+    real.write_text("old", encoding="utf-8")
+    link = tmp_path / "link.json"
+    link.symlink_to(real)
+    ps.atomic_write(link, "new")
+    assert link.is_symlink() and link.read_text(encoding="utf-8") == "new"      # the link survived
+    assert real.read_text(encoding="utf-8") == "new"                           # and its target was replaced
+    assert sorted(p.name for p in real.parent.iterdir()) == ["state.json"]    # no temp file left
+
+
+@pytest.mark.skipif(not POSIX, reason="symlinks")
+def test_atomic_write_through_a_dangling_symlink_creates_the_target(tmp_path):
+    link = tmp_path / "link.json"
+    link.symlink_to(tmp_path / "later.json")
+    ps.atomic_write(link, "x")
+    assert link.is_symlink() and (tmp_path / "later.json").read_text(encoding="utf-8") == "x"
+
+
+@pytest.mark.skipif(not POSIX or (hasattr(os, "geteuid") and os.geteuid() == 0), reason="needs an unprivileged POSIX user")
+def test_atomic_write_refuses_a_read_only_target_like_write_text(tmp_path):
+    f = tmp_path / "ro.txt"
+    f.write_text("keep", encoding="utf-8")
+    f.chmod(0o444)
+    with pytest.raises(PermissionError):
+        ps.atomic_write(f, "overwrite")
+    assert f.read_text(encoding="utf-8") == "keep" and [p.name for p in tmp_path.iterdir()] == ["ro.txt"]
+    with pytest.raises(PermissionError):
+        f.write_text("overwrite", encoding="utf-8")                              # what it did before
+
+
+def test_atomic_write_handles_target_names_near_the_name_limit(tmp_path):
+    for n in (200, 230, 250):
+        name = "n" * n + ".txt"
+        try:
+            (tmp_path / name).write_text("probe", encoding="utf-8")
+        except OSError:
+            continue                                                              # this file system's limit is lower
+        (tmp_path / name).unlink()
+        ps.atomic_write(tmp_path / name, f"v{n}")
+        assert (tmp_path / name).read_text(encoding="utf-8") == f"v{n}"
+        assert [p.name for p in tmp_path.iterdir()] == [name]
+        (tmp_path / name).unlink()
+
+
+def test_temp_and_lock_names_fit_the_limit_for_multibyte_names():
+    name = "é" * 120                                                              # 240 bytes
+    assert len(ps._fit_name(name, 14, 255).encode("utf-8")) <= 255 - 14
+    assert len(ps.lock_path_for(Path("/x") / ("é" * 125)).name.encode("utf-8")) <= 255
+    assert ps.lock_path_for(Path("/x/a.json")).name == "a.json.lock"
+
+
+@pytest.mark.skipif(not POSIX, reason="POSIX permission bits")
+def test_shared_setting_gives_the_umask_default_modes(tmp_path, monkeypatch):
+    monkeypatch.setenv("CONTEXT_RUNTIME_SHARED", "1")
+    old = os.umask(0o022)
+    try:
+        d = ps.ensure_private_dir(tmp_path / "shared" / "sub")
+        ps.atomic_write(d / "f.json", "x")
+        ps.locked_append(d / "log.jsonl", "line\n")
+        with ps.file_lock(ps.lock_path_for(d / "f.json")):
+            pass
+        assert stat.S_IMODE(d.stat().st_mode) == 0o755
+        assert stat.S_IMODE((d / "f.json").stat().st_mode) == 0o644
+        assert stat.S_IMODE((d / "log.jsonl").stat().st_mode) == 0o644
+        assert stat.S_IMODE((d / "f.json.lock").stat().st_mode) == 0o644
+        monkeypatch.delenv("CONTEXT_RUNTIME_SHARED")
+        ps.atomic_write(d / "private.json", "x")
+        with ps.file_lock(ps.lock_path_for(d / "private.json")):
+            pass
+        assert stat.S_IMODE((d / "private.json").stat().st_mode) == 0o600
+        assert stat.S_IMODE((d / "private.json.lock").stat().st_mode) == 0o600
+    finally:
+        os.umask(old)
+
+
+# ───────────────────────── file_lock where the file system cannot lock ─────────────────────────
+
+def _no_flock(monkeypatch, code):
+    import errno as _errno
+
+    class _Fcntl:
+        LOCK_EX, LOCK_NB, LOCK_UN = 2, 4, 8
+
+        @staticmethod
+        def flock(fd, op):
+            if op & 8:
+                return
+            raise OSError(getattr(_errno, code), "locking not supported")
+
+    monkeypatch.setattr(ps, "fcntl", _Fcntl)
+    monkeypatch.setattr(ps, "_warned", set())
+
+
+@pytest.mark.parametrize("code", ["ENOLCK", "ENOTSUP", "EOPNOTSUPP"])
+def test_best_effort_lock_degrades_to_an_in_process_lock_with_one_warning(tmp_path, monkeypatch, caplog, code):
+    import logging
+    _no_flock(monkeypatch, code)
+    monkeypatch.delenv("CONTEXT_RUNTIME_LOCKING", raising=False)
+    lock = tmp_path / "x.lock"
+    with caplog.at_level(logging.WARNING, logger="context_runtime.platform"):
+        for _ in range(3):
+            with ps.file_lock(lock):
+                pass
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert str(lock) in warnings[0] and "other processes are NOT excluded" in warnings[0]
+
+
+def test_degraded_lock_still_excludes_threads_of_this_process(tmp_path, monkeypatch):
+    _no_flock(monkeypatch, "ENOLCK")
+    lock = tmp_path / "x.lock"
+    with ps.file_lock(lock):
+        with pytest.raises(ps.LockTimeout):
+            with ps.file_lock(lock, timeout=0.2):
+                pass
+    with ps.file_lock(lock, timeout=1):
+        pass
+
+
+def test_strict_locking_raises_instead_of_degrading(tmp_path, monkeypatch):
+    _no_flock(monkeypatch, "ENOLCK")
+    monkeypatch.setenv("CONTEXT_RUNTIME_LOCKING", "strict")
+    with pytest.raises(OSError) as e:
+        with ps.file_lock(tmp_path / "x.lock"):
+            pass
+    assert not isinstance(e.value, ps.LockTimeout)
+    monkeypatch.setenv("CONTEXT_RUNTIME_LOCKING", "best-effort")
+    with ps.file_lock(tmp_path / "x.lock", governance=True):                     # the variable beats the default
+        pass
+
+
+def test_governance_stores_are_strict_by_default_and_others_best_effort(tmp_path, monkeypatch):
+    _no_flock(monkeypatch, "ENOLCK")
+    monkeypatch.delenv("CONTEXT_RUNTIME_LOCKING", raising=False)
+    assert ps.locking_strict(governance=True) and not ps.locking_strict(governance=False)
+    with pytest.raises(OSError):
+        with ps.file_lock(tmp_path / "gov.lock", governance=True):
+            pass
+    with ps.file_lock(tmp_path / "other.lock"):
+        pass
+    store = RuleStore(str(tmp_path / "rules"))                                   # policy rules are governance data
+    with pytest.raises(OSError):
+        store.add("global", "rule", "x")
+    monkeypatch.setenv("CONTEXT_RUNTIME_LOCKING", "best-effort")
+    store.add("global", "rule", "x")
+    assert [r.text for r in store.list(scope="global")] == ["x"]
+
+
+def test_an_unrelated_oserror_from_flock_is_not_swallowed(tmp_path, monkeypatch):
+    _no_flock(monkeypatch, "EBADF")
+    with pytest.raises(OSError):
+        with ps.file_lock(tmp_path / "x.lock"):
+            pass

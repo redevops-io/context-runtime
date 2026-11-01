@@ -90,11 +90,29 @@ def _walk(root: Path) -> Iterator[tuple[tuple[str, ...], str, Path]]:
                 continue
 
 
-def iter_corpus_files(root: str | os.PathLike[str], suffixes: Iterable[str] | None = None) -> Iterator[CorpusFile]:
+def _warn_duplicate_names(base: Path, chosen: list[tuple[tuple[str, ...], str, Path]]) -> None:
+    """Log one warning when several listed files share a file name (after NFC). The stores build chunk ids from
+    the file name alone (``<name>::0``), so those files get the same id and replace or shadow one another. The id
+    format is kept (changing it would invalidate existing indexes); this makes the collision visible."""
+    seen: dict[str, str] = {}
+    dups: list[str] = []
+    for names, _raw, _path in chosen:
+        if names[-1] in seen:
+            dups.append(f"{seen[names[-1]]} and {'/'.join(names)}")
+        else:
+            seen[names[-1]] = "/".join(names)
+    if dups:
+        _log.warning("corpus: %d file(s) under %s share a file name with another file and will get the same chunk id "
+                     "(for example %s); rename them to keep both", len(dups), base, "; ".join(dups[:3]))
+
+
+def iter_corpus_files(root: str | os.PathLike[str], suffixes: Iterable[str] | None = None, *,
+                      warn_duplicates: bool = True) -> Iterator[CorpusFile]:
     """The regular files under ``root`` in the portable order described in the module docstring.
 
     ``suffixes`` (for example ``(".md", ".txt")``) keeps only files whose lower-cased suffix is listed; the
-    comparison uses :attr:`pathlib.Path.suffix`, as the callers always did. ``root`` may also be a single
+    comparison uses :attr:`pathlib.Path.suffix`, as the callers always did. ``warn_duplicates=False`` skips the
+    duplicate-name warning for callers that label by the full relative path. ``root`` may also be a single
     file, which is yielded alone. A root that does not exist yields nothing.
     """
     base = Path(root).expanduser()
@@ -105,7 +123,8 @@ def iter_corpus_files(root: str | os.PathLike[str], suffixes: Iterable[str] | No
     elif base.is_dir():
         found.extend(_walk(base))
     found.sort(key=lambda t: (t[0], t[1]))
-    for names, _raw, path in found:
-        if wanted is not None and Path(names[-1]).suffix.lower() not in wanted:
-            continue
+    chosen = [t for t in found if wanted is None or Path(t[0][-1]).suffix.lower() in wanted]
+    if warn_duplicates:
+        _warn_duplicate_names(base, chosen)
+    for names, _raw, path in chosen:
         yield CorpusFile("/".join(names), path)
