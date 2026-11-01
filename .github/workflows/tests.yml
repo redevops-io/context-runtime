@@ -3,8 +3,8 @@ name: tests
 on:
   push:
     branches: ["main"]
+  # No base-branch filter: a pull request stacked on another branch is tested too.
   pull_request:
-    branches: ["main"]
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
