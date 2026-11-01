@@ -388,7 +388,8 @@ def locked_append(path: str | os.PathLike[str], text: str, *, encoding: str = "u
     A bare ``open(path, "a")`` is not enough on Windows: the C runtime implements append as "seek to the end, then
     write", so two writers that seek before either writes overwrite each other's line (observed: lines lost in
     nearly every barrier-released round of three threads on a Windows runner; none on Linux or macOS). The lock
-    makes the seek and the write one critical section on every platform. ``text`` is written as given (end it with
+    makes the seek and the write one critical section on every platform. The wait is bounded by ``timeout`` for the
+    in-process lock and again for the file lock, so the worst case is about twice ``timeout``. ``text`` is written as given (end it with
     ``"\n"`` for a line-oriented log) in a single ``write`` call, flushed, and ``fsync``-ed unless
     ``durable=False`` (for diagnostic logs where losing the last line in a crash is acceptable).
     """
@@ -451,16 +452,14 @@ def locking_strict(governance: bool = False, env: Mapping[str, str] | None = Non
 
 
 _append_locks: dict[str, threading.Lock] = {}
+_thread_locks: dict[str, threading.Lock] = {}
+_thread_locks_guard = threading.Lock()
 
 
 def _append_lock_for(path: Path) -> threading.Lock:
     key = os.path.abspath(path)
     with _thread_locks_guard:
         return _append_locks.setdefault(key, threading.Lock())
-
-
-_thread_locks: dict[str, threading.Lock] = {}
-_thread_locks_guard = threading.Lock()
 
 
 def _thread_lock_for(path: Path) -> threading.Lock:
@@ -551,3 +550,16 @@ def file_lock(path: str | os.PathLike[str], *, timeout: float = 10.0, poll: floa
                 _unlock(fh)
     finally:
         fh.close()
+
+
+def _reset_thread_locks_after_fork() -> None:
+    """A forked child has only the forking thread: a lock another thread held (or was acquiring) at fork time would
+    stay locked forever. Give the child fresh registries and a fresh guard."""
+    global _append_locks, _thread_locks, _thread_locks_guard
+    _append_locks = {}
+    _thread_locks = {}
+    _thread_locks_guard = threading.Lock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_thread_locks_after_fork)

@@ -8,6 +8,7 @@ and processes together through a barrier (the schedule that exposes it) and requ
 from __future__ import annotations
 
 import json
+import os
 import multiprocessing
 import threading
 from pathlib import Path
@@ -212,3 +213,58 @@ def test_threads_of_one_process_queue_on_the_in_process_lock(tmp_path, monkeypat
     for t in ts:
         t.join(TIMEOUT)
     assert len(path.read_text(encoding="utf-8").splitlines()) == 400
+
+
+# ───────────────────────── fork safety of the in-process locks ─────────────────────────
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="fork exists only on POSIX")
+def test_a_forked_child_is_not_blocked_by_locks_other_threads_held_at_fork_time(tmp_path):
+    """A forked child keeps only the forking thread. A per-path lock (or the registry guard) that another thread
+    held at fork time must not stay locked in the child: it gets fresh locks."""
+    import time
+    import warnings
+
+    from context_runtime import platform_services as ps
+    path = tmp_path / "forked.log"
+    path.touch()
+    held, release = threading.Event(), threading.Event()
+    lock = ps._append_lock_for(ps.lock_path_for(path))
+
+    def holder():
+        with lock, ps._thread_locks_guard:                    # both at once, as a thread caught mid-operation
+            held.set()
+            release.wait(30)
+
+    t = threading.Thread(target=holder)
+    t.start()
+    assert held.wait(10)
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)      # fork() in a multi-threaded process
+            pid = os.fork()
+        if pid == 0:                                             # child
+            code = 1
+            try:
+                import signal
+                signal.alarm(15)                                 # never outlive the test if it blocks on a lock
+                t0 = time.monotonic()
+                locked_append(path, "from-child\n", timeout=3)
+                code = 0 if time.monotonic() - t0 < 2 else 2
+            finally:
+                os._exit(code)
+        deadline = time.monotonic() + 30
+        while True:
+            done, status = os.waitpid(pid, os.WNOHANG)
+            if done:
+                break
+            if time.monotonic() > deadline:
+                os.kill(pid, 9)
+                os.waitpid(pid, 0)
+                pytest.fail("the forked child blocked on a lock inherited from another thread")
+            time.sleep(0.05)
+    finally:
+        release.set()
+        t.join(10)
+    assert os.waitstatus_to_exitcode(status) == 0, "the child blocked on a lock inherited from another thread"
+    assert "from-child" in path.read_text(encoding="utf-8")
+    locked_append(path, "from-parent\n")                         # and the parent's own locks are unaffected

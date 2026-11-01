@@ -15,7 +15,7 @@ import warnings
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SCANNED = ("context_runtime", "scripts", "eval", "benchmarks", "examples")
+SCANNED = ("context_runtime", "scripts", "eval", "benchmarks", "examples", "deploy")
 
 #: (file relative to the repo root, enclosing function) -> (expected number of bare appends, reason).
 #: More occurrences than listed fail the test; fewer only warn, so an entry can be cleaned up later at leisure.
@@ -23,7 +23,7 @@ ALLOWED = {
     ("context_runtime/platform_services.py", "locked_append"):
         (1, "the helper itself: appends inside the in-process and file locks"),
     ("context_runtime/control_plane/context.py", "_append"):
-        (1, "append semantics covered by dedicated tests in that module"),
+        (1, "unchanged in this change"),
 }
 
 _MODE = re.compile(r"^[rwxabt+]{1,4}$")            # a string that looks like a file mode
@@ -39,7 +39,7 @@ def _dotted(fn: ast.expr) -> str:
         return fn.id
     if isinstance(fn, ast.Attribute):
         base = _dotted(fn.value)
-        return f"{base}.{fn.attr}" if base else fn.attr
+        return f"{base or '?'}.{fn.attr}"          # '?' = a receiver that is not a plain name (a call, `a / b` ...)
     return ""
 
 
@@ -132,7 +132,8 @@ def _v(src: str, rel: str = "<src>") -> list[str]:
 def test_detector_flags_every_append_form():
     for src in (
         "open(p, 'a')", "open(p, mode='ab')", "open(p, 'a+', encoding='utf-8')", "q.open('a', encoding='utf-8')",
-        "Path(p).open(mode='ab')", "io.open(p, 'a')", "codecs.open(p, 'a', 'utf-8')", "gzip.open(p, 'ab')",
+        "Path(p).open(mode='ab')", "Path(p).open('a')", "(base / 'x').open('ab')", "get().open('a')",
+        "obj.child.open('a+')", "io.open(p, 'a')", "codecs.open(p, 'a', 'utf-8')", "gzip.open(p, 'ab')",
         "gzip.open(p, 'at')", "bz2.open(p, 'ab')", "tarfile.open(p, 'a')", "os.fdopen(fd, 'a')",
         "os.open(p, os.O_WRONLY | os.O_APPEND)", "from os import O_APPEND\nflags = O_APPEND",
         "logging.FileHandler('x.log')", "handlers.RotatingFileHandler('x.log')",
@@ -148,7 +149,8 @@ def test_detector_ignores_reads_writes_and_unrelated_open_methods():
         "logging.FileHandler('x', 'w')", "logging.basicConfig(filename='x.log', filemode='w')",
         "logging.basicConfig(level=10)", "webbrowser.open('https://example.com/a')", "zf.open('data.json')",
         "Image.open('a.png')", "pdfplumber.open(p)", "opener.open(req, timeout=5)", "tarfile.open(p, 'r:gz')",
-        "codecs.open(p, 'r', 'utf-8')", "x.open(path_variable)", "gzip.open(p, m)", "io.open(p, m)",
+        "codecs.open(p, 'r', 'utf-8')", "x.open(path_variable)", "Path(p).open('r')", "(base / 'a.png').open('rb')",
+        "get().open(mode_variable)", "gzip.open(p, m)", "io.open(p, m)",
     ):
         assert _v(src) == [], src
 
