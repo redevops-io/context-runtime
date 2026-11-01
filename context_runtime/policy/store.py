@@ -85,7 +85,7 @@ class RuleStore:
 
     def _locked(self, scope: str):
         """Inter-process lock around a read-modify-write of one scope file."""
-        return file_lock(lock_path_for(self._path(scope)))
+        return file_lock(lock_path_for(self._path(scope)), governance=True)
 
     # ── CRUD ──
     def add(self, scope: str, kind: str, text: str, *, action: str = "deny", match: dict | None = None,

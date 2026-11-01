@@ -246,7 +246,7 @@ class DeploymentScanner:
         image = self._docker_image()
         if image:
             import tempfile
-            with tempfile.TemporaryDirectory(prefix="zap_") as workdir:
+            with tempfile.TemporaryDirectory(prefix="zap_", ignore_cleanup_errors=True) as workdir:
                 os.chmod(workdir, 0o777)   # ZAP container's 'zap' user must be able to write the report
                 # --network host so the container can reach host-loopback / LAN deployments
                 # (a container's 127.0.0.1 is its own, not the host's). Works for public URLs too.

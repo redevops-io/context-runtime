@@ -19,10 +19,12 @@ from __future__ import annotations
 
 import contextlib
 import errno
+import hashlib
 import logging
 import os
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Iterator, Mapping
 from pathlib import Path
@@ -62,8 +64,14 @@ def os_family(platform: str | None = None) -> str:
 
 
 def in_container(env: Mapping[str, str] | None = None, platform: str | None = None) -> bool:
-    """True on a Linux host that is a container: ``CONTEXT_RUNTIME_CONTAINER`` (1/0 forces the answer), the
-    Docker/Podman marker files, or a Kubernetes pod. Containers keep their historical layout."""
+    """True on a Linux host that is a container. Containers keep their historical layout.
+
+    ``CONTEXT_RUNTIME_CONTAINER=1`` or ``0`` forces the answer and is the explicit override when detection is
+    wrong. Otherwise a container is recognised by any of: the Docker or Podman marker files, a Kubernetes pod
+    (``KUBERNETES_SERVICE_HOST``), Amazon ECS / Fargate (``ECS_CONTAINER_METADATA_URI`` or ``..._V4``,
+    ``AWS_EXECUTION_ENV`` starting with ``AWS_ECS``), Google Cloud Run (``K_SERVICE``), or a container runtime
+    named in ``/proc/1/cgroup``.
+    """
     e = os.environ if env is None else env
     forced = e.get(CONTAINER_ENV, "").strip().lower()
     if forced in ("1", "true", "yes"):
@@ -72,7 +80,24 @@ def in_container(env: Mapping[str, str] | None = None, platform: str | None = No
         return False
     if os_family(platform) != "linux":
         return False
-    return bool(e.get("KUBERNETES_SERVICE_HOST")) or os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv")
+    if any(e.get(k) for k in ("KUBERNETES_SERVICE_HOST", "ECS_CONTAINER_METADATA_URI",
+                              "ECS_CONTAINER_METADATA_URI_V4", "K_SERVICE")):
+        return True
+    if e.get("AWS_EXECUTION_ENV", "").startswith("AWS_ECS"):
+        return True
+    if os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv"):
+        return True
+    cg = _cgroup_text()
+    return any(marker in cg for marker in ("docker", "kubepods", "containerd", "libpod", "ecs", "crio"))
+
+
+def _cgroup_text() -> str:
+    """The text of ``/proc/1/cgroup`` (empty when unreadable); a function so tests can substitute it."""
+    try:
+        with open("/proc/1/cgroup", encoding="utf-8", errors="replace") as fh:
+            return fh.read(65536)
+    except OSError:
+        return ""
 
 
 _warned: set[str] = set()
@@ -121,9 +146,10 @@ def state_dir(*, env: Mapping[str, str] | None = None, platform: str | None = No
     """Where durable state (approvals, policies, learned stats) lives.
 
     Order: ``CONTEXT_RUNTIME_HOME`` / ``AGENTIC_OS_HOME`` > container layout (the working-directory-relative
-    ``.context-runtime`` that containers have always used) > an existing legacy ``.context-runtime`` in the
-    working directory (kept so data written by an older version is not orphaned) > the host convention.
-    The keyword arguments exist for tests; production callers pass none.
+    ``.context-runtime`` that containers have always used) > a non-empty legacy ``.context-runtime`` in the
+    working directory > the host convention. The legacy directory is used whenever it holds anything, even if
+    the platform directory also exists, so a start never silently switches to empty state; one warning names
+    both paths and says how to migrate. The keyword arguments exist for tests; production callers pass none.
     """
     e = os.environ if env is None else env
     explicit = _first_env(e, STATE_ENV)
@@ -133,21 +159,32 @@ def state_dir(*, env: Mapping[str, str] | None = None, platform: str | None = No
         return Path(LEGACY_STATE_DIRNAME)
     target = _platform_dir("state", e, os_family(platform), _home(e, home))
     legacy = Path(LEGACY_STATE_DIRNAME)
-    if not target.exists() and legacy.is_dir():
-        _warn_once(f"using the existing working-directory state {legacy.resolve()}; move it to {target} "
-                   "or set CONTEXT_RUNTIME_HOME")
+    if _non_empty_dir(legacy) or (legacy.is_dir() and not target.exists()):
+        both = f" (the platform directory {target} also exists and is NOT used)" if target.exists() else ""
+        _warn_once(f"using the existing working-directory state {legacy.resolve()}{both}; to move to the platform "
+                   f"location, copy its contents to {target} and remove {legacy.resolve()}, or set "
+                   "CONTEXT_RUNTIME_HOME to pick one explicitly")
         return legacy
     return target
+
+
+def _non_empty_dir(path: Path) -> bool:
+    try:
+        return path.is_dir() and any(path.iterdir())
+    except OSError:
+        return False
 
 
 def state_path(*parts: str, container_default: str | None = None, env: Mapping[str, str] | None = None,
                platform: str | None = None, home: Path | None = None, container: bool | None = None) -> Path:
     """A path below :func:`state_dir`. ``container_default`` is the absolute location a container has
-    always used for this item (for example ``/data/context-runtime/policy``); it applies only in a
-    container and only when ``CONTEXT_RUNTIME_HOME`` is not set."""
+    always used for this item (for example ``/data/context-runtime/policy``); in a container it always applies,
+    including when ``CONTEXT_RUNTIME_HOME`` is set (as ``/data`` in the compose files): that variable never
+    moved these items and must not start to. An item's own variable (``POLICY_DIR`` ...) is handled by its
+    caller and wins over everything."""
     e = os.environ if env is None else env
     is_container = in_container(e, platform) if container is None else container
-    if container_default and is_container and not _first_env(e, STATE_ENV):
+    if container_default and is_container:
         return Path(container_default)
     return state_dir(env=e, platform=platform, home=home, container=is_container).joinpath(*parts)
 
@@ -166,8 +203,8 @@ def config_file(name: str = "config.yaml", *, env: Mapping[str, str] | None = No
                 platform: str | None = None, home: Path | None = None,
                 container: bool | None = None) -> Path:
     """The configuration file: ``CONTEXT_RUNTIME_CONFIG`` / ``AGENTIC_OS_CONFIG`` > container layout (the
-    working-directory ``name`` containers have always used) > an existing working-directory file with no
-    file in the config directory (legacy) > ``config_dir() / name``."""
+    working-directory ``name`` containers have always used) > an existing working-directory file (legacy; used
+    even when the config directory also has one, with a warning naming both) > ``config_dir() / name``."""
     e = os.environ if env is None else env
     explicit = _first_env(e, CONFIG_FILE_ENV)
     if explicit:
@@ -175,8 +212,10 @@ def config_file(name: str = "config.yaml", *, env: Mapping[str, str] | None = No
     if in_container(e, platform) if container is None else container:
         return Path(name)
     target = config_dir(env=e, platform=platform, home=home) / name
-    if not target.exists() and Path(name).is_file():
-        _warn_once(f"using the working-directory {Path(name).resolve()}; move it to {target}")
+    if Path(name).is_file():
+        both = f" (the file {target} also exists and is NOT used)" if target.exists() else ""
+        _warn_once(f"using the working-directory {Path(name).resolve()}{both}; to move to the platform location, "
+                   f"copy it to {target} and remove it here, or set CONTEXT_RUNTIME_CONFIG to pick one explicitly")
         return Path(name)
     return target
 
@@ -192,8 +231,8 @@ def cache_dir(*, env: Mapping[str, str] | None = None, platform: str | None = No
 
 
 def ensure_private_dir(path: str | os.PathLike[str]) -> Path:
-    """``mkdir -p`` where every directory this call creates is 0700 on POSIX (existing directories are
-    never changed). On Windows the new directory inherits the user-profile ACL, which is the intent for
+    """``mkdir -p`` where every directory this call creates is 0700 on POSIX (``0777 & ~umask`` with
+    ``CONTEXT_RUNTIME_SHARED=1``); existing directories are never changed. On Windows the new directory inherits the user-profile ACL, which is the intent for
     ``%LOCALAPPDATA%``."""
     p = Path(path)
     missing: list[Path] = []
@@ -205,13 +244,41 @@ def ensure_private_dir(path: str | os.PathLike[str]) -> Path:
         cur = cur.parent
     for d in reversed(missing):
         try:
-            d.mkdir(mode=0o700) if os.name == "posix" else d.mkdir()
+            d.mkdir(mode=default_dir_mode()) if os.name == "posix" else d.mkdir()
         except FileExistsError:
             continue
         if os.name == "posix":
             with contextlib.suppress(OSError):
-                os.chmod(d, 0o700)   # mkdir's mode is masked by the umask
+                os.chmod(d, default_dir_mode())   # mkdir's mode is masked by the umask
     return p
+
+
+# ───────────────────────────────── permissions ─────────────────────────────────
+
+SHARED_ENV = "CONTEXT_RUNTIME_SHARED"
+
+
+def shared_directory() -> bool:
+    """True when the operator declared that state is shared with other users or containers
+    (``CONTEXT_RUNTIME_SHARED=1``). Files and lock files then get the process umask's default permissions
+    instead of the private 0600 / 0700 used otherwise."""
+    return os.environ.get(SHARED_ENV, "").strip().lower() in ("1", "true", "yes")
+
+
+def _umask() -> int:
+    old = os.umask(0)
+    os.umask(old)
+    return old
+
+
+def default_file_mode() -> int:
+    """Mode for a new state file: 0600, or ``0666 & ~umask`` when :func:`shared_directory`."""
+    return (0o666 & ~_umask()) if shared_directory() else 0o600
+
+
+def default_dir_mode() -> int:
+    """Mode for a new state directory: 0700, or ``0777 & ~umask`` when :func:`shared_directory`."""
+    return (0o777 & ~_umask()) if shared_directory() else 0o700
 
 
 # ───────────────────────────────── atomic write ─────────────────────────────────
@@ -238,7 +305,8 @@ def _replace_with_retry(src: str, dst: str, *, retries: int = REPLACE_RETRIES, s
 
 
 def _fsync_dir(directory: Path) -> None:
-    """Make the rename itself durable. Directories cannot be opened on Windows; skip there."""
+    """Make the rename itself durable. Directories cannot be opened on Windows; skip there. The data is
+    already in place when this runs, so a failure to sync the directory is logged, not raised."""
     if os.name != "posix":
         return
     try:
@@ -247,30 +315,56 @@ def _fsync_dir(directory: Path) -> None:
         return
     try:
         os.fsync(fd)
-    except OSError as e:  # some file systems (and network mounts) refuse fsync on a directory
-        if e.errno not in (errno.EINVAL, errno.ENOTSUP, errno.EBADF, errno.EACCES):
-            raise
+    except OSError as e:
+        _log.debug("fsync of directory %s failed (%s); the write itself succeeded", directory, e)
     finally:
         os.close(fd)
 
 
+def _name_max(directory: Path) -> int:
+    try:
+        return int(os.pathconf(directory, "PC_NAME_MAX"))
+    except (AttributeError, ValueError, OSError):
+        return 255
+
+
+def _fit_name(stem: str, extra_bytes: int, limit: int) -> str:
+    """``stem`` shortened (on a character boundary) so that ``stem`` plus ``extra_bytes`` fits ``limit`` bytes."""
+    room = max(8, limit - extra_bytes)
+    raw = stem.encode("utf-8")
+    if len(raw) <= room:
+        return stem
+    return raw[:room].decode("utf-8", errors="ignore")
+
+
 def atomic_write(path: str | os.PathLike[str], data: str | bytes, *, encoding: str = "utf-8",
-                 mode: int = 0o600) -> None:
+                 mode: int | None = None) -> None:
     """Replace ``path`` with ``data`` so a reader sees either the old file or the new one, never a partial.
 
-    The temporary file has a unique name (two writers never share it) and lives in the target's directory
-    (the rename cannot cross a file system). A new file is created ``mode`` (0600 by default, POSIX); an
-    existing target keeps its permissions. The parent directory is created if missing.
+    * The temporary file has a unique name (two writers never share it), is derived from the target name but
+      shortened so it never exceeds the file system's name limit, and lives in the target's directory (the
+      rename cannot cross a file system).
+    * A symlink at ``path`` is written through (the link survives and its target is replaced), as
+      ``Path.write_text`` did.
+    * An existing file keeps its permissions; a read-only existing file raises ``PermissionError`` (POSIX,
+      for a user who could not write it), as ``write_text`` did. A new file is created with ``mode``
+      (default :func:`default_file_mode`: 0600, or the umask default when ``CONTEXT_RUNTIME_SHARED=1``).
+    * Missing parent directories are created with :func:`ensure_private_dir`.
     """
-    target = Path(path)
+    target = Path(os.path.realpath(path))
     parent = target.parent
     ensure_private_dir(parent)
     payload = data.encode(encoding) if isinstance(data, str) else data
     try:
-        keep = os.stat(target).st_mode & 0o777
+        st = os.stat(target)
     except OSError:
-        keep = mode
-    fd, tmp = tempfile.mkstemp(dir=parent, prefix=f".{target.name}.", suffix=".tmp")
+        keep = default_file_mode() if mode is None else mode
+    else:
+        keep = st.st_mode & 0o777
+        if os.name == "posix" and not os.access(target, os.W_OK):
+            raise PermissionError(errno.EACCES, "target is read-only", str(target))
+    prefix = "." + _fit_name(target.name, 4 + 8 + 2, _name_max(parent) - 1) + "."
+    fd, tmp = tempfile.mkstemp(dir=parent, prefix=prefix, suffix=".tmp")
     try:
         with os.fdopen(fd, "wb") as fh:
             fh.write(payload)
@@ -287,7 +381,7 @@ def atomic_write(path: str | os.PathLike[str], data: str | bytes, *, encoding: s
 
 
 def locked_append(path: str | os.PathLike[str], text: str, *, encoding: str = "utf-8",
-                  timeout: float = 10.0, mode: int = 0o600) -> None:
+                  timeout: float = 10.0, mode: int | None = None) -> None:
     """Append ``text`` to ``path`` under :func:`file_lock` as one write, flushed and ``fsync``-ed, so lines
     from concurrent processes are never interleaved."""
     target = Path(path)
@@ -300,7 +394,7 @@ def locked_append(path: str | os.PathLike[str], text: str, *, encoding: str = "u
             os.fsync(fh.fileno())
         if not existed and os.name == "posix":
             with contextlib.suppress(OSError):
-                os.chmod(target, mode)
+                os.chmod(target, default_file_mode() if mode is None else mode)
 
 
 # ───────────────────────────────── file lock ─────────────────────────────────
@@ -309,14 +403,46 @@ class LockTimeout(TimeoutError):
     """The lock could not be taken within the timeout."""
 
 
+LOCKING_ENV = "CONTEXT_RUNTIME_LOCKING"          # strict | best-effort
+#: errno values that mean "this file system cannot do advisory locks" (NFS without lockd, some FUSE, 9p, SMB).
+_NO_LOCK_ERRNOS = {getattr(errno, n) for n in ("ENOLCK", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EINVAL")
+                   if hasattr(errno, n)}
+
+
 def lock_path_for(path: str | os.PathLike[str]) -> Path:
     """The sidecar lock file for a data file: ``<name>.lock`` next to it (never the data file itself, which
-    is replaced by rename)."""
+    is replaced by rename). A very long name is shortened with a digest so the lock name fits."""
     p = Path(path)
-    return p.with_name(p.name + ".lock")
+    name = p.name
+    if len(name.encode("utf-8")) + 5 > 255:
+        digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
+        name = _fit_name(name, 5 + 9, 255) + "~" + digest
+    return p.with_name(name + ".lock")
+
+
+def locking_strict(governance: bool = False, env: Mapping[str, str] | None = None) -> bool:
+    """Whether a lock that the file system cannot provide is an error. ``CONTEXT_RUNTIME_LOCKING=strict`` or
+    ``best-effort`` decides; unset, stores that hold governance data (``governance=True``) are strict and the
+    others best-effort."""
+    e = os.environ if env is None else env
+    v = e.get(LOCKING_ENV, "").strip().lower()
+    if v in ("strict", "best-effort", "besteffort", "best_effort"):
+        return v == "strict"
+    return governance
+
+
+_thread_locks: dict[str, threading.Lock] = {}
+_thread_locks_guard = threading.Lock()
+
+
+def _thread_lock_for(path: Path) -> threading.Lock:
+    key = os.path.abspath(path)
+    with _thread_locks_guard:
+        return _thread_locks.setdefault(key, threading.Lock())
 
 
 def _try_lock(fh) -> bool:
+    """True when the lock was taken, False when somebody else holds it. Raises ``OSError`` for anything else."""
     if fcntl is not None:
         try:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -330,8 +456,10 @@ def _try_lock(fh) -> bool:
             fh.seek(0)
             msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
             return True
-        except OSError:
-            return False
+        except OSError as e:
+            if e.errno in (errno.EACCES, errno.EDEADLK, getattr(errno, "EDEADLOCK", errno.EDEADLK)):
+                return False       # lock violation: held by another handle
+            raise
     raise RuntimeError("no file-locking primitive available on this platform")
 
 
@@ -344,26 +472,54 @@ def _unlock(fh) -> None:
 
 
 @contextlib.contextmanager
-def file_lock(path: str | os.PathLike[str], *, timeout: float = 10.0, poll: float = 0.02) -> Iterator[None]:
-    """Hold an exclusive inter-process lock on ``path`` (created if needed, mode 0600) for the block.
+def file_lock(path: str | os.PathLike[str], *, timeout: float = 10.0, poll: float = 0.02,
+              governance: bool = False, strict: bool | None = None) -> Iterator[None]:
+    """Hold an exclusive inter-process lock on ``path`` (created if needed) for the block.
 
     Polls until ``timeout`` seconds have passed, then raises :class:`LockTimeout`. The OS releases the lock
     if the holder dies. Not re-entrant (a second acquisition of the same path in one process waits for the
     first and so deadlocks until the timeout); keep critical sections short.
+
+    On a file system that cannot lock (``ENOLCK``, ``ENOTSUP``, ``EOPNOTSUPP``, ``ENOSYS``, ``EINVAL``), the
+    behaviour follows ``CONTEXT_RUNTIME_LOCKING`` (or ``strict=``): ``strict`` re-raises the ``OSError``;
+    ``best-effort`` logs ONE warning naming the path and falls back to a lock that serialises threads of this
+    process only (other processes are NOT excluded). Unset, ``governance=True`` stores are strict and the
+    rest best-effort. The lock file is 0600 (or the umask default with ``CONTEXT_RUNTIME_SHARED=1``).
     """
     lock_path = Path(path)
     ensure_private_dir(lock_path.parent)
-    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, default_file_mode())
     fh = os.fdopen(fd, "r+b", buffering=0)
+    thread_lock = None
     try:
         deadline = time.monotonic() + max(0.0, timeout)
-        while not _try_lock(fh):
+        while True:
+            try:
+                got = _try_lock(fh)
+            except OSError as e:
+                if e.errno not in _NO_LOCK_ERRNOS:
+                    raise
+                if locking_strict(governance) if strict is None else strict:
+                    raise
+                _warn_once(f"file locking is not supported at {lock_path} ({errno.errorcode.get(e.errno, e.errno)}); "
+                           "serialising threads of this process only, other processes are NOT excluded. "
+                           f"Set {LOCKING_ENV}=strict to fail instead.")
+                thread_lock = _thread_lock_for(lock_path)
+                if not thread_lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
+                    thread_lock = None
+                    raise LockTimeout(f"could not lock {lock_path} within {timeout:g}s") from None
+                break
+            if got:
+                break
             if time.monotonic() >= deadline:
                 raise LockTimeout(f"could not lock {lock_path} within {timeout:g}s")
             time.sleep(poll)
         try:
             yield
         finally:
-            _unlock(fh)
+            if thread_lock is not None:
+                thread_lock.release()
+            else:
+                _unlock(fh)
     finally:
         fh.close()

@@ -1,8 +1,10 @@
 """DuckDB-backed store — a persistent BM25 index (StorePlugin/RetrieverPlugin surface).
 
-The in-memory store rebuilds its BM25 stats in the process; DuckDB gives the same lexical
+The in-memory store rebuilds its BM25 stats in the process; DuckDB gives lexical
 retrieval backed by a real, persistent index (its `fts` extension computes Okapi BM25 in
-the engine). This is the concrete backend the 3-index chat memory and the sharded
+the engine). When the extension cannot be loaded the store falls back to an APPROXIMATE lexical search in
+process (the in-memory store's tokeniser and BM25): same kind of ranking, but NOT score-compatible with the
+engine and not identical in which queries match (see `_fallback_search`). This is the concrete backend the 3-index chat memory and the sharded
 retriever map onto for real corpora: one DuckDB file per shard / per user's local data.
 
     store = DuckDBStore(path="finance.duckdb")   # or ":memory:"
@@ -57,8 +59,8 @@ class DuckDBStore:
         # reindex) are serialized by this lock so the control plane can serve concurrently.
         self._write_lock = threading.Lock()
         self._db = _duckdb().connect(path)
-        # BM25 runs in the engine when the `fts` extension loads; otherwise the same BM25 runs in-process
-        # (see _fallback_search). Nothing is downloaded unless install_fts / INSTALL_FTS_ENV says so.
+        # BM25 runs in the engine when the `fts` extension loads; otherwise an approximate lexical fallback runs
+        # in process (see _fallback_search). Nothing is downloaded unless install_fts / INSTALL_FTS_ENV says so.
         self._fts = self._load_fts(fts_extension, install_fts)
         self._fallback = None
         self._db.execute(
@@ -75,7 +77,7 @@ class DuckDBStore:
         Order: an explicit extension file (argument or ``FTS_EXTENSION_ENV``) > a pre-provisioned extension
         directory (``EXTENSION_DIR_ENV``) > an extension DuckDB already has installed > an opt-in
         ``INSTALL fts`` (``install_fts=True`` or ``INSTALL_FTS_ENV=1``). When none works the store logs one
-        line and uses the in-memory BM25 path.
+        line and uses the approximate in-memory lexical fallback.
         """
         db = self._db
         ext_file = extension or os.environ.get(FTS_EXTENSION_ENV, "").strip()
@@ -99,7 +101,7 @@ class DuckDBStore:
                 db.execute("LOAD fts")
             return True
         except Exception as e:  # noqa: BLE001
-            _log.warning("duckdb: the fts extension is not available (%s: %s); using the in-memory BM25 path "
+            _log.warning("duckdb: the fts extension is not available (%s: %s); using the APPROXIMATE in-memory lexical fallback (not score-compatible with the engine) "
                          "(set %s to a bundled fts.duckdb_extension, or %s=1 to allow a one-time download)",
                          type(e).__name__, str(e).splitlines()[0][:160] if str(e) else "", FTS_EXTENSION_ENV,
                          INSTALL_FTS_ENV)
@@ -107,7 +109,7 @@ class DuckDBStore:
 
     @property
     def fts_available(self) -> bool:
-        """True when BM25 runs in DuckDB's `fts` index, False on the in-memory fallback."""
+        """True when BM25 runs in DuckDB's `fts` index, False on the approximate in-memory fallback."""
         return self._fts
 
     def _insert(self, docs: list[dict]) -> int:
@@ -128,14 +130,24 @@ class DuckDBStore:
                 self._db.execute("PRAGMA create_fts_index('docs','chunk_id','text', overwrite=1)")
 
     def _fallback_search(self, query: str, k: int) -> list[Hit]:
-        """BM25 over the same rows in process (no extension). Rebuilt after any change to the table."""
-        fb = self._fallback
-        if fb is None:
-            from .store_inmemory import InMemoryStore
-            rows = self._db.cursor().execute("SELECT chunk_id, filename, text FROM docs ORDER BY chunk_id").fetchall()
-            fb = InMemoryStore([{"chunk_id": r[0], "filename": r[1], "text": r[2], "created_at": None}
-                                for r in rows], source=self.source)
-            self._fallback = fb
+        """Approximate lexical search in process, used when the `fts` extension is unavailable.
+
+        It runs the in-memory store's BM25 over the same rows, which is NOT the engine's BM25: the engine drops
+        English stop words and digit tokens and stems with Porter, the fallback does none of that, and the score
+        scales differ. A query can therefore match more (``the``, ``404``) or fewer (``errors`` vs ``error``)
+        chunks than on the engine path, and scores must not be compared across the two. The snapshot is built
+        and installed under the write lock, so a concurrent insert (which resets it under the same lock) can
+        never be overwritten by an older snapshot.
+        """
+        with self._write_lock:
+            fb = self._fallback
+            if fb is None:
+                from .store_inmemory import InMemoryStore
+                rows = self._db.cursor().execute(
+                    "SELECT chunk_id, filename, text FROM docs ORDER BY chunk_id").fetchall()
+                fb = InMemoryStore([{"chunk_id": r[0], "filename": r[1], "text": r[2], "created_at": None}
+                                    for r in rows], source=self.source)
+                self._fallback = fb
         return fb.search(query, k, method="bm25")
 
     def index(self, path: str) -> dict:

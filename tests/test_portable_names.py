@@ -14,7 +14,7 @@ from context_runtime.pathnames import MAX_COMPONENT, is_windows_reserved, portab
 from context_runtime.policy.store import RuleStore, _safe
 from context_runtime.types import RawAsset
 
-RESERVED = ["con", "CON", "prn", "aux", "nul", "com1", "COM9", "lpt1", "LPT9", "con.txt", "nul.tar.gz",
+RESERVED = ["con", "CON", "prn", "aux", "nul", "com0", "COM1", "COM9", "lpt0", "lpt1", "LPT9", "con.txt", "nul.tar.gz",
             "com¹", "conin$"]
 
 
@@ -85,3 +85,20 @@ def test_explicit_archive_directory_is_kept(tmp_path):
     del arch
     gc.collect()
     assert (tmp_path / "keep").is_dir()
+
+
+def test_the_name_mapping_is_injective_for_reserved_names_and_long_names():
+    # "con" and "con_" must stay two different files (an escape marker no ordinary name contains is used)
+    assert _safe("con") != _safe("con_") and _safe("con") == "con~" and _safe("con_") == "con_"
+    assert portable_component("nul.txt") == "nul~.txt"
+    names = ["con", "con_", "nul", "nul_", "com0", "com0_", "lpt0", "x" * 200, "x" * 200 + "y", "x" * 128]
+    assert len({_safe(n) for n in names}) == len(names)
+    assert not any(is_windows_reserved(_safe(n)) for n in names)
+
+
+def test_rules_for_con_and_con_underscore_are_separate(tmp_path):
+    store = RuleStore(str(tmp_path))
+    store.add("con", "rule", "for con")
+    store.add("con_", "rule", "for con underscore")
+    assert [r.text for r in store.list(scope="con")] == ["for con"]
+    assert [r.text for r in store.list(scope="con_")] == ["for con underscore"]
