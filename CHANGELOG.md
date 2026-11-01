@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fix (Windows):** `JsonlExporter` appends each trace through `locked_append` (inter-process lock, one write, explicit newline, no per-trace `fsync`). A bare `open(path, "a")` loses lines when writers overlap on Windows, where the C runtime appends as seek-then-write. `locked_append` gains `durable=False`. A test fails on any new lock-free append writer in the package.
+
 Native Windows and macOS portability of the core library. Details and the verification status of each item: [docs/native-portability.md](docs/native-portability.md).
 
 - **Breaking change (corpus identifiers and policy scopes, all operating systems):** a corpus reference whose path segment is a Windows device name (`con`, `prn`, `aux`, `nul`, `conin$`, `conout$`, `com0`-`com9`, `lpt0`-`lpt9`, case-insensitive, with or without an extension such as `nul.txt`) is refused: `POST /librechat/ingest` answers `400 {"detail": "invalid corpus reference"}`. These names were accepted on Linux and macOS before. The policy store stores a scope with such a name under `<name>~` (for example `con~/app.jsonl`; `con` and `con_` stay separate files) and shortens file-name components over 128 characters (`...~<digest>`); rules saved under the old file names are not found and nothing is migrated automatically.
