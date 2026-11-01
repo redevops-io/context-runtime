@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+Native Windows and macOS portability of the core library. Details and the verification status of each item: [docs/native-portability.md](docs/native-portability.md).
+
 - **Breaking change (corpus identifiers and policy scopes, all operating systems):** a corpus reference whose path segment is a Windows device name (`con`, `prn`, `aux`, `nul`, `conin$`, `conout$`, `com0`-`com9`, `lpt0`-`lpt9`, case-insensitive, with or without an extension such as `nul.txt`) is refused: `POST /librechat/ingest` answers `400 {"detail": "invalid corpus reference"}`. These names were accepted on Linux and macOS before. The policy store stores a scope with such a name under `<name>~` (for example `con~/app.jsonl`; `con` and `con_` stay separate files) and shortens file-name components over 128 characters (`...~<digest>`); rules saved under the old file names are not found and nothing is migrated automatically.
 - **Behaviour change (`Archive`):** a default `Archive()` (no directory given) now lives in a `TemporaryDirectory` that is removed when the archive is garbage-collected or the interpreter exits. Before, the `mkdtemp` directory and the archived tool outputs survived the process. Pass an explicit `directory` to keep them; an explicit directory is never removed.
 - Explicit `encoding="utf-8"` for every text-mode file access and text subprocess call (the locale code page is no longer used); `tests/test_encoding_explicit.py` and a ruff PLW1514 step guard the common call forms.
@@ -13,6 +15,9 @@
 - **Behaviour change (permissions):** state files written through `atomic_write`, `locked_append` and the lock files are created 0600, and directories created by `ensure_private_dir` 0700 (the process umask, typically 0644 / 0755, applied before). An existing file keeps its mode and a read-only target is refused as `write_text` did; a symlink at the target is written through. Set `CONTEXT_RUNTIME_SHARED=1` to get the umask defaults back for a directory shared with other users or containers.
 - **Behaviour change (locking):** `RuleStore` read-modify-write and the other stores' logs take an inter-process lock. On a file system that cannot lock (`ENOLCK`, `ENOTSUP`, `EOPNOTSUPP`) `CONTEXT_RUNTIME_LOCKING=best-effort` logs one warning and serialises threads of the process only; `strict` raises. Unset, the policy store (governance data) is strict and the other stores best-effort.
 - **Behaviour change (DuckDB `fts`):** `DuckDBStore` no longer runs `INSTALL fts` by default. It loads a configured (`CONTEXT_RUNTIME_DUCKDB_FTS_EXTENSION`, `CONTEXT_RUNTIME_DUCKDB_EXTENSION_DIR`) or already installed extension, or `CONTEXT_RUNTIME_DUCKDB_INSTALL_FTS=1` allows a one-time download. Without the extension it logs one warning and uses an APPROXIMATE in-memory lexical fallback that is not score-compatible with the engine: no stop-word or digit removal, no stemming (`the` and `404` match, `errors` does not match `error`), other score scale.
+- `ImageRetriever` falls back to exact cosine search when turbovec rejects the embedding width (turbovec needs a multiple of 8); before, such a width raised `ValueError` whenever turbovec was installed.
+- CI additions: a `macos-26` Apple Silicon lane next to `macos-15`; the Windows and macOS lanes install a pinned, SHA-512-verified caddy so the demo-proxy tests run there; every test run ends with a skip summary that marks `UNVERIFIED` items.
+- Docs: [docs/native-portability.md](docs/native-portability.md) (breaking changes, directories, DuckDB extension provisioning, Windows ACL scope, what is verified).
 
 ## 0.4.1 — 2026-10-30
 
