@@ -381,20 +381,40 @@ def atomic_write(path: str | os.PathLike[str], data: str | bytes, *, encoding: s
 
 
 def locked_append(path: str | os.PathLike[str], text: str, *, encoding: str = "utf-8",
-                  timeout: float = 10.0, mode: int | None = None) -> None:
-    """Append ``text`` to ``path`` under :func:`file_lock` as one write, flushed and ``fsync``-ed, so lines
-    from concurrent processes are never interleaved."""
+                  timeout: float = 10.0, mode: int | None = None, durable: bool = True) -> None:
+    """Append ``text`` to ``path`` under :func:`file_lock` as one write, so lines from concurrent threads and
+    processes are never lost or interleaved.
+
+    A bare ``open(path, "a")`` is not enough on Windows: the C runtime implements append as "seek to the end, then
+    write", so two writers that seek before either writes overwrite each other's line (observed: lines lost in
+    nearly every barrier-released round of three threads on a Windows runner; none on Linux or macOS). The lock
+    makes the seek and the write one critical section on every platform. The wait is bounded by ``timeout`` for the
+    in-process lock and again for the file lock, so the worst case is about twice ``timeout``. ``text`` is written as given (end it with
+    ``"\n"`` for a line-oriented log) in a single ``write`` call, flushed, and ``fsync``-ed unless
+    ``durable=False`` (for diagnostic logs where losing the last line in a crash is acceptable).
+    """
     target = Path(path)
     ensure_private_dir(target.parent)
-    with file_lock(lock_path_for(target), timeout=timeout):
-        existed = target.exists()
-        with open(target, "ab") as fh:
-            fh.write(text.encode(encoding))
-            fh.flush()
-            os.fsync(fh.fileno())
-        if not existed and os.name == "posix":
-            with contextlib.suppress(OSError):
-                os.chmod(target, default_file_mode() if mode is None else mode)
+    lock_file = lock_path_for(target)
+    # Threads of this process queue on an in-process lock first (cheap, no polling) and only the winner takes the
+    # file lock. Some network file systems emulate flock with per-process byte-range locks, which do not exclude
+    # two threads of one process; this lock does.
+    thread_lock = _append_lock_for(lock_file)
+    if not thread_lock.acquire(timeout=max(0.0, timeout)):
+        raise LockTimeout(f"could not lock {lock_file} within {timeout:g}s")
+    try:
+        with file_lock(lock_file, timeout=timeout, poll=0.005):
+            existed = target.exists()
+            with open(target, "ab") as fh:
+                fh.write(text.encode(encoding))
+                fh.flush()
+                if durable:
+                    os.fsync(fh.fileno())
+            if not existed and os.name == "posix":
+                with contextlib.suppress(OSError):
+                    os.chmod(target, default_file_mode() if mode is None else mode)
+    finally:
+        thread_lock.release()
 
 
 # ───────────────────────────────── file lock ─────────────────────────────────
@@ -431,8 +451,15 @@ def locking_strict(governance: bool = False, env: Mapping[str, str] | None = Non
     return governance
 
 
+_append_locks: dict[str, threading.Lock] = {}
 _thread_locks: dict[str, threading.Lock] = {}
 _thread_locks_guard = threading.Lock()
+
+
+def _append_lock_for(path: Path) -> threading.Lock:
+    key = os.path.abspath(path)
+    with _thread_locks_guard:
+        return _append_locks.setdefault(key, threading.Lock())
 
 
 def _thread_lock_for(path: Path) -> threading.Lock:
@@ -523,3 +550,16 @@ def file_lock(path: str | os.PathLike[str], *, timeout: float = 10.0, poll: floa
                 _unlock(fh)
     finally:
         fh.close()
+
+
+def _reset_thread_locks_after_fork() -> None:
+    """A forked child has only the forking thread: a lock another thread held (or was acquiring) at fork time would
+    stay locked forever. Give the child fresh registries and a fresh guard."""
+    global _append_locks, _thread_locks, _thread_locks_guard
+    _append_locks = {}
+    _thread_locks = {}
+    _thread_locks_guard = threading.Lock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_thread_locks_after_fork)
