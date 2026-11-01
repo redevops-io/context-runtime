@@ -12,6 +12,7 @@ permissions:
   contents: read
 jobs:
   pytest:
+    name: "pytest (ubuntu-latest)"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -53,7 +54,7 @@ jobs:
   # separate jobs with their own check names so the Ubuntu `pytest` check is untouched; they are not required
   # checks (yet). No secrets are used.
   pytest-windows:
-    name: "pytest (windows-latest, native, non-required)"
+    name: "pytest (windows-latest)"
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -93,7 +94,7 @@ jobs:
         run: python -X warn_default_encoding -m pytest tests -q -rs
 
   pytest-macos:
-    name: "pytest (macos-15, Apple Silicon, native, non-required)"
+    name: "pytest (macos-15)"
     runs-on: macos-15
     timeout-minutes: 30
     steps:
@@ -131,7 +132,7 @@ jobs:
 
   # The newest Apple Silicon image GitHub offers today (macos-latest points here); macos-15 above stays as well.
   pytest-macos-26:
-    name: "pytest (macos-26, Apple Silicon, native, non-required)"
+    name: "pytest (macos-26)"
     runs-on: macos-26
     timeout-minutes: 30
     steps:
