@@ -10,6 +10,8 @@ import re
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 
+from ..pathnames import is_windows_reserved
+
 # One path segment: unreserved + a few sub-delims. No '%' (no second decoding upstream),
 # no slashes, no backslashes, no whitespace/control characters.
 _SEGMENT = re.compile(r"^[A-Za-z0-9._~!$&'()*+,;=:@-]+$")
@@ -198,7 +200,8 @@ _UNKNOWN_CORPUS = "unknown corpus"
 def corpus_segments(ref: str) -> list[str]:
     """Validate a corpus reference (an identifier or a relative path under the corpus root) and
     return its segments. Refused: empty, absolute, drive-qualified, ``.``/``..``, hidden, backslash,
-    percent-encoded or control characters, and anything outside ``[A-Za-z0-9._-]`` per segment."""
+    percent-encoded or control characters, Windows device names (``con``, ``nul``, ``com1`` ...), and
+    anything outside ``[A-Za-z0-9._-]`` per segment."""
     if not isinstance(ref, str) or not ref or len(ref) > 512:
         raise CorpusError(400, "invalid corpus reference")
     if "\\" in ref or "%" in ref or any(ord(c) < 0x20 or ord(c) == 0x7F for c in ref):
@@ -209,7 +212,7 @@ def corpus_segments(ref: str) -> list[str]:
     if not segments or len(segments) > 8:
         raise CorpusError(400, "invalid corpus reference")
     for seg in segments:
-        if not _CORPUS_SEGMENT.match(seg) or seg.endswith("."):
+        if not _CORPUS_SEGMENT.match(seg) or seg.endswith(".") or is_windows_reserved(seg):
             raise CorpusError(400, "invalid corpus reference")
     return segments
 

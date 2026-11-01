@@ -47,7 +47,7 @@ def go_results() -> dict | None:
         return None
     try:
         out = subprocess.run(["go", "run", "./cmd/dsparkbench", "--json"], cwd=GO_DIR,
-                             capture_output=True, text=True, timeout=300)
+                             capture_output=True, text=True, encoding="utf-8", timeout=300)
         if out.returncode != 0:
             return None
         return json.loads(out.stdout.strip().splitlines()[-1])

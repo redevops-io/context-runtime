@@ -79,13 +79,13 @@ class Stack:
         self.root = tmp / "corpus-root"
         for t in ("a", "b", "served"):
             (self.root / t).mkdir(parents=True)
-        (self.root / "served" / "note.md").write_text(f"# Note\n\n{SENTENCE}\n")
+        (self.root / "served" / "note.md").write_text(f"# Note\n\n{SENTENCE}\n", encoding="utf-8")
         home = tmp / "home"
         home.mkdir()
         self.procs: list[subprocess.Popen] = []
         self.stub = http.server.HTTPServer(("127.0.0.1", self.stub_port), _Stub)
         threading.Thread(target=self.stub.serve_forever, daemon=True).start()
-        base = {"HOME": str(home), "PATH": os.path.dirname(sys.executable) + ":/usr/bin:/bin",
+        base = {"HOME": str(home), "PATH": os.pathsep.join([os.path.dirname(sys.executable), *(["/usr/bin", "/bin"] if os.name == "posix" else [])]),
                 "PYTHONDONTWRITEBYTECODE": "1", "XDG_DATA_HOME": str(home / "d"), "XDG_CONFIG_HOME": str(home / "c")}
         app_env = {**base, "CONTEXT_RUNTIME_HOME": str(home / "cr"),
                    "CONTEXT_RUNTIME_API_KEY": ADMIN_KEY, "CR_TENANT_KEYS": f"{READ_KEY}=*",
@@ -96,7 +96,7 @@ class Stack:
              "--port", str(self.app_port), "--log-level", "warning"],
             env=app_env, cwd=str(home), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
         wrapper = tmp / "Caddyfile.test"
-        wrapper.write_text(f"{{\n\tadmin off\n\tauto_https off\n}}\nimport {CADDYFILE}\n")
+        wrapper.write_text(f"{{\n\tadmin off\n\tauto_https off\n}}\nimport {CADDYFILE}\n", encoding="utf-8")
         caddy_env = {**base, "CR_PROXY_LISTEN": f"http://127.0.0.1:{self.proxy_port}",
                      "CR_UPSTREAM": f"127.0.0.1:{self.app_port}", "LIBRECHAT_UPSTREAM": f"127.0.0.1:{self.stub_port}",
                      "CR_PUBLIC_READ_KEY": READ_KEY}      # the proxy gets the read key and nothing else
@@ -152,7 +152,7 @@ def stack(tmp_path_factory):
         s.close()
         out = os.environ.get("CR_DEMO_PROXY_TRANSCRIPT")
         if out:
-            Path(out).write_text("\n".join(s.log) + "\n")
+            Path(out).write_text("\n".join(s.log) + "\n", encoding="utf-8")
 
 
 def test_demo_ui_routes_work_through_the_proxy_without_a_client_credential(stack):

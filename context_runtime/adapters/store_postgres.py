@@ -97,7 +97,7 @@ class PostgresStore:
         for fp in sorted(p.rglob("*")):
             if fp.suffix.lower() in (".md", ".txt", ".rst") and fp.is_file():
                 docs.append({"chunk_id": f"{fp.name}::0", "filename": fp.name,
-                             "text": fp.read_text(errors="ignore"), "ts": fp.stat().st_mtime})
+                             "text": fp.read_text(encoding="utf-8", errors="ignore"), "ts": fp.stat().st_mtime})
         n = self._insert(docs)
         return {"files": n, "chunks": n}
 

@@ -291,7 +291,7 @@ def test_no_cookie_is_set_anywhere():
         app = mod.create_app(base)
         for p in ("/", "/healthz", "/api/summary", "/docs"):
             assert "set-cookie" not in get(app, base + p).headers
-    assert "set_cookie" not in APP_PY.read_text().lower()
+    assert "set_cookie" not in APP_PY.read_text(encoding="utf-8").lower()
 
 
 # --- mutation checks: the contract must notice a prefix removed from any one place ---------------------------------

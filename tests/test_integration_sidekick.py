@@ -71,10 +71,10 @@ def test_bandit_learns_the_rewarding_arm():
     assert b.policy()["code_reasoning"] == good.key
 
 
-def test_context_runtime_beats_naive_over_a_task_stream():
+def test_context_runtime_beats_naive_over_a_task_stream(tmp_path):
     """End-to-end mechanism check (the harness in miniature)."""
     rt = ContextRuntime.default([])
-    store = ContextRuntimeSkillStore("/tmp/context_runtime_test_skills", runtime=rt, bandit=EpsilonGreedyBandit(DEFAULT_ARMS, epsilon=0.15))
+    store = ContextRuntimeSkillStore(str(tmp_path / "skills"), runtime=rt, bandit=EpsilonGreedyBandit(DEFAULT_ARMS, epsilon=0.15))
     store.save(Skill("port-codes", "map error codes", "bm25 over logs", []))
     latent = "bm25:3:1500"
 

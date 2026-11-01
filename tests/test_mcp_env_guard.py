@@ -138,7 +138,7 @@ def test_opting_in_to_inheritance_still_works_and_is_the_only_way():
 
 def test_spawned_child_gets_none_of_many_secret_like_variables(tmp_path, monkeypatch):
     server = tmp_path / "env_server.py"
-    server.write_text(ENV_SERVER)
+    server.write_text(ENV_SERVER, encoding="utf-8")
     for name in SECRET_LIKE:
         monkeypatch.setenv(name, SYNTHETIC)
     client = MCPClient.stdio([sys.executable, str(server)])

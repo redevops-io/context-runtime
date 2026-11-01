@@ -72,7 +72,7 @@ def check_markdown(p: Path) -> None:
 
 def check_shell(code: str, p: Path, start: int) -> None:
     rel = p.relative_to(ROOT)
-    r = subprocess.run(["bash", "-n"], input=code, capture_output=True, text=True)
+    r = subprocess.run(["bash", "-n"], input=code, capture_output=True, text=True, encoding="utf-8")
     if r.returncode:
         errors.append(f"{rel}:{start}: bash -n failed: {r.stderr.strip().splitlines()[-1] if r.stderr else '?'}")
     for line in code.splitlines():

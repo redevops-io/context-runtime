@@ -28,13 +28,13 @@ def world(tmp_path, monkeypatch):
     root = tmp_path / "corpus-root"
     served = root / "served"
     served.mkdir(parents=True)
-    (served / "note.md").write_text(f"# Note\n\n{INSIDE}\n")
+    (served / "note.md").write_text(f"# Note\n\n{INSIDE}\n", encoding="utf-8")
     (served / "sub").mkdir()
-    (served / "sub" / "nested.txt").write_text("nested synthetic text KESTREL-77")
+    (served / "sub" / "nested.txt").write_text("nested synthetic text KESTREL-77", encoding="utf-8")
     outside = tmp_path / "outside"
     outside.mkdir()
-    (outside / "synthetic-note.md").write_text(f"# Synthetic note\n\n{SENTENCE}\n")
-    (outside / "b.txt").write_text("synthetic text")
+    (outside / "synthetic-note.md").write_text(f"# Synthetic note\n\n{SENTENCE}\n", encoding="utf-8")
+    (outside / "b.txt").write_text("synthetic text", encoding="utf-8")
     monkeypatch.setenv("CONTEXT_RUNTIME_API_KEY", KEY)
     monkeypatch.setenv("CONTEXT_RUNTIME_CORPUS_ROOT", str(root))
     monkeypatch.delenv("CR_TENANT_KEYS", raising=False)
@@ -190,7 +190,7 @@ def test_a_dangling_symlink_is_refused(world, client):
 def test_a_symlink_to_another_corpus_in_the_root_is_refused(world, client):
     other = world.root / "other"
     other.mkdir()
-    (other / "x.md").write_text("another corpus under the same root")
+    (other / "x.md").write_text("another corpus under the same root", encoding="utf-8")
     os.symlink(other, world.served / "other-link")
     assert _ingest(client, corpus="served").status_code == 404
 

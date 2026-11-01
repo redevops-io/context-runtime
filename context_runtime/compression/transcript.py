@@ -46,7 +46,10 @@ class Archive:
     """Append-only store of everything compaction removed. Files on disk are the source of truth."""
 
     def __init__(self, directory: str | Path | None = None, retriever: Any | None = None):
-        self.directory = Path(directory) if directory else Path(tempfile.mkdtemp(prefix="cr-archive-"))
+        # A default archive lives in a TemporaryDirectory that is removed when the Archive is garbage-collected
+        # (or at interpreter exit), so no directory is leaked. An explicit directory is never removed.
+        self._tmpdir = None if directory else tempfile.TemporaryDirectory(prefix="cr-archive-")
+        self.directory = Path(directory) if directory else Path(self._tmpdir.name)
         self.directory.mkdir(parents=True, exist_ok=True)
         if retriever is None:
             from ..adapters.store_inmemory import InMemoryStore

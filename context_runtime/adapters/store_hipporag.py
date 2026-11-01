@@ -49,7 +49,7 @@ class SimGraphRetriever:
         for fp in sorted(p.rglob("*")):
             if fp.suffix.lower() in (".md", ".txt", ".rst") and fp.is_file():
                 self.docs.append({"chunk_id": f"{fp.name}::0", "filename": fp.name,
-                                  "text": fp.read_text(errors="ignore"), "created_at": None})
+                                  "text": fp.read_text(encoding="utf-8", errors="ignore"), "created_at": None})
                 n += 1
         return {"files": n, "chunks": n}
 
@@ -139,7 +139,7 @@ class HippoRAGRetriever:
             docs = list(path_or_docs)
         else:
             p = Path(path_or_docs).expanduser()
-            docs = [fp.read_text(errors="ignore") for fp in sorted(p.rglob("*"))
+            docs = [fp.read_text(encoding="utf-8", errors="ignore") for fp in sorted(p.rglob("*"))
                     if fp.suffix.lower() in (".md", ".txt", ".rst") and fp.is_file()]
         for i, text in enumerate(docs):
             self._doc_meta[text] = {"chunk_id": f"hr::{i}", "filename": f"doc-{i}"}

@@ -81,7 +81,7 @@ class TurboVecRetriever:
         for fp in sorted(p.rglob("*")):
             if fp.suffix.lower() in (".md", ".txt", ".rst") and fp.is_file():
                 self.docs.append({"chunk_id": f"{fp.name}::0", "filename": fp.name,
-                                  "text": fp.read_text(errors="ignore"), "created_at": None})
+                                  "text": fp.read_text(encoding="utf-8", errors="ignore"), "created_at": None})
                 n += 1
         self._index, self._built_n = None, -1  # invalidate
         return {"files": n, "chunks": n}

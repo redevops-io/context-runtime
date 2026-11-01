@@ -62,5 +62,5 @@ def save_trace(trace: Trace, dir_path: str) -> str:
     d = Path(dir_path).expanduser()
     d.mkdir(parents=True, exist_ok=True)
     fp = d / f"{trace.id}.json"
-    fp.write_text(jsonio.dumps(trace, indent=2))
+    fp.write_text(jsonio.dumps(trace, indent=2), encoding="utf-8")
     return str(fp)
