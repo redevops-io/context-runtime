@@ -8,7 +8,6 @@ and symlinks that leave the corpus are refused. Synthetic data only.
 from __future__ import annotations
 
 import os
-import sys
 
 import pytest
 
@@ -155,7 +154,22 @@ def test_an_unknown_corpus_and_a_file_are_404(world, client):
 
 # ───────────────────────────── symlinks ─────────────────────────────
 
-pytestmark_symlink = pytest.mark.skipif(sys.platform == "win32" or not hasattr(os, "symlink"), reason="needs symlinks")
+def _can_symlink() -> bool:
+    """True when this process may create symlinks (always on POSIX; on Windows only with the symlink
+    privilege, which administrator runners and Developer Mode have). Probed, not assumed from the OS."""
+    if not hasattr(os, "symlink"):
+        return False
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        try:
+            os.symlink(os.path.join(d, "target"), os.path.join(d, "link"))
+        except (OSError, NotImplementedError):
+            return False
+    return True
+
+
+pytestmark_symlink = pytest.mark.skipif(
+    not _can_symlink(), reason="this process cannot create symlinks (Windows without the symlink privilege)")
 
 
 @pytestmark_symlink
