@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from ..ingest.corpus_files import iter_corpus_files
 from ..types import Hit
 from .store_inmemory import InMemoryStore, _token_list  # noqa: F401  (reuse tokenizer parity)
 
@@ -99,11 +100,10 @@ class SemanticRetriever:
     def index(self, path: str) -> dict:
         p = Path(path).expanduser()
         n = 0
-        for fp in sorted(p.rglob("*")) if p.is_dir() else [p]:
-            if fp.is_file() and fp.suffix.lower() in _EMBED_EXTS:
-                self.docs.append({"chunk_id": f"{fp.name}::0", "filename": fp.name,
-                                  "text": fp.read_text(encoding="utf-8", errors="ignore"), "created_at": None})
-                n += 1
+        for cf in iter_corpus_files(p, _EMBED_EXTS):
+            self.docs.append({"chunk_id": f"{cf.name}::0", "filename": cf.name,
+                              "text": cf.path.read_text(encoding="utf-8", errors="ignore"), "created_at": None})
+            n += 1
         self._emb = None  # invalidate
         self._ann = None  # invalidate any cuVS index built over the old matrix
         return {"files": n, "chunks": n}

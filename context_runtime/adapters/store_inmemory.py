@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from ..ingest.corpus_files import iter_corpus_files
 from ..types import Hit, PluginInfo, Retrieval
 
 _WORD = re.compile(r"\w+")
@@ -42,13 +43,12 @@ class InMemoryStore:
             return {"files": 1, "chunks": len(rows), "parquet": str(pq)}
         p = Path(path).expanduser()
         n = 0
-        for fp in sorted(p.rglob("*")):
-            if fp.suffix.lower() in (".md", ".txt", ".rst") and fp.is_file():
-                self.docs.append({
-                    "chunk_id": f"{fp.name}::0", "filename": fp.name,
-                    "text": fp.read_text(encoding="utf-8", errors="ignore"), "created_at": None,
-                })
-                n += 1
+        for cf in iter_corpus_files(p, (".md", ".txt", ".rst")):
+            self.docs.append({
+                "chunk_id": f"{cf.name}::0", "filename": cf.name,
+                "text": cf.path.read_text(encoding="utf-8", errors="ignore"), "created_at": None,
+            })
+            n += 1
         return {"files": n, "chunks": n}
 
     def _bm25_index(self):

@@ -22,6 +22,7 @@ import logging
 import os
 from pathlib import Path
 
+from ..ingest.corpus_files import iter_corpus_files
 from ..types import Hit, PluginInfo
 
 _log = logging.getLogger("context_runtime.duckdb")
@@ -166,10 +167,10 @@ class DuckDBStore:
             return {"files": 1, "chunks": self._n, "parquet": str(pq)}
         p = Path(path).expanduser()
         docs = []
-        for fp in sorted(p.rglob("*")):
-            if fp.suffix.lower() in (".md", ".txt", ".rst") and fp.is_file():
-                docs.append({"chunk_id": f"{fp.name}::0", "filename": fp.name,
-                             "text": fp.read_text(encoding="utf-8", errors="ignore"), "ts": fp.stat().st_mtime})
+        for cf in iter_corpus_files(p, (".md", ".txt", ".rst")):
+            docs.append({"chunk_id": f"{cf.name}::0", "filename": cf.name,
+                         "text": cf.path.read_text(encoding="utf-8", errors="ignore"),
+                         "ts": cf.path.stat().st_mtime})
         n = self._insert(docs)
         self._reindex()
         return {"files": n, "chunks": n}

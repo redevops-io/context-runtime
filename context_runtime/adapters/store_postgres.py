@@ -21,6 +21,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
+from ..ingest.corpus_files import iter_corpus_files
 from ..types import Hit, PluginInfo
 
 
@@ -94,10 +95,10 @@ class PostgresStore:
         """Index a folder of text/markdown files (one chunk per file, matching InMemoryStore)."""
         p = Path(path).expanduser()
         docs = []
-        for fp in sorted(p.rglob("*")):
-            if fp.suffix.lower() in (".md", ".txt", ".rst") and fp.is_file():
-                docs.append({"chunk_id": f"{fp.name}::0", "filename": fp.name,
-                             "text": fp.read_text(encoding="utf-8", errors="ignore"), "ts": fp.stat().st_mtime})
+        for cf in iter_corpus_files(p, (".md", ".txt", ".rst")):
+            docs.append({"chunk_id": f"{cf.name}::0", "filename": cf.name,
+                         "text": cf.path.read_text(encoding="utf-8", errors="ignore"),
+                         "ts": cf.path.stat().st_mtime})
         n = self._insert(docs)
         return {"files": n, "chunks": n}
 

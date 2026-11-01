@@ -28,6 +28,7 @@ import importlib.util
 import os
 from pathlib import Path
 
+from ..ingest.corpus_files import iter_corpus_files
 from ..types import Hit, PluginInfo
 
 _PAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".tiff", ".tif", ".pdf"}
@@ -103,8 +104,7 @@ class MultiVectorRetriever:
         p = Path(path).expanduser()
         if not self.available:
             return {"files": 0, "pages": 0}
-        files = [fp for fp in (sorted(p.rglob("*")) if p.is_dir() else [p])
-                 if fp.is_file() and fp.suffix.lower() in _PAGE_EXTS]
+        files = [cf.path for cf in iter_corpus_files(p, _PAGE_EXTS)]
         if not files:
             return {"files": 0, "pages": 0}
         mats = self._doc_embed([str(fp) for fp in files])

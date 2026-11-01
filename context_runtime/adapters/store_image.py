@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from ..ingest.corpus_files import iter_corpus_files
 from ..types import Hit, PluginInfo
 
 _IMG_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
@@ -128,16 +129,16 @@ class ImageRetriever:
         can share a mixed corpus dir with the text stores."""
         p = Path(path).expanduser()
         n = 0
-        for fp in sorted(p.rglob("*")) if p.is_dir() else [p]:
-            if fp.is_file() and fp.suffix.lower() in _IMG_EXTS:
-                cid = f"{fp.name}::img"
-                self.docs.append({
-                    "chunk_id": cid, "filename": fp.name, "path": str(fp),
-                    "text": f"[image: {fp.name}]", "created_at": None,
-                    "meta": {"type": "image", "source_id": fp.name, "page": None,
-                             "bbox": None, "embedding_id": cid, "path": str(fp)},
-                })
-                n += 1
+        for cf in iter_corpus_files(p, _IMG_EXTS):
+            fp = cf.path
+            cid = f"{cf.name}::img"
+            self.docs.append({
+                "chunk_id": cid, "filename": cf.name, "path": str(fp),
+                "text": f"[image: {cf.name}]", "created_at": None,
+                "meta": {"type": "image", "source_id": cf.name, "page": None,
+                         "bbox": None, "embedding_id": cid, "path": str(fp)},
+            })
+            n += 1
         self._emb = None   # invalidate cache
         return {"files": n, "images": n}
 
