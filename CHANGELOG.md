@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Breaking change (corpus identifiers and policy scopes, all operating systems):** a corpus reference whose path segment is a Windows device name (`con`, `prn`, `aux`, `nul`, `conin$`, `conout$`, `com0`-`com9`, `lpt0`-`lpt9`, case-insensitive, with or without an extension such as `nul.txt`) is refused: `POST /librechat/ingest` answers `400 {"detail": "invalid corpus reference"}`. These names were accepted on Linux and macOS before. The policy store stores a scope with such a name under `<name>~` (for example `con~/app.jsonl`; `con` and `con_` stay separate files) and shortens file-name components over 128 characters (`...~<digest>`); rules saved under the old file names are not found and nothing is migrated automatically.
+- **Behaviour change (`Archive`):** a default `Archive()` (no directory given) now lives in a `TemporaryDirectory` that is removed when the archive is garbage-collected or the interpreter exits. Before, the `mkdtemp` directory and the archived tool outputs survived the process. Pass an explicit `directory` to keep them; an explicit directory is never removed.
+- Explicit `encoding="utf-8"` for every text-mode file access and text subprocess call (the locale code page is no longer used); `tests/test_encoding_explicit.py` and a ruff PLW1514 step guard the common call forms.
+- `NamedTemporaryFile` that is reopened by name uses `delete_on_close=False`; the ZAP work directory is removed after the report is read; the `json.load(open(...))` handle leaks are fixed.
+- CI: Windows and macOS (Apple Silicon) test lanes next to the Ubuntu job; the test workflow also runs for pull requests of any base branch.
+
 ## 0.4.1 — 2026-10-30
 
 Upgrade notes and the full list of changes: [docs/release-0.4.1.md](docs/release-0.4.1.md).
