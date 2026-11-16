@@ -17,8 +17,9 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from ..adapters.store_temporal import TemporalFact
 from ..platform_services import config_file, ensure_private_dir, state_dir
-from . import channels, views
+from . import channels, memory_store, views
 from .context import Context
 from .fleet import Fleet
 from .registry import Module, Registry
@@ -83,6 +84,10 @@ ACCESS: dict[tuple[str, str], Access] = {
     ("POST", "/approvals/{approval_id}/{decision}"): Access.ADMIN,
     ("POST", "/dispatch"): Access.ADMIN,
     ("GET", "/jobs/{job_id}"): Access.ADMIN,
+    # narrow memory service (bi-temporal fact store, for an external consumer over HTTP)
+    ("POST", "/memory/fact"): Access.ADMIN,
+    ("GET", "/memory/fact"): Access.READER,
+    ("GET", "/memory/changes"): Access.READER,
     ("POST", "/agent/run"): Access.ADMIN,
     ("POST", "/agent/outcome"): Access.ADMIN,
     ("GET", "/agent/policy/{module}"): Access.ADMIN,
@@ -561,6 +566,52 @@ def job_status(job_id: str) -> dict:
     if job is None:
         raise HTTPException(404, f"no job {job_id}")
     return {"job_id": job_id, **job}
+
+
+class MemoryFactRequest(BaseModel):
+    namespace: str = "default"
+    subject: str
+    predicate: str
+    object: str
+    valid_from: str = ""
+    valid_to: str | None = None
+    recorded_at: str = ""
+    meta: dict = {}
+
+
+@app.post("/memory/fact", dependencies=[Depends(require_api_key)])
+def memory_write_fact(req: MemoryFactRequest) -> dict:
+    """Write one provenance-tracked fact. A thin pass-through to ``TemporalStore.add`` — no fact
+    semantics beyond what ``adapters/store_temporal.py`` already implements; this route and its
+    two GET siblings below exist to let an external consumer (e.g. a DeerFlow deployment) reach
+    the bi-temporal fact store over plain HTTP instead of importing this package directly."""
+    store = memory_store.get_store(req.namespace)
+    store.add(req.subject, req.predicate, req.object, valid_from=req.valid_from,
+              valid_to=req.valid_to, recorded_at=req.recorded_at, meta=dict(req.meta))
+    fact = TemporalFact(req.subject, req.predicate, req.object, req.valid_from, req.valid_to,
+                         req.recorded_at, dict(req.meta))
+    memory_store.append_fact(req.namespace, fact)
+    return {"subject": fact.subject, "predicate": fact.predicate, "object": fact.obj,
+            "valid_from": fact.valid_from, "valid_to": fact.valid_to,
+            "recorded_at": fact.recorded_at, "meta": fact.meta}
+
+
+@app.get("/memory/fact")
+def memory_read_fact(namespace: str = "default", query: str = "", k: int = 5,
+                      at: str | None = None, known_at: str | None = None) -> list[dict]:
+    """Point-in-time fact query. ``at`` omitted returns current (not-yet-superseded) facts;
+    ``at``/``known_at`` set answers "what was true, as known at that time" — a thin pass-through
+    to ``TemporalStore.search``/``as_of``."""
+    store = memory_store.get_store(namespace)
+    hits = store.search(query, k) if at is None else store.as_of(query, k, at=at, known_at=known_at)
+    return [asdict(h) for h in hits]
+
+
+@app.get("/memory/changes")
+def memory_changes(namespace: str = "default", query: str = "", since: str = "",
+                    until: str = "", k: int = 20) -> list[dict]:
+    """"What changed, and when?" — a thin pass-through to ``TemporalStore.changes``."""
+    return memory_store.get_store(namespace).changes(query, since=since, until=until, k=k)
 
 
 @app.get("/notify/status")
