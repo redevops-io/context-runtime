@@ -17,6 +17,6 @@ fuser -k 8092/tcp 2>/dev/null || true; sleep 1
 env PYTHONPATH="$ROOT" CR_CORPUS_DIR="$CORPUS" CR_EMBEDDINGS=1 \
   CR_UPSTREAM_BASE_URL="${KIMI_BASE_URL:-}" CR_UPSTREAM_API_KEY="${KIMI_API_KEY:-}" \
   CR_UPSTREAM_MODEL="${KIMI_MODEL:-}" CR_UPSTREAM_MAX_TOKENS=4096 CR_UPSTREAM_TEMPERATURE=1 \
-  CONTEXT_RUNTIME_HOME=/tmp/financebench-home CONTEXT_RUNTIME_API_KEY="${CONTEXT_RUNTIME_API_KEY:-context-runtime}" \
+  CONTEXT_RUNTIME_HOME=/tmp/financebench-home CONTEXT_RUNTIME_API_KEY="${CONTEXT_RUNTIME_API_KEY:?set CONTEXT_RUNTIME_API_KEY (the control plane answers 503 without a key)}" \
   uv run --no-project --with fastapi --with uvicorn --with httpx --with pyyaml --with fastembed \
   uvicorn context_runtime.control_plane.app:app --host 0.0.0.0 --port 8092

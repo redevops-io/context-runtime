@@ -39,7 +39,7 @@ SECRET = "synthetic-secret-value-not-real"
 @pytest.fixture()
 def server_path(tmp_path):
     path = tmp_path / "env_server.py"
-    path.write_text(ENV_SERVER)
+    path.write_text(ENV_SERVER, encoding="utf-8")
     return str(path)
 
 
@@ -151,6 +151,6 @@ def test_every_scan_setting_the_engine_reads_is_in_the_explicit_list():
     import context_runtime.integrations.runtime_scan as rs
     import context_runtime.integrations.runtime_scan_engine as engine
 
-    names = set(re.findall(r'os\.getenv\("(SCAN_[A-Z_]+)"', Path(engine.__file__).read_text()))
+    names = set(re.findall(r'os\.getenv\("(SCAN_[A-Z_]+)"', Path(engine.__file__).read_text(encoding="utf-8")))
     assert names, "no SCAN_ settings found: the pattern needs updating"
     assert names <= set(rs.DEPLOY_SCAN_ENV), sorted(names - set(rs.DEPLOY_SCAN_ENV))

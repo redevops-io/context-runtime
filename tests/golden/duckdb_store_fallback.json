@@ -1,0 +1,34 @@
+{
+  "report": {
+    "chunks": 17,
+    "files": 17
+  },
+  "search": {
+    "alpha": [
+      "a.md::0",
+      "a.txt::0"
+    ],
+    "caf\u00e9": [
+      "caf\u00e9.md::0"
+    ],
+    "hidden": [
+      ".hidden.md::0"
+    ],
+    "incident outage": [
+      "C.md::0"
+    ],
+    "japanese": [
+      "\u65e5\u672c\u8a9e.md::0"
+    ],
+    "revenue": [
+      "file name.md::0",
+      ".hidden.md::0",
+      "UPPER.TXT::0",
+      "a.md::0",
+      "deep.rst::0"
+    ],
+    "umlaut": [
+      "\u00fcn\u00ef.txt::0"
+    ]
+  }
+}

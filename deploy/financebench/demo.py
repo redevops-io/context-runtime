@@ -1,6 +1,6 @@
 """FinanceBench × LibreQB demo: for each hard question, show what EACH retrieval method
 surfaces (the Query Board) vs. the served strategy — proving no single method suffices."""
-import json, sys, urllib.request
+import json, os, sys, urllib.request
 
 CP = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8092"
 QUERIES = [
@@ -13,8 +13,10 @@ QUERIES = [
 ]
 
 def post(path, body):
-    r = urllib.request.Request(CP + path, data=json.dumps(body).encode(),
-                               headers={"Content-Type": "application/json"})
+    headers = {"Content-Type": "application/json"}
+    if os.environ.get("CONTEXT_RUNTIME_API_KEY"):      # the control plane requires a credential on every route but /health
+        headers["X-API-Key"] = os.environ["CONTEXT_RUNTIME_API_KEY"]
+    r = urllib.request.Request(CP + path, data=json.dumps(body).encode(), headers=headers)
     return json.loads(urllib.request.urlopen(r, timeout=300).read())
 
 def base(cid):

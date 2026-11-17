@@ -69,7 +69,8 @@ class SupplyChainScanner:
 
     def _run(self, cmd: list[str]) -> tuple[int, str, str]:
         try:
-            p = subprocess.run(cmd, text=True, capture_output=True, timeout=self.timeout)
+            p = subprocess.run(cmd, text=True, encoding="utf-8", errors="replace", capture_output=True,
+                               timeout=self.timeout)
             return p.returncode, p.stdout, p.stderr
         except FileNotFoundError:
             return 127, "", "binary not found"

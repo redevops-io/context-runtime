@@ -44,7 +44,7 @@ services:
       # the container reach a control plane running on the host.
       - CONTEXT_RUNTIME_URL=${CONTEXT_RUNTIME_URL:-http://host.docker.internal:8092}
       - CONTEXT_RUNTIME_GO_URL=${CONTEXT_RUNTIME_GO_URL:-http://host.docker.internal:8093}
-      - CONTEXT_RUNTIME_API_KEY=${CONTEXT_RUNTIME_API_KEY:-context-runtime}
+      - CONTEXT_RUNTIME_API_KEY=${CONTEXT_RUNTIME_API_KEY:?set CONTEXT_RUNTIME_API_KEY to the control plane's key or a tenant key}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

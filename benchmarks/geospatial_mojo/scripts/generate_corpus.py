@@ -107,7 +107,7 @@ def gen_adversarial(rng, out):
 
 
 def write_jsonl(path, rows):
-    with open(path, "w") as fh:
+    with open(path, "w", encoding="utf-8") as fh:
         for r in rows:
             fh.write(json.dumps(r, separators=(",", ":")) + "\n")
 
@@ -125,12 +125,12 @@ def main():
     for name, rows in sets.items():
         write_jsonl(os.path.join(CORPUS, f"{name}.jsonl"), rows)
     try:
-        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=HERE, text=True).strip()
+        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=HERE, text=True, encoding="utf-8").strip()
     except Exception:
         commit = "unknown"
     manifest = {"seed": hex(SEED), "generator_commit": commit, "epsilon": {"on_edge": 1e-9, "collinear": 1e-12},
                 "counts": {k: len(v) for k, v in sets.items()}}
-    with open(os.path.join(CORPUS, "manifest.json"), "w") as fh:
+    with open(os.path.join(CORPUS, "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2)
     print("corpus written:", manifest["counts"])
 

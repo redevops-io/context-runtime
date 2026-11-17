@@ -24,7 +24,7 @@ def _restore_priors():
 def _cell(tmp, dataset, strategy, oracle):
     (tmp / f"{dataset}__hybrid__qwen__{strategy}.json").write_text(json.dumps(
         {"dataset": dataset, "method": "hybrid", "model": "qwen", "strategy": strategy,
-         "n": 12, "acc_oracle": oracle}))
+         "n": 12, "acc_oracle": oracle}), encoding="utf-8")
 
 
 def _ablation(tmp):
@@ -49,7 +49,7 @@ def test_priors_from_ablation_builds_cost_ordered_ladders(tmp_path):
 
 def test_load_priors_overrides_strategies_for(tmp_path):
     p = tmp_path / "priors.json"
-    p.write_text(json.dumps({"multi_hop": ["decompose", "reason"], "temporal": ["mapreduce"]}))
+    p.write_text(json.dumps({"multi_hop": ["decompose", "reason"], "temporal": ["mapreduce"]}), encoding="utf-8")
     applied = gs.load_priors(str(p))
     assert applied["temporal"] == ["mapreduce"]
     # set_priors re-orders cheapest-first regardless of input order → reason before decompose

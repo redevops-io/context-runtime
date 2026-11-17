@@ -8,11 +8,11 @@ policies). The approvals log is the human-in-the-loop record: any action a modul
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Any, Iterator
 
+from ..platform_services import atomic_write
 from . import safety
 
 
@@ -94,13 +94,7 @@ class Context:
     def _rewrite(self, rows: list[Approval]) -> None:
         # Write to a temp file and atomically rename over the log so a concurrent
         # reader never sees a half-written file (no partial/truncated rewrite).
-        tmp_path = self._approvals_path.with_suffix(self._approvals_path.suffix + ".tmp")
-        with tmp_path.open("w", encoding="utf-8") as fh:
-            for ap in rows:
-                fh.write(json.dumps(asdict(ap)) + "\n")
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp_path, self._approvals_path)
+        atomic_write(self._approvals_path, "".join(json.dumps(asdict(ap)) + "\n" for ap in rows))
 
     def _read(self) -> Iterator[Approval]:
         if not self._approvals_path.exists():
