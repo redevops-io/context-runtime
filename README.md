@@ -164,6 +164,7 @@ missing the bridge document that multi-hop surfaces.
 ```python
 from context_runtime import ContextRuntime, SourceRef
 
+docs = []                                 # your documents; empty here so the tour runs offline
 rt = ContextRuntime.default(docs)          # offline: stub model + in-memory store
 
 # RUN — the core abstraction (plan → build_context → execute → verify)
