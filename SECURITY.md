@@ -22,6 +22,15 @@ passwords and cloud or database settings in your environment do **not** reach th
   `inherit_env=False` overrides the variable.
 - The bundled `deploy_scan` server (`mount_deploy_scan`) is handed its own settings explicitly (`SCAN_ALLOWLIST`, `SCAN_LIVE`, the `SCAN_ZAP_*`, `SCAN_NMAP_PORTS` and `SCAN_NUCLEI_TEMPLATES` options, and `DOCKER_HOST` and `DOCKER_CONTEXT` for live scans), and nothing else from your environment.
 
+### Changing the allowlist
+
+The list above is deliberately small, and it is also meant to evolve: a server or platform may legitimately need another variable.
+An addition is a documented security review, not a prohibition. In the pull request, state (1) which variable and which server or
+platform needs it, (2) why passing it through the explicit `env` mapping is not enough, (3) that its name and value cannot carry a
+credential (a name containing KEY, TOKEN, SECRET, PASSWORD or CREDENTIAL does not qualify; a value that may embed credentials is
+filtered the way the proxy variables are), and (4) the test that shows it reaches the child. Then update `SAFE_ENV_VARS` and
+`REVIEWED_SAFE_ENV_VARS` in `tests/test_mcp_env_guard.py` together; that test exists so that the list never changes unnoticed.
+
 ## Control plane: authentication, tenant keys and ingestion
 
 Purpose: the control plane (`context_runtime.control_plane.app`, the image built by the `Dockerfile`) serves approvals, jobs, fleet

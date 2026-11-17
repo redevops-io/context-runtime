@@ -24,7 +24,8 @@ from context_runtime.tools.mcp import INHERIT_ENV_VAR, MCPClient, SAFE_ENV_PREFI
 PACKAGE = Path(context_runtime.__file__).resolve().parent
 MCP_FILE = Path(mcp_module.__file__).resolve()
 
-#: The exact allowlist as reviewed. Adding a name here is a security decision: it needs a reason in the PR.
+#: The exact allowlist as reviewed. Adding a name is allowed after a documented security review (see SECURITY.md,
+#: "Changing the allowlist"): record the reason in the PR and update this set together with SAFE_ENV_VARS.
 REVIEWED_SAFE_ENV_VARS = frozenset({
     "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LANGUAGE", "TZ", "TERM", "TMPDIR", "TEMP", "TMP",
     "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT",
@@ -89,8 +90,8 @@ def test_inheritance_is_off_by_default_in_every_signature():
 
 def test_allowlist_is_exactly_the_reviewed_set():
     assert SAFE_ENV_VARS == REVIEWED_SAFE_ENV_VARS, (
-        "the stdio MCP environment allowlist changed: widening it is a security decision, so update REVIEWED_SAFE_ENV_VARS "
-        f"in this test together with the reason. Added: {sorted(SAFE_ENV_VARS - REVIEWED_SAFE_ENV_VARS)}; "
+        "the stdio MCP environment allowlist changed. A legitimate addition needs a documented security review (SECURITY.md, "
+        "'Changing the allowlist'); then update REVIEWED_SAFE_ENV_VARS here together with SAFE_ENV_VARS. Added: {sorted(SAFE_ENV_VARS - REVIEWED_SAFE_ENV_VARS)}; "
         f"removed: {sorted(REVIEWED_SAFE_ENV_VARS - SAFE_ENV_VARS)}")
     assert tuple(SAFE_ENV_PREFIXES) == REVIEWED_PREFIXES
 
