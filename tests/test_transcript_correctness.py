@@ -98,7 +98,7 @@ def test_pins_yield_in_the_last_resort_so_a_run_cannot_die_on_them():
 def manager(tmp_path, **kw):
     inp = tmp_path / "task_folder"
     inp.mkdir(parents=True, exist_ok=True)
-    (inp / "applications.csv").write_text(CSV)
+    (inp / "applications.csv").write_text(CSV, encoding="utf-8")
     m = ContextRuntimeManager(tmp_path / "arch", **kw)
     assert m.index_files(inp) == 1
     return m

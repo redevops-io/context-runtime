@@ -49,9 +49,11 @@ class MultimodalExtractor:
         if asset.uri and os.path.exists(asset.uri):
             return extract_text(asset.uri, self._ex)
         if asset.data is not None:
-            with tempfile.NamedTemporaryFile(suffix=_suffix_for(asset), delete=True) as fh:
+            # delete_on_close=False: the file is closed (not deleted) before it is reopened by name, which
+            # Windows requires; it is removed when the with-block exits.
+            with tempfile.NamedTemporaryFile(suffix=_suffix_for(asset), delete=True, delete_on_close=False) as fh:
                 fh.write(asset.data)
-                fh.flush()
+                fh.close()
                 return extract_text(fh.name, self._ex)
         return "", "empty"
 

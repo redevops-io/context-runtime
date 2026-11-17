@@ -118,7 +118,7 @@ def load_financial_docs(cap: int) -> list[dict]:
     docs = []
     for fp in files:
         docs.append({"chunk_id": fp.stem, "filename": fp.name,
-                     "text": fp.read_text(errors="ignore"), "created_at": None})
+                     "text": fp.read_text(encoding="utf-8", errors="ignore"), "created_at": None})
     return docs
 
 

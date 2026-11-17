@@ -25,10 +25,11 @@ Everything is opt-in: no map ⇒ callers behave exactly as before.
 from __future__ import annotations
 
 import json
-import os
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from ..platform_services import atomic_write, locked_append
 
 
 # ──────────────────────────── isotonic regression (PAV) ────────────────────────────
@@ -93,12 +94,7 @@ class CalibrationMap:
         return {m: {"breakpoints": c.breakpoints, "n": c.n} for m, c in self._m.items()}
 
     def save(self, path: str | Path) -> None:
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = str(path) + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(self.to_dict(), f)
-        os.replace(tmp, path)  # atomic
+        atomic_write(path, json.dumps(self.to_dict()))
 
     @classmethod
     def load(cls, path: str | Path) -> "CalibrationMap | None":
@@ -139,9 +135,7 @@ class CalibrationLog:
         row = {"method": method, "bucket": bucket, "label": round(float(label), 4), "hits": hits}
         line = json.dumps(row, ensure_ascii=False)
         with self._lock:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.path, "a", encoding="utf-8") as f:
-                f.write(line + "\n")
+            locked_append(self.path, line + "\n")
 
     def rows(self) -> list[dict]:
         if not self.path.exists():

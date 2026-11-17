@@ -50,7 +50,7 @@ def test_store_records_observations_and_new_opportunity(tmp_path):
                      enrich=True, store=store)
     assert store.observation_count() == 2                 # one list + one detail observation persisted
     assert [c.kind for c in res.changes] == [ChangeKind.NEW]
-    assert store.path.exists() and store.path.read_text().count("\n") >= 3
+    assert store.path.exists() and store.path.read_text(encoding="utf-8").count("\n") >= 3
 
 
 def test_restart_reload_is_idempotent_then_detects_amendment(tmp_path):

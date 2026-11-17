@@ -17,6 +17,7 @@ from pathlib import Path
 
 from ..costmodel.estimators import HeuristicEstimator
 from ..integrations.modules import CATALOG, ModuleSpec, ModuleTenant
+from ..platform_services import ensure_private_dir, state_dir
 from ..runtime.runtime import ContextRuntime
 from .context import Approval, Context
 from .registry import Module, Registry
@@ -58,8 +59,8 @@ class Fleet:
                  workdir=None, runtime: ContextRuntime | None = None, home: str | None = None):
         self.registry = registry
         self.router = router                      # kept for app compatibility; unused
-        self.home = Path(home or ".context-runtime")   # persistence root (the /data volume)
-        self.context = context or Context(self.home)
+        self.home = Path(home) if home else state_dir()   # persistence root (the /data volume in a container)
+        self.context = context or Context(ensure_private_dir(self.home))
         # ONE shared runtime; its cost-model statistics persist so calibration survives restarts
         if runtime is None:
             estimator = HeuristicEstimator(stats_path=str(self.home / "costmodel_stats.json"))

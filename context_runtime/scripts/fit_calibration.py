@@ -9,20 +9,19 @@ Usage:
     python -m context_runtime.scripts.fit_calibration \
         [--log PATH] [--out PATH] [--min-samples N]
 
-Defaults resolve under $CONTEXT_RUNTIME_HOME (or .context-runtime).
+Defaults resolve under $CONTEXT_RUNTIME_HOME (or the platform state directory).
 """
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 
+from ..platform_services import state_dir
 from ..integrations.calibration import CalibrationLog, fit_from_log
 
 
 def _home() -> Path:
-    return Path(os.environ.get("CONTEXT_RUNTIME_HOME")
-               or os.environ.get("AGENTIC_OS_HOME", ".context-runtime"))
+    return state_dir()
 
 
 def main(argv: list[str] | None = None) -> int:

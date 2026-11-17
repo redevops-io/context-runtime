@@ -166,7 +166,7 @@ class DeploymentScanner:
     def _run(self, cmd: list[str], timeout: float | None = None) -> tuple[int, str, str]:
         t = timeout or self.timeout
         try:
-            p = subprocess.run(cmd, text=True, capture_output=True, timeout=t)
+            p = subprocess.run(cmd, text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=t)
             return p.returncode, p.stdout, p.stderr
         except FileNotFoundError:
             return 127, "", f"{cmd[0]} not found"
@@ -246,15 +246,15 @@ class DeploymentScanner:
         image = self._docker_image()
         if image:
             import tempfile
-            workdir = tempfile.mkdtemp(prefix="zap_")
-            os.chmod(workdir, 0o777)   # ZAP container's 'zap' user must be able to write the report
-            # --network host so the container can reach host-loopback / LAN deployments
-            # (a container's 127.0.0.1 is its own, not the host's). Works for public URLs too.
-            net = os.getenv("SCAN_ZAP_NETWORK", "host")
-            rc, _, err = self._run(
-                ["docker", "run", "--rm", "--network", net, "-v", f"{workdir}:/zap/wrk/:rw", image,
-                 script, "-t", url, "-J", "report.json", "-I"], timeout=zap_timeout)
-            raw = _read(os.path.join(workdir, "report.json"))
+            with tempfile.TemporaryDirectory(prefix="zap_", ignore_cleanup_errors=True) as workdir:
+                os.chmod(workdir, 0o777)   # ZAP container's 'zap' user must be able to write the report
+                # --network host so the container can reach host-loopback / LAN deployments
+                # (a container's 127.0.0.1 is its own, not the host's). Works for public URLs too.
+                net = os.getenv("SCAN_ZAP_NETWORK", "host")
+                rc, _, err = self._run(
+                    ["docker", "run", "--rm", "--network", net, "-v", f"{workdir}:/zap/wrk/:rw", image,
+                     script, "-t", url, "-J", "report.json", "-I"], timeout=zap_timeout)
+                raw = _read(os.path.join(workdir, "report.json"))
             note = f"{kind} docker (rc={rc})" + ("" if raw else f" — no report: {err[:100]}")
             return ScanReport(bool(raw) or rc == 0, target, ["zap"],
                               findings=_parse_zap(raw, target), note=note)
@@ -299,7 +299,7 @@ def _as_url(target: str) -> str:
 
 def _read(path: str) -> str:
     try:
-        with open(path) as fh:
+        with open(path, encoding="utf-8", errors="replace") as fh:
             return fh.read()
     except OSError:
         return ""

@@ -158,12 +158,25 @@ class RuntimeScanTenant:
         return hashlib.sha256(t.encode()).hexdigest()[:16]
 
 
-def mount_deploy_scan(registry: ToolRegistry, *, python: str | None = None):
+#: Settings the bundled deploy_scan server reads (see runtime_scan_engine). They are configuration, not secrets, and are handed to the
+#: server explicitly because stdio MCP servers no longer inherit the whole parent environment. DOCKER_HOST and DOCKER_CONTEXT are
+#: for live scans that run a tool image through the docker CLI.
+DEPLOY_SCAN_ENV = (
+    "SCAN_ALLOWLIST", "SCAN_LIVE", "SCAN_ZAP_IMAGE", "SCAN_NMAP_PORTS", "SCAN_NUCLEI_TEMPLATES",
+    "SCAN_ZAP_TIMEOUT", "SCAN_ZAP_WORKDIR", "SCAN_ZAP_NETWORK", "DOCKER_HOST", "DOCKER_CONTEXT",
+)
+
+
+def mount_deploy_scan(registry: ToolRegistry, *, python: str | None = None, env: dict[str, str] | None = None):
     """Mount the bundled deploy_scan MCP server (stdio) into a registry, so the scan tools ride
-    the registry's ApprovalPolicy. Returns (client, tool_names)."""
+    the registry's ApprovalPolicy. Returns (client, tool_names). The server receives the DEPLOY_SCAN_ENV settings found in
+    the current environment, plus ``env`` (which wins); nothing else from the parent environment."""
+    import os
     import sys
     from ..tools.mcp import MCPClient, mount_mcp
+    server_env = {k: os.environ[k] for k in DEPLOY_SCAN_ENV if k in os.environ}
+    server_env.update(env or {})
     client = MCPClient.stdio([python or sys.executable, "-m",
-                              "context_runtime.tools.mcp_servers.deploy_scan"])
+                              "context_runtime.tools.mcp_servers.deploy_scan"], env=server_env)
     names = mount_mcp(registry, client, prefix="scan", default_side_effecting=True)
     return client, names

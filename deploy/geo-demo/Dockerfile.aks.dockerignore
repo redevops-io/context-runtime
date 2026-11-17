@@ -1,0 +1,4 @@
+# The main build context only supplies deploy/geo-demo/Dockerfile.aks and healthcheck.py; everything else comes from the
+# named context `context_runtime_src`. Deny by default so nothing else in a working tree can reach a layer.
+*
+!deploy/geo-demo/healthcheck.py

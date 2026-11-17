@@ -8,12 +8,20 @@ from fastapi.testclient import TestClient
 
 from context_runtime.control_plane.app import app
 
-client = TestClient(app)
+KEY = "control-plane-test-key"
+client = TestClient(app, headers={"X-API-Key": KEY})          # an authorised caller
+anonymous = TestClient(app)                                    # no credential
+
+
+@pytest.fixture(autouse=True)
+def _configured_server(monkeypatch):
+    """The control plane fails closed: the tests run against a deployment that has a key configured."""
+    monkeypatch.setenv("CONTEXT_RUNTIME_API_KEY", KEY)
 
 
 def test_health_reports_registry():
-    j = client.get("/health").json()
-    assert j["status"] == "ok" and j["modules"] >= 14
+    assert anonymous.get("/health").json() == {"status": "ok"}      # liveness only, no operational detail
+    assert len(client.get("/modules").json()) >= 14
 
 
 def test_all_modules_deployed_as_tenants():
@@ -58,8 +66,6 @@ def test_unknown_module_404():
 
 def test_mutating_endpoints_require_api_key(monkeypatch):
     # With an API key configured, protected POSTs demand a matching X-API-Key header (else 401).
-    # The rest of this suite runs with the key UNSET, so auth is disabled there — this is the only
-    # coverage of the 401 branch that guards every money/infra/ingest mutation.
     monkeypatch.setenv("CONTEXT_RUNTIME_API_KEY", "s3cret")
     protected = [
         ("/up", {}),
@@ -67,11 +73,11 @@ def test_mutating_endpoints_require_api_key(monkeypatch):
         ("/agent/run", {"module": "control-tower", "question": "q"}),
     ]
     for path, body in protected:
-        assert client.post(path, json=body).status_code == 401              # no header → 401
-        assert client.post(path, json=body, headers={"X-API-Key": "nope"}).status_code == 401  # wrong key → 401
+        assert anonymous.post(path, json=body).status_code == 401              # no header → 401
+        assert anonymous.post(path, json=body, headers={"X-API-Key": "nope"}).status_code == 401  # wrong key → 401
     # correct key → auth passes (handler runs; status is anything but 401)
-    ok = client.post("/agent/run", json={"module": "control-tower", "question": "q"},
-                     headers={"X-API-Key": "s3cret"})
+    ok = anonymous.post("/agent/run", json={"module": "control-tower", "question": "q"},
+                        headers={"X-API-Key": "s3cret"})
     assert ok.status_code != 401
 
 

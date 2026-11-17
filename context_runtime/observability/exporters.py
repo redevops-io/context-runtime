@@ -9,22 +9,48 @@ conventions. Langfuse/OTel deps are lazy-imported so the core stays dependency-f
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from .. import jsonio
+from ..platform_services import LockTimeout, locked_append
 from ..types import Trace
+
+_log = logging.getLogger("context_runtime.observability")
+
+#: How long an export may wait for the append lock. Traces are diagnostic and the exporter runs on the request
+#: path, so contention must not stall the application for long.
+EXPORT_LOCK_TIMEOUT = 1.0
 
 
 class JsonlExporter:
-    """Append each trace as one JSON line — zero deps, always available."""
+    """Append each trace as one JSON line — zero deps, always available. Safe for concurrent threads and
+    processes: each line is appended under an inter-process lock (a bare append can lose lines on Windows)."""
 
     def __init__(self, path: str = ".context_runtime/traces.jsonl"):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._warned = False
 
     def export(self, trace: Trace) -> None:
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(jsonio.dumps(trace) + "\n")
+        """Append one line. If the lock is not available within ``EXPORT_LOCK_TIMEOUT`` (another process holds it,
+        or this thread already does), the trace is dropped and ONE warning is logged for this exporter; any other
+        I/O error is logged once and raised, as a failed write always was."""
+        line = jsonio.dumps(trace) + "\n"        # explicit newline; written in one call, not fsync-ed (diagnostic)
+        try:
+            locked_append(self.path, line, durable=False, timeout=EXPORT_LOCK_TIMEOUT)
+        except LockTimeout:
+            self._warn_once(f"trace dropped: could not take the append lock for {self.path} within "
+                            f"{EXPORT_LOCK_TIMEOUT:g}s (further drops are not logged)")
+        except OSError as e:
+            self._warn_once(f"trace export to {self.path} failed ({type(e).__name__}: {e}); further failures are "
+                            "not logged")
+            raise
+
+    def _warn_once(self, message: str) -> None:
+        if not self._warned:
+            self._warned = True
+            _log.warning(message)
 
 
 class MultiExporter:
