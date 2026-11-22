@@ -41,8 +41,40 @@ if not any(os.environ.get(v) for v in _HOME_VARS):
 from context_runtime.tools.base import (default_authorizer_installed, local_trusted_authorizer,  # noqa: E402
                                         set_default_authorizer)
 
+# ── the posture the control plane is imported in ─────────────────────────────────────────────
+# ``context_runtime.control_plane.app`` stands its fleet up at import, and a fleet that runs tools refuses
+# to be built with nothing to ask (``tools.authz.require_plane``) — importing it with no plane is now an
+# error, not a warning. So the suite makes the choice a governed deployment makes, before the import that
+# reads it: install a plane, then import the service. It is the harness's attributed local-trust authorizer
+# under a name that says where it came from, and the session fixture below takes it back out again before
+# any test runs, so nothing downstream inherits it.
+#
+# The three variables are popped rather than set: the suite must not be able to change posture because of
+# something in the developer's shell. A test that wants the diagnostic mode says so for its own process
+# (see tests/test_authorization_negative_controls.py), and a test that wants local authority asks for
+# ``local_run``, which is audited and per-test.
+for _posture_var in ("CR_EXECUTION_MODE", "CR_DIAGNOSTIC_REASON", "CR_LOCAL_AUTHORITY"):
+    os.environ.pop(_posture_var, None)
+set_default_authorizer(local_trusted_authorizer(plane="pytest_import_time"))
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _STRAY = (".context-runtime", ".agentic-os")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _import_time_plane_removed_before_any_test():
+    """The plane exists to get the service imported. It must not survive into a single assertion.
+
+    Session-scoped and declared here so it runs after collection — by the time the first test body starts,
+    every module-level ``app`` import has happened, and this takes the grant away. The per-test
+    ``_clean_authorizer_plane`` fixture would fail the run if it were still installed; this fixture is the
+    reason it does not, and it says so out loud rather than leaving a process-wide allow-all in place for
+    1,900 tests that assert the opposite.
+    """
+    if default_authorizer_installed():
+        set_default_authorizer(None)
+    assert not default_authorizer_installed(), "a process-wide plane survived into the test session"
+    yield
 
 
 @pytest.fixture(autouse=True)

@@ -111,7 +111,15 @@ def test_no_websocket_routes():
 
 def test_health_is_public_and_minimal(no_key):
     r = no_key.get("/health")
-    assert r.status_code == 200 and r.json() == {"status": "ok"}
+    body = r.json()
+    assert r.status_code == 200
+    # "Minimal" used to mean one key. It now means three, and the two that were added are the ones that
+    # stop an unauthorized caller from learning nothing while an operator learns everything: an instance
+    # with no authorization plane must not be able to answer this route like a working one. Anything beyond
+    # these three keys is operational detail and stays off the unauthenticated route.
+    assert set(body) == {"status", "mode", "privileged_execution"}, body
+    assert body["status"] == "ok" and body["mode"] in ("execute", "diagnostic")
+    assert isinstance(body["privileged_execution"], bool)
 
 
 @pytest.mark.parametrize("method,path", sorted(k for k, v in EXPECTED.items() if v != PUBLIC and k[0] != "*"))

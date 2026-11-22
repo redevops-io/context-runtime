@@ -20,8 +20,12 @@ from ..costmodel.estimators import HeuristicEstimator
 from ..integrations.modules import CATALOG, ModuleSpec, ModuleTenant
 from ..platform_services import ensure_private_dir, state_dir
 from ..runtime.runtime import ContextRuntime
-from ..tools.authz import local_authority_from_env
-from ..tools.base import default_authorizer_installed
+from ..tools.authz import (
+    DIAGNOSTIC,
+    PrivilegedExecutionUnavailable,
+    execution_mode,
+    require_plane,
+)
 from .context import Approval, Context
 from .registry import Module, Registry
 
@@ -35,31 +39,20 @@ _ALIAS = {
 }
 
 
-#: the "no plane" fact is a start-up fact: it is said once per process, not once per module up/down.
-_PLANE_WARNING_SHOWN = False
+#: Recorded once per process so /health can say what this fleet was allowed to become. It is a start-up fact,
+#: which is exactly why it is no longer a warning: see ``require_plane``.
+_MODE: tuple[str, str] | None = None
 
 
-def _warn_if_no_plane() -> None:
-    """Say once, at the moment it is cheap to act on, that this fleet stands up with no authorization plane.
+def mode() -> tuple[str, str]:
+    """``("execute", "")`` or ``("diagnostic", reason)`` for this fleet — decided once, at construction.
 
-    The fleet is a long-lived, request-facing surface, so it follows the same rule as ``AgentConsole`` rather
-    than the tenants' own: standing a module up with no plane yet installed is a start-up the operator can
-    still fix — an embedding application installs its gate a moment after this import — whereas refusing to
-    import is a container that never answers ``/health``. It is not a grant: with no plane every tool call
-    comes back ``missing_authorizer``. Silence is the failure mode this migration exists to remove, because a
-    fleet that denies every tool call looks exactly like a healthy one on ``/status``.
+    The control plane is a privileged execution service: it stands up tenants whose tools block IPs, file
+    tickets and bill customers. It therefore refuses to come up at all with nothing to ask, and the only
+    instance of it that may boot without a plane is one where execution has been taken out of the build —
+    no tenants, no dispatch, nothing for a missing grant to be about.
     """
-    global _PLANE_WARNING_SHOWN
-    if _PLANE_WARNING_SHOWN or default_authorizer_installed() or local_authority_from_env()[0]:
-        return
-    _PLANE_WARNING_SHOWN = True
-    warnings.warn(
-        "the module fleet is standing up with no authorization plane: every tool call its tenants make is "
-        "denied (missing_authorizer) until the embedding application installs one with "
-        "context_runtime.tools.set_default_authorizer(...), or the process declares local authority with "
-        'CR_LOCAL_AUTHORITY="why this process is trusted". The fleet still serves /health and /status on '
-        "purpose: a process that boots and denies is diagnosable, one that refuses to start is not.",
-        stacklevel=3)
+    return _MODE if _MODE is not None else execution_mode(context="module fleet")
 
 
 def spec_for(m: Module) -> ModuleSpec:
@@ -90,8 +83,16 @@ class ModuleStatus:
 
 class Fleet:
     def __init__(self, registry: Registry, router=None, context: Context | None = None,
-                 workdir=None, runtime: ContextRuntime | None = None, home: str | None = None):
+                 workdir=None, runtime: ContextRuntime | None = None, home: str | None = None,
+                 privileged: bool | None = None):
+        global _MODE
         self.registry = registry
+        # Decided once, here, before anything can run: a privileged fleet refuses construction without a plane
+        # (``require_plane``), a diagnostic one comes up and is handed nothing to execute with.
+        _MODE = execution_mode(context="module fleet")
+        self.privileged = (_MODE[0] != DIAGNOSTIC) if privileged is None else privileged
+        if self.privileged:
+            require_plane(context="module fleet")
         self.router = router                      # kept for app compatibility; unused
         self.home = Path(home) if home else state_dir()   # persistence root (the /data volume in a container)
         self.context = context or Context(ensure_private_dir(self.home))
@@ -109,16 +110,20 @@ class Fleet:
 
     # --- lifecycle ---
     def up(self, *names: str) -> list[ModuleStatus]:
+        if not self.privileged:
+            raise PrivilegedExecutionUnavailable(
+                "this fleet is diagnostic: it does not stand modules up. It exists to show a fleet that has no "
+                "execution path — no tenants, no tool registry, nothing a missing grant could be about — and "
+                "standing one up would be the moment it silently became an execution service again. Run the "
+                "execution instance for that.")
         out = []
-        _warn_if_no_plane()
         for n in (names or self._names()):
             m = self.registry.get(n)
             # the fleet gates approvals (via Context); the tenant's own tools default-deny.
             # each tenant's learned policy persists to the /data volume → survives restarts.
             self.tenants[n] = ModuleTenant(
                 spec_for(m), runtime=self.runtime, approver=lambda a: False,
-                persist_path=str(self.home / "bandits" / f"{n}.json"),
-                authorizer_on_missing="deny_later")
+                persist_path=str(self.home / "bandits" / f"{n}.json"))
             self._up.add(n)
             out.append(ModuleStatus(n, True, m.agents, "context-runtime tenant"))
         return out
@@ -139,6 +144,11 @@ class Fleet:
     # --- dispatch (now a Context Runtime plan, not a raw model call) ---
     def dispatch(self, module_name: str, agent: str, action: str, prompt: str,
                  capability: str = "reason", background: bool = False) -> Approval | dict:
+        if not self.privileged:
+            raise PrivilegedExecutionUnavailable(
+                f"dispatch({module_name}/{action}) is refused: this fleet is diagnostic, so it has no tenants "
+                f"and no tool path behind them. A diagnostic instance answers questions about a fleet; it does "
+                f"not act as one.")
         m = self.registry.get(module_name)
         if agent not in m.agents:
             raise ValueError(f"module {module_name} has no agent {agent!r} (agents: {m.agents})")

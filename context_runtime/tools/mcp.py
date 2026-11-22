@@ -11,8 +11,9 @@ import json
 import logging
 import os
 import subprocess
+import warnings
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 
@@ -315,7 +316,7 @@ def mount_mcp(
     prefix: str | None = None,
     default_side_effecting: bool = True,
     actions: dict[str, str] | None = None,
-    default_action: str = "write",
+    default_action: Optional[str] = None,
 ) -> list[str]:
     """Initialize client if needed, list tools, register each wrapped MCPToolPlugin.
 
@@ -323,13 +324,16 @@ def mount_mcp(
 
     ``actions`` gives a tool its risk class — keyed by the registered name, or by the server's own
     name when a prefix is used — and is decided by whoever mounts the server, after reading what
-    that server does. A tool absent from the map gets ``default_action``, which is ``write``: an
-    announced ``readOnlyHint`` may relax the *approval* gate, never the authorization class, because
+    that server does. A tool absent from the map gets ``default_action`` — and if no ``default_action``
+    was given, it gets nothing: it is not mounted, and the refusal is reported. There used to be a
+    ``write`` sitting in the signature as the default, which is a risk class a caller could receive
+    without ever choosing one; the class for an unread server is now something the mount has to say.
+    An announced ``readOnlyHint`` may relax the *approval* gate, never the authorization class, because
     the thing asking to be run is not allowed to grade its own risk. ``actions`` values and
     ``default_action`` must come from the shared vocabulary ``ACTIONS``.
-    Returns the list of registered tool names.
+    Returns the list of registered tool names — tools refused for want of a class are absent from it.
     """
-    if default_action not in ACTIONS:
+    if default_action is not None and default_action not in ACTIONS:
         raise RegistryConfigurationError(
             f"mount_mcp default_action={default_action!r} is not one of the vocabulary {ACTIONS}")
     declared = dict(actions or {})
@@ -347,6 +351,7 @@ def mount_mcp(
         tools = client.list_tools()
     except Exception:
         return registered
+    unclassified: list[str] = []
     for tdesc in tools:
         if not isinstance(tdesc, dict) or not tdesc.get("name"):
             continue
@@ -358,8 +363,20 @@ def mount_mcp(
         # ``read`` because of a spelling is the failure this layer exists to prevent.
         candidates = [declared[key] for key in (raw, reg_name) if key in declared]
         action = max(candidates, key=_STRENGTH.get, default=default_action)
+        if action is None:
+            # Refused by default: nobody has read this tool enough to name what it can do, and a tool
+            # nobody classified matches no grant. Not registering it says the same thing louder, and
+            # before a request rather than during one.
+            unclassified.append(reg_name)
+            continue
         plugin = MCPToolPlugin(tdesc, client, name=reg_name, default_side_effecting=default_side_effecting,
                                action=action)
         registry.register(plugin)
         registered.append(reg_name)
+    if unclassified:
+        warnings.warn(
+            f"mount_mcp refused to mount {len(unclassified)} tool(s) with no risk class: {sorted(unclassified)}. "
+            f"Pass actions={{...}} for each one, or default_action='write' to say in one place that this whole "
+            f"server is assumed consequential. An MCP server is code this repository did not write and cannot "
+            f"read, so the class is no longer something it hands out by default.", stacklevel=2)
     return registered

@@ -24,7 +24,9 @@ def test_web_search_mounts_as_readonly_tool():
     console = AgentConsole("X", "A watch monitors a URL.", tools=[tool("noop", "noop", lambda a: {"text": "ok"})])
     client = _client()
     try:
-        names = console.mount_mcp(client)
+        # This server ships in this repository and only fetches, so the mount can name the class instead of
+        # relying on one: read, stated here, reviewed with the source it describes.
+        names = console.mount_mcp(client, actions={"web_search": "read"})
         assert "web_search" in names
         assert "web_search" in console._tools                       # visible to classify + dispatch
         spec = console.registry.get("web_search").spec()

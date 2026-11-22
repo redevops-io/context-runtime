@@ -100,7 +100,15 @@ class Stack:
         app_env = {**base, "CONTEXT_RUNTIME_HOME": str(home / "cr"),
                    "CONTEXT_RUNTIME_API_KEY": ADMIN_KEY, "CR_TENANT_KEYS": f"{READ_KEY}=*",
                    "CONTEXT_RUNTIME_CORPUS_ROOT": str(self.root),
-                   "CR_TENANTS": f"demo-finance={self.root / 'a'} | demo-medical={self.root / 'b'}"}
+                   "CR_TENANTS": f"demo-finance={self.root / 'a'} | demo-medical={self.root / 'b'}",
+                   # This backend is launched as a bare uvicorn process, and a control plane that runs tools
+                   # now refuses to start with nothing to ask. Every other part of this test is about the
+                   # proxy in front of it, so the app declares what a demo box on the operator's own machine
+                   # declares — local authority, in a sentence, audited as a wildcard grant. The alternative
+                   # is CR_EXECUTION_MODE=diagnostic, which would take the fleet's execution path away and
+                   # leave the routes under test with nothing behind them.
+                   "CR_LOCAL_AUTHORITY": "test stack: a control plane on the operator's own laptop, no "
+                                         "tenant in scope"}
         self.procs.append(subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "context_runtime.control_plane.app:app", "--host", "127.0.0.1",
              "--port", str(self.app_port), "--log-level", "warning"],

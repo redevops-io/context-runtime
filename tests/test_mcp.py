@@ -94,7 +94,10 @@ def _run_with_client_and_registry(policy: ApprovalPolicy | None = None):
             f.write(FAKE_SERVER)
         client = MCPClient.stdio([sys.executable, fake_path])
         try:
-            names = mount_mcp(reg, client)
+            # No class is declared for this fake server's tools, so the mount says in one place that the
+            # whole server is assumed consequential. mount_mcp has no default class of its own to fall
+            # back to: with neither an actions map nor a default, it mounts nothing at all.
+            names = mount_mcp(reg, client, default_action="write")
             return reg, names, client
         except Exception:
             client.close()
@@ -144,7 +147,7 @@ def test_mcp_tools_are_gated_by_approval_policy(local_run):
             f.write(FAKE_SERVER)
         client2 = MCPClient.stdio([sys.executable, fake_path])
         try:
-            mount_mcp(reg2, client2)
+            mount_mcp(reg2, client2, default_action="write")
             res2 = reg2.run("echo", {"text": "allow"})
             assert res2.ok is True
             assert "allow" in res2.text

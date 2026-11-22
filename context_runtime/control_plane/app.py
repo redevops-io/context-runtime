@@ -199,8 +199,13 @@ app.add_middleware(
     CORSMiddleware, allow_origins=[o.strip() for o in _cors if o.strip()],
     allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["*"],
 )
+# Building the fleet is the authorization gate: a privileged fleet that cannot name a plane to ask raises here,
+# so the container exits instead of serving a dashboard over a fleet whose every call is denied. A fleet
+# declared diagnostic (CR_EXECUTION_MODE=diagnostic, with a written reason) comes up and is built without an
+# execution path — no tenants, so /up, /dispatch and /agent/run have nothing to fall back to.
 fleet = _build()
-fleet.up()  # (b) stand up every module as a Context Runtime tenant → deployed
+if fleet.privileged:
+    fleet.up()  # (b) stand up every module as a Context Runtime tenant → deployed
 # Hermes 0.17 inbound chatops gateway — daemon thread, started only if a channel
 # is configured (closed by default; honors AGENTIC_OS_GATEWAY_ALLOW / _OPEN).
 _gateway = channels.Gateway(fleet)
@@ -490,8 +495,32 @@ def dashboard() -> str:
 
 @app.get("/health")
 def health() -> dict:
-    """Liveness only. The one unauthenticated route; it discloses nothing about the deployment."""
-    return {"status": "ok"}
+    """Liveness, plus the one fact that stops a deny-only instance being read as a working one.
+
+    It used to answer ``{"status": "ok"}`` and nothing else, on the grounds that a public route should
+    disclose nothing about the deployment. That held until the fleet could stand up with no authorization plane
+    and keep answering this endpoint while every tool call came back denied — the dashboard's green tick was
+    then indistinguishable from the outage it was supposed to detect. Two booleans are disclosed, both derived
+    from this process's own start-up decision: no paths, no tenants, no configuration, no module names.
+    """
+    return {"status": "ok", "mode": "diagnostic" if not fleet.privileged else "execute",
+            "privileged_execution": fleet.privileged}
+
+
+def require_execution() -> None:
+    """Refuse, before the handler runs, on the routes that would make a diagnostic instance execute.
+
+    The handlers would fail anyway — there are no tenants — but a 500 from inside ``fleet.up()`` reads like a
+    crash, and this state is not a crash: it is a deployment that said what it is. 503 says so, and says what
+    to change.
+    """
+    if not fleet.privileged:
+        raise HTTPException(503, "this control plane is running in the diagnostic mode (no authorization plane "
+                                 "was installed, so privileged execution is not available in it). To run "
+                                 "actions, start the execution instance: install a plane with "
+                                 "context_runtime.tools.set_default_authorizer(...) before the control plane "
+                                 "imports, or declare local authority with CR_LOCAL_AUTHORITY=\"why this "
+                                 "process may act as the operator\".")
 
 
 @app.get("/modules", response_model=list[ModuleList])
@@ -505,7 +534,7 @@ def status() -> list[dict]:
     return [asdict(s) for s in fleet.status()]
 
 
-@app.post("/up", dependencies=[Depends(require_api_key)])
+@app.post("/up", dependencies=[Depends(require_api_key), Depends(require_execution)])
 def up(names: list[str] | None = None) -> list[dict]:
     return [asdict(s) for s in fleet.up(*(names or []))]
 
@@ -539,7 +568,7 @@ class DispatchRequest(BaseModel):
     background: bool = False
 
 
-@app.post("/dispatch", dependencies=[Depends(require_api_key)])
+@app.post("/dispatch", dependencies=[Depends(require_api_key), Depends(require_execution)])
 def dispatch(req: DispatchRequest) -> dict:
     """Run one agent action through the fleet (router-picked model).
 
@@ -988,7 +1017,7 @@ class RunRequest(BaseModel):
     question: str
 
 
-@app.post("/agent/run", dependencies=[Depends(require_api_key)])
+@app.post("/agent/run", dependencies=[Depends(require_api_key), Depends(require_execution)])
 def agent_run(req: RunRequest) -> dict:
     """Plan a module's answer through its Context Runtime tenant (no side effects)."""
     try:

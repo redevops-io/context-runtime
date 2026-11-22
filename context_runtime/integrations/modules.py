@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from itertools import combinations
 
 from ..runtime.runtime import ContextRuntime
-from ..tools.authz import RegistryConfigurationError, resolve_authorizer
+from ..tools.authz import PrivilegedExecutionUnavailable, RegistryConfigurationError, resolve_authorizer
 from ..tools.base import ACTIONS, ApprovalPolicy, ToolRegistry, ToolResult, ToolSpec, function_tool
 from ..types import Goal, Hit, Plan, Trace
 from .bandit import EpsilonGreedyBandit
@@ -231,8 +231,12 @@ class ModuleTenant:
                  bandit: EpsilonGreedyBandit | None = None, approver=None, epsilon: float = 0.12,
                  persist_path: str | None = None,
                  authorizer=None, local_trust: bool = False, local_trust_reason: str = "",
-                 authorizer_on_missing: str = "raise"):
+                 authorizer_on_missing: str = "raise", privileged: bool = True):
         self.spec = spec
+        # ``privileged=False`` is a promise about this object, not a request: it says the caller is a
+        # read-only surface, so ``act`` is refused here as well as at the registry. A surface that could
+        # execute and asked to be built without a plane is refused at construction instead.
+        self.privileged = privileged
         self.runtime = runtime or ContextRuntime.default([])
         self.arms = _bundles(spec.sources)
         self.bandit = bandit or EpsilonGreedyBandit(self.arms, epsilon=epsilon, persist_path=persist_path)
@@ -244,7 +248,7 @@ class ModuleTenant:
                                          authorizer, local_trust=local_trust,
                                          local_trust_reason=local_trust_reason,
                                          context=f"module fleet tenant {spec.name!r}",
-                                         on_missing=authorizer_on_missing))
+                                         on_missing=authorizer_on_missing, privileged=privileged))
         for s in spec.sources:
             self.registry.register(_source_tool(spec.name, s))
         for a in spec.actions:
@@ -267,6 +271,11 @@ class ModuleTenant:
         return ModuleResult(self.spec.name, kind, bundle, tuple(hits), context, action, plan)
 
     def act(self, action: str, **args) -> ToolResult:
+        if not self.privileged:
+            raise PrivilegedExecutionUnavailable(
+                f"{self.spec.name}.{action} was refused: this tenant was built as a read-only surface "
+                f"(privileged=False), so it has no execution path to authorize a call through. A service that "
+                f"means to act builds a privileged tenant and installs a plane to ask.")
         return self.registry.run(f"{self.spec.name}_{action}", args)
 
     def record_outcome(self, question: str, success: bool) -> float:

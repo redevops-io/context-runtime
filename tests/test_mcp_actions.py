@@ -69,14 +69,18 @@ def _runnable(*names, authorizer):
     return ToolRegistry(policy=ApprovalPolicy("allowlist", allow=list(names)), authorizer=authorizer)
 
 
-def test_mounted_mcp_tool_defaults_to_write():
-    """No class declared means the strictest class every capability must clear — not ``read`` because the
-    server said it was one, and not a free pass from having no class at all."""
+def test_a_tool_nobody_classed_is_not_mounted_at_all():
+    """Refused by default, and refused structurally: the tool is not in the registry, so there is no call
+    for a plane to deny and no grant that could accidentally match it. The signature used to carry
+    ``default_action="write"``, which handed out a risk class to a mount that had not read the server —
+    a floor in the same shape as the one the injected-factory seam just lost."""
     spy, seen = _spy()
     reg = _runnable("convert_video", authorizer=spy)
-    mount_mcp(reg, FakeMCPClient([_tool("convert_video")]))
-    assert reg.run("convert_video", {}).ok
-    assert seen == [("convert_video", "write", True)]
+    with pytest.warns(UserWarning, match="no risk class"):
+        names = mount_mcp(reg, FakeMCPClient([_tool("convert_video")]))
+    assert names == [] and reg.list() == []
+    assert reg.run("convert_video", {}).ok is False
+    assert seen == []            # nothing was registered, so nothing was ever asked about
 
 
 def test_read_only_hint_relaxes_approval_but_never_the_class():
@@ -84,7 +88,7 @@ def test_read_only_hint_relaxes_approval_but_never_the_class():
     and it stops there."""
     spy, seen = _spy()
     reg = ToolRegistry(authorizer=spy)
-    mount_mcp(reg, FakeMCPClient([_tool("search", readOnlyHint=True)]))
+    mount_mcp(reg, FakeMCPClient([_tool("search", readOnlyHint=True)]), default_action="write")
     assert reg.run("search", {}).ok
     assert seen == [("search", "write", False)]  # not confirmed, still authorized as a write
 
