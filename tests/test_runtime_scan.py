@@ -98,7 +98,7 @@ def _drive(reg, target, profile):
     return reg.run("scan.scan_results", {"job_id": job})
 
 
-def test_mcp_async_lifecycle():
+def test_mcp_async_lifecycle(local_run):
     reg, client, names = _mounted(approver=lambda a: True)   # allow active for the lifecycle test
     try:
         assert {"scan.scan_start", "scan.scan_status", "scan.scan_results"} <= set(names)
@@ -111,7 +111,7 @@ def test_mcp_async_lifecycle():
         client.close()
 
 
-def test_mcp_approval_gate_blocks_active():
+def test_mcp_approval_gate_blocks_active(local_run):
     reg, client, _ = _mounted(approver=passive_only_approver)
     try:
         # passive auto-approved
@@ -124,7 +124,7 @@ def test_mcp_approval_gate_blocks_active():
         client.close()
 
 
-def test_mcp_off_scope_refused():
+def test_mcp_off_scope_refused(local_run):
     reg, client, _ = _mounted(approver=lambda a: True)   # even with blanket approval…
     try:
         r = reg.run("scan.scan_start", {"target": "https://example.com/", "profile": "recon"})
@@ -134,7 +134,7 @@ def test_mcp_off_scope_refused():
         client.close()
 
 
-def test_mcp_unknown_profile():
+def test_mcp_unknown_profile(local_run):
     reg, client, _ = _mounted(approver=lambda a: True)
     try:
         r = reg.run("scan.scan_start", {"target": "vibexgen.io", "profile": "nope"})
