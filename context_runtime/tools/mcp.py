@@ -16,7 +16,13 @@ from typing import Any
 
 import httpx
 
-from .base import ToolPlugin, ToolRegistry, ToolResult, ToolSpec
+from .authz import RegistryConfigurationError
+from .base import ACTIONS, ToolRegistry, ToolResult, ToolSpec
+
+# How destructive each class is, used to reconcile a classification map keyed by both a tool's own name
+# and the prefixed name it is registered under: the stricter of the two is used. ``ACTIONS`` is already
+# ordered by risk (read < write < delete), so its index is the rank.
+_STRENGTH: dict[str, int] = {action: rank for rank, action in enumerate(ACTIONS)}
 
 _log = logging.getLogger(__name__)
 
@@ -234,13 +240,25 @@ class MCPToolPlugin:
     _client: MCPClient
     _name: str
     _default_side: bool = True
+    _action: str = "write"
 
-    def __init__(self, tool_desc: dict[str, Any], client: MCPClient, *, name: str | None = None, default_side_effecting: bool = True) -> None:
+    def __init__(self, tool_desc: dict[str, Any], client: MCPClient, *, name: str | None = None,
+                 default_side_effecting: bool = True, action: str = "write") -> None:
+        """``action`` is the risk class this tool is asked about — set by whoever mounts the server.
+
+        The server's ``readOnlyHint`` is an announcement from the code being run; it moves the
+        approval gate and nothing else. An MCP tool with no declared class is therefore ``write``.
+        """
+        if action not in ACTIONS:
+            raise RegistryConfigurationError(
+                f"MCP tool {(name or tool_desc.get('name'))!r} declares action={action!r}, which is not "
+                f"one of the vocabulary {ACTIONS}")
         # support dataclass init + override for manual
         object.__setattr__(self, "_desc", tool_desc)
         object.__setattr__(self, "_client", client)
         object.__setattr__(self, "_name", name or tool_desc.get("name", "unnamed"))
         object.__setattr__(self, "_default_side", default_side_effecting)
+        object.__setattr__(self, "_action", action)
 
     def spec(self) -> ToolSpec:
         mcp_name = self._desc.get("name") or self._name
@@ -248,12 +266,20 @@ class MCPToolPlugin:
         schema = self._desc.get("inputSchema") or self._desc.get("input_schema") or {"type": "object", "properties": {}}
         ann = self._desc.get("annotations") or {}
         read_only = bool(ann.get("readOnlyHint")) if "readOnlyHint" in ann else False
-        side = (not read_only) if "readOnlyHint" in ann else bool(self._default_side)
+        # ``read`` and ``side_effecting`` cannot both be true: the engine refuses a spec that asks to be
+        # authorized as the weakest class while declaring that it mutates something. When the operator
+        # classified this tool ``read``, that classification is the authoritative statement about it —
+        # truer than a mount-wide ``default_side_effecting`` that was never about this tool in particular.
+        if self._action == "read":
+            side = False
+        else:
+            side = (not read_only) if "readOnlyHint" in ann else bool(self._default_side)
         return ToolSpec(
             name=self._name,
             description=desc,
             parameters=schema,
             side_effecting=side,
+            action=self._action,
         )
 
     def run(self, args: dict) -> ToolResult:
@@ -288,12 +314,29 @@ def mount_mcp(
     *,
     prefix: str | None = None,
     default_side_effecting: bool = True,
+    actions: dict[str, str] | None = None,
+    default_action: str = "write",
 ) -> list[str]:
     """Initialize client if needed, list tools, register each wrapped MCPToolPlugin.
 
     Registered name = f'{prefix}.{name}' if prefix else name.
+
+    ``actions`` gives a tool its risk class — keyed by the registered name, or by the server's own
+    name when a prefix is used — and is decided by whoever mounts the server, after reading what
+    that server does. A tool absent from the map gets ``default_action``, which is ``write``: an
+    announced ``readOnlyHint`` may relax the *approval* gate, never the authorization class, because
+    the thing asking to be run is not allowed to grade its own risk. ``actions`` values and
+    ``default_action`` must come from the shared vocabulary ``ACTIONS``.
     Returns the list of registered tool names.
     """
+    if default_action not in ACTIONS:
+        raise RegistryConfigurationError(
+            f"mount_mcp default_action={default_action!r} is not one of the vocabulary {ACTIONS}")
+    declared = dict(actions or {})
+    misgraded = {key: value for key, value in declared.items() if value not in ACTIONS}
+    if misgraded:
+        raise RegistryConfigurationError(
+            f"mount_mcp actions {sorted(misgraded)} use classes outside the vocabulary {ACTIONS}")
     try:
         if not client._initialized:
             client.initialize()
@@ -309,7 +352,14 @@ def mount_mcp(
             continue
         raw = tdesc["name"]
         reg_name = f"{prefix}.{raw}" if prefix else raw
-        plugin = MCPToolPlugin(tdesc, client, name=reg_name, default_side_effecting=default_side_effecting)
+        # A map may be keyed by the server's own name or by the prefixed name this mount registers it
+        # under; when it is keyed by both and they disagree, the stricter class wins. Which name wins is
+        # otherwise a detail of how the caller spelled the key, and a classification that quietly becomes
+        # ``read`` because of a spelling is the failure this layer exists to prevent.
+        candidates = [declared[key] for key in (raw, reg_name) if key in declared]
+        action = max(candidates, key=_STRENGTH.get, default=default_action)
+        plugin = MCPToolPlugin(tdesc, client, name=reg_name, default_side_effecting=default_side_effecting,
+                               action=action)
         registry.register(plugin)
         registered.append(reg_name)
     return registered
