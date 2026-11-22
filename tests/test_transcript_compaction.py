@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -119,7 +120,12 @@ class Scripted:
         return {"message": r, "finish_reason": "stop", "usage": {"prompt_tokens": self.prompt_tokens, "completion_tokens": 5}}
 
 
-def test_inside_the_real_agent_loop_the_model_can_recover_compacted_output():
+def test_inside_the_real_agent_loop_the_model_can_recover_compacted_output(local_run):
+    # ``local_run`` is load-bearing, not boilerplate: this loop asserts that the model recovered a tool
+    # result it had dropped, which requires the tool to have RUN. Under authz/v1 a bare registry has no
+    # plane and denies every call, so without a declared local authority the compaction assertions below
+    # would be comparing stubs against denials. ``ApprovalPolicy("bypass")`` is the other gate (approval)
+    # and never authorized anything.
     reg = ToolRegistry(ApprovalPolicy("bypass"))
     reg.register(function_tool("dump", lambda a: ToolResult(text=f"BIG{a['n']} " + "filler " * 700 + f" SECRET{a['n']}"),
                                parameters={"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]}))
@@ -137,7 +143,7 @@ def test_inside_the_real_agent_loop_the_model_can_recover_compacted_output():
     assert any("SECRET1" in m["content"] and not STUB.match(m["content"]) for m in last_msgs if m["role"] == "tool")   # and recovered
 
 
-def test_server_context_error_is_handled_by_the_manager_in_the_loop():
+def test_server_context_error_is_handled_by_the_manager_in_the_loop(local_run):
     reg = ToolRegistry(ApprovalPolicy("bypass"))
     reg.register(function_tool("dump", lambda a: ToolResult(text="x" * 5000), parameters={"type": "object", "properties": {}}))
     mgr = ContextRuntimeManager()
@@ -146,6 +152,9 @@ def test_server_context_error_is_handled_by_the_manager_in_the_loop():
     client = Scripted(replies, prompt_tokens=10)
     res = run_loop(client, reg, "s", "t", max_context_tokens=10**9, context_manager=mgr)
     assert res.stop == "done" and mgr.archive.entries
+    # ...and what reached the archive is the tool's output, not a denial message wearing its place: the
+    # assertion above passes either way, which is exactly how a migrated test quietly stops testing anything.
+    assert any(Path(e.path).read_text(encoding="utf-8").startswith("xxxx") for e in mgr.archive.entries.values())
 
 
 def test_oversized_tool_output_is_archived_whole_at_admission_so_the_middle_is_recoverable():
