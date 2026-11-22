@@ -141,8 +141,12 @@ class SocialAutopilotTenant:
         # else explicitly declared local authority — otherwise construction fails here instead of
         # denying every call later (see ``context_runtime/tools/authz.py``). Risk classes below
         # are read off what the tool actually does, never off its name or its ``side_effecting`` flag.
-        # ``draft_caption`` returns drafted copy to the caller; the schedule/publish call that
-        # would make it an external communication is a separate consequential path — ``read``.
+        # ``draft_caption`` returns drafted copy to the caller and the shipped implementation is a
+        # local simulation, so it reads. Two named divergences from the platform table, both deliberate:
+        # agentic-os classes ``social.draft`` write because its draft calls an external generator, and
+        # the publish/schedule call is a separate consequential path (``social.publish`` write). Whoever
+        # passes ``caption_tool_factory`` that reaches a generation service re-registers this tool as
+        # write — the class describes the function that is actually installed.
         self.registry = ToolRegistry(authorizer=resolve_authorizer(
             authorizer, local_trust=local_trust, local_trust_reason=local_trust_reason,
             context="social_autopilot"))

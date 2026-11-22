@@ -171,12 +171,15 @@ def _source_tool(module: str, source: str):
 
 
 # What each declared fleet action accomplishes, read off the platform's own classification table
-# (agentic-os docs/TOOL_CLASSIFICATION_INVENTORY.md) wherever the same capability exists there:
-# `refund` moves money (billing.charge = write); `dunning`, `post`, `send_campaign` and
-# `send_sequence` are outbound communications (send_email, post_to_channel, crm.draft_outreach =
-# write); `escalate`, `remediate` (compliance.remediate), `close` (a period close) and `rollback`
-# (infra.rollback_release) change state — `write`; `fulfill_dsar` is the capability the platform
-# lists as `privacy.delete` = `delete`. Declared per action, never derived from the word "action".
+# (agentic_os/tool_actions.py, evidence rows in docs/TOOL_CLASSIFICATION_INVENTORY.md) wherever the
+# same capability exists there — and only where it does: `refund` and `dunning` are the platform's
+# own `refund` / `billing.refund` / `billing.dunning` = write; `post` is `social.publish` = write;
+# `send_campaign` and `send_sequence` are `outreach.send_all` = write; `escalate` is
+# `support.escalate` = write; `remediate` is `compliance.remediate` = write; `rollback` is
+# `infra.rollback_release` = write; `fulfill_dsar` is `privacy.delete` = delete. `close` has no
+# counterpart there (the platform registers only `close_status`, a read of whether a period is
+# closed), so it is classified from what closing a period does — it posts entries — as write.
+# Declared per action, never derived from the word "action".
 _ACTION_CLASSES: dict[str, str] = {
     "refund": "write",
     "dunning": "write",

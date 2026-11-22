@@ -162,10 +162,11 @@ class BlockIpTool:
                         parameters={"type": "object", "properties": {
                             "ip": {"type": "string"}, "duration": {"type": "string"}}},
                         side_effecting=True, approval_required=True,
-                        # The platform's own inventory classifies the same capability (`ban_ip`,
-                        # apps/edge-sentinel/operator.py:79) as `write`: it changes live edge policy for a
-                        # third party. The dry-run default is a runtime guard, not a licence to call it a
-                        # read; the grant and the approval are separate checks.
+                        # The platform classifies the same capability — `sentinel.block_ip`, registered at
+                        # agentic-os apps/edge-sentinel/operator.py:57 and listed write in both
+                        # agentic_os/tool_actions.py and docs/TOOL_CLASSIFICATION_INVENTORY.md — because it
+                        # changes live edge policy affecting third parties. The dry-run default is a runtime
+                        # guard, not a licence to call it a read; grant and approval stay separate checks.
                         action="write")
 
     def run(self, args: dict) -> ToolResult:
