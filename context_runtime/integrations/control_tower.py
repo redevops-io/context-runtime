@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from ..runtime.runtime import ContextRuntime
+from ..tools.actions import resolve_action
 from ..tools.authz import resolve_authorizer
 from ..tools.base import ToolRegistry, ToolResult, function_tool
 from ..types import Goal, Trace
@@ -100,6 +101,7 @@ class ControlTowerTenant:
                  arms: tuple[ControlTowerArm, ...] = DEFAULT_TOWER,
                  bandit: EpsilonGreedyBandit | None = None, epsilon: float = 0.15,
                  refresh_tool_factory: Callable[[dict], ToolResult] | None = None,
+                 refresh_action: str | None = None,
                  authorizer=None, local_trust: bool = False, local_trust_reason: str = ""):
         self.runtime = runtime or ContextRuntime.default([])
         self.arms = arms
@@ -112,6 +114,8 @@ class ControlTowerTenant:
         # ``refresh_metabase`` re-runs Metabase queries and returns their rows — the same call
         # agentic-os classifies as ``bi.refresh``/read: a query against the platform's own
         # warehouse, which writes no business state. Persisting a card or dashboard would not be.
+        # ``refresh_tool_factory`` replaces that function, and the class does not come with the slot it
+        # fills: whoever swaps in a live call declares it with ``refresh_action`` (``resolve_action``).
         self.registry = ToolRegistry(authorizer=resolve_authorizer(
             authorizer, local_trust=local_trust, local_trust_reason=local_trust_reason,
             context="control_tower"))
@@ -120,7 +124,8 @@ class ControlTowerTenant:
             name="refresh_metabase",
             description="Refresh the Metabase query set (simulated).",
             fn=refresh_fn,
-            action="read",
+            action=resolve_action(shipped="read", injected=refresh_tool_factory, declared=refresh_action,
+                                  param="refresh_action", tool="refresh_metabase", context="control_tower"),
         ))
         self._pending: dict[str, tuple[Plan, ControlTowerArm, str, str]] = {}
 

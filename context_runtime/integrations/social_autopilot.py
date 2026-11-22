@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from ..runtime.runtime import ContextRuntime
+from ..tools.actions import resolve_action
 from ..tools.authz import resolve_authorizer
 from ..tools.base import ToolRegistry, ToolResult, function_tool
 from ..types import Goal, Trace
@@ -132,6 +133,7 @@ class SocialAutopilotTenant:
                  strategies: tuple[SocialStrategy, ...] = DEFAULT_STRATEGIES,
                  bandit: EpsilonGreedyBandit | None = None, epsilon: float = 0.15,
                  caption_tool_factory: Callable[[dict], ToolResult] | None = None,
+                 caption_action: str | None = None,
                  authorizer=None, local_trust: bool = False, local_trust_reason: str = ""):
         self.runtime = runtime or ContextRuntime.default([])
         self.strategies = strategies
@@ -144,9 +146,9 @@ class SocialAutopilotTenant:
         # ``draft_caption`` returns drafted copy to the caller and the shipped implementation is a
         # local simulation, so it reads. Two named divergences from the platform table, both deliberate:
         # agentic-os classes ``social.draft`` write because its draft calls an external generator, and
-        # the publish/schedule call is a separate consequential path (``social.publish`` write). Whoever
-        # passes ``caption_tool_factory`` that reaches a generation service re-registers this tool as
-        # write — the class describes the function that is actually installed.
+        # the publish/schedule call is a separate consequential path (``social.publish`` write). Passing
+        # ``caption_tool_factory`` replaces the simulation, so that function declares its own class with
+        # ``caption_action`` — construction refuses rather than hand a live generator a read grant.
         self.registry = ToolRegistry(authorizer=resolve_authorizer(
             authorizer, local_trust=local_trust, local_trust_reason=local_trust_reason,
             context="social_autopilot"))
@@ -155,7 +157,8 @@ class SocialAutopilotTenant:
             name="draft_caption",
             description="Draft a caption for the chosen social strategy (simulated).",
             fn=caption_fn,
-            action="read",
+            action=resolve_action(shipped="read", injected=caption_tool_factory, declared=caption_action,
+                                  param="caption_action", tool="draft_caption", context="social_autopilot"),
         ))
         self._pending: dict[str, tuple[Plan, SocialStrategy, str, str]] = {}
 

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from ..runtime.runtime import ContextRuntime
+from ..tools.actions import resolve_action
 from ..tools.authz import resolve_authorizer
 from ..tools.base import ToolRegistry, ToolResult, function_tool
 from ..types import Goal, Trace
@@ -107,6 +108,7 @@ class AgenticBooksTenant:
                  arms: tuple[BooksReportBundle, ...] = DEFAULT_BOOKS,
                  bandit: EpsilonGreedyBandit | None = None, epsilon: float = 0.15,
                  pull_tool_factory: Callable[[dict], ToolResult] | None = None,
+                 pull_action: str | None = None,
                  authorizer=None, local_trust: bool = False, local_trust_reason: str = ""):
         self.runtime = runtime or ContextRuntime.default([])
         self.arms = arms
@@ -118,6 +120,8 @@ class AgenticBooksTenant:
         # are read off what the tool actually does, never off its name or its ``side_effecting`` flag.
         # ``pull_reports`` reads receivables, payables, tax and trial balance for the tenant:
         # books data, and nothing is written — ``read``.
+        # ``pull_tool_factory`` replaces that function, and the class does not come with the slot it fills:
+        # a live ERP pull that posts journal entries or writes a report is not the same call as this one.
         self.registry = ToolRegistry(authorizer=resolve_authorizer(
             authorizer, local_trust=local_trust, local_trust_reason=local_trust_reason,
             context="agentic_books"))
@@ -126,7 +130,8 @@ class AgenticBooksTenant:
             name="pull_reports",
             description="Pull the selected ledger/report bundle (simulated).",
             fn=pull_fn,
-            action="read",
+            action=resolve_action(shipped="read", injected=pull_tool_factory, declared=pull_action,
+                                  param="pull_action", tool="pull_reports", context="agentic_books"),
         ))
         self._pending: dict[str, tuple] = {}
 

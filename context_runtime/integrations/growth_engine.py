@@ -8,6 +8,7 @@ from typing import Callable
 
 from .bandit import EpsilonGreedyBandit
 from ..runtime.runtime import ContextRuntime
+from ..tools.actions import resolve_action
 from ..tools.authz import resolve_authorizer
 from ..tools.base import ToolRegistry, ToolResult, function_tool
 from ..types import Goal, Plan, Trace
@@ -129,6 +130,7 @@ class GrowthEngineTenant:
                  bandit: EpsilonGreedyBandit | None = None, epsilon: float = 0.15,
                  bucket_fn: Callable[[str], str] = growth_engine_bucket,
                  report_tool_factory: Callable[[dict], ToolResult] | None = None,
+                 report_action: str | None = None,
                  authorizer=None, local_trust: bool = False, local_trust_reason: str = ""):
         self.runtime = runtime or ContextRuntime.default([])
         self.arms = arms
@@ -142,6 +144,8 @@ class GrowthEngineTenant:
         # ``draft_attribution_report`` composes an attribution answer from analytics it reads;
         # the text goes back to the caller and nothing is published — ``read``. Publishing the
         # report is a separate route and is classified ``write`` where it is registered.
+        # ``report_tool_factory`` replaces that function, and the class does not come with the slot it
+        # fills: a live report that lands in a warehouse or a dashboard is not the same call as this one.
         self.registry = ToolRegistry(authorizer=resolve_authorizer(
             authorizer, local_trust=local_trust, local_trust_reason=local_trust_reason,
             context="growth_engine"))
@@ -150,7 +154,9 @@ class GrowthEngineTenant:
             name="draft_attribution_report",
             description="Draft an attribution breakdown for the chosen arm (simulated).",
             fn=report_fn,
-            action="read",
+            action=resolve_action(shipped="read", injected=report_tool_factory, declared=report_action,
+                                  param="report_action", tool="draft_attribution_report",
+                                  context="growth_engine"),
         ))
         self._pending: dict[str, tuple[Plan, AttributionArm, str, str]] = {}
 
