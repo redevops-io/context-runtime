@@ -361,6 +361,30 @@ class AgentConsole:
         from ..policy import current_policy
         return self._policy or current_policy()
 
+    def _denied_by_authorization(self, name: str, result) -> bool:
+        """Whether a failed result is the AUTHORIZATION gate refusing, not the APPROVAL gate holding the call.
+
+        The two answers read differently to a user — "you are not allowed to do that" versus "this needs a
+        confirmation first" — and conflating them tells someone with no grant that pressing confirm would help.
+
+        :mod:`agent_harness.tools` has never carried a ``denied`` flag on ``ToolResult``, so asking for one
+        raised ``AttributeError`` and a denied console call answered 500 instead of its reason. The flag is used
+        when a result has one; otherwise the registry's own audit trail is read: an authorization outcome is the
+        entry that carries the plane's attribution (``policy_reason``/``plane``), while an approval hold writes
+        only the four keys it has always written. No entry at all is not a denial — an unregistered tool, a tool
+        that crashed, and a policy block each failed somewhere else, and say so.
+        """
+        explicit = getattr(result, "denied", None)
+        if explicit is not None:
+            return bool(explicit)
+        if not (result.error or "").startswith("denied:"):
+            return False
+        for entry in reversed(self.registry.audit):
+            if entry.get("tool") != name:
+                continue
+            return entry.get("allowed") is False and "policy_reason" in entry
+        return False
+
     def _answer_tool(self, name: str, args: dict, principal=None) -> dict:
         # tool-phase policy: an approval rule pauses an irreversible action; a deny rule blocks it.
         policy = self._effective_policy()
@@ -379,7 +403,7 @@ class AgentConsole:
         if not result.ok:
             # A denial carries its own reason and must show it: "this needs confirmation" is what a held
             # side effect says, and it is the wrong thing to tell someone whose action was denied.
-            if result.denied:
+            if self._denied_by_authorization(name, result):
                 body = summary or result.error or "That action is not authorized."
             else:
                 body = summary or "That action needs confirmation before it can run."
