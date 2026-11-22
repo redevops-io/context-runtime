@@ -25,7 +25,7 @@ def test_bandit_state_survives_reload(tmp_path):
     assert b2.value("ctx", "a")[0] == 20
 
 
-def test_module_tenant_persists(tmp_path):
+def test_module_tenant_persists(local_run, tmp_path):
     p = str(tmp_path / "billing.json")
     t1 = ModuleTenant(CATALOG["billing"], persist_path=p)
     latent = CATALOG["billing"].sources[0]

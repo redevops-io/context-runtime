@@ -15,9 +15,11 @@ from .base import (
     ToolResult,
     ToolSpec,
 )
+from .authz import LOCAL_AUTHORITY_ENV, local_authority, local_authority_from_env, resolve_authorizer
 from .retriever import ToolRetriever
 
 __all__ = [
     "ToolSpec", "ToolResult", "ToolPlugin", "ToolRegistry", "ApprovalPolicy",
     "ToolError", "ToolRetriever",
+    "resolve_authorizer", "local_authority", "local_authority_from_env", "LOCAL_AUTHORITY_ENV",
 ]

@@ -21,7 +21,8 @@ import urllib.request
 from dataclasses import dataclass
 
 from ..runtime.runtime import ContextRuntime
-from ..tools.base import ApprovalPolicy, ToolRegistry, ToolResult, ToolSpec
+from ..tools.authz import resolve_authorizer
+from ..tools.base import ACTIONS, ApprovalPolicy, ToolRegistry, ToolResult, ToolSpec
 from ..types import Goal, Hit, Plan, Trace
 from .bandit import EpsilonGreedyBandit
 
@@ -61,7 +62,11 @@ class CrowdSecDecisionsTool:
     def spec(self) -> ToolSpec:
         return ToolSpec(name="crowdsec_decisions",
                         description="Live CrowdSec ban/captcha decisions (IP, scenario, duration).",
-                        parameters={"type": "object", "properties": {"query": {"type": "string"}}})
+                        parameters={"type": "object", "properties": {"query": {"type": "string"}}},
+                        # It asks the platform's own CrowdSec LAPI for decisions and writes nothing — the
+                        # platform's table draws the same line for `bi.refresh`. Sensitive, so scoped
+                        # narrowly by the plane; sensitivity is not a reason to call it a write.
+                        action="read")
 
     def run(self, args: dict) -> ToolResult:
         rows = self._live() if (self.lapi_url and self.bouncer_key) else self._sim(args.get("query", ""))
@@ -108,7 +113,10 @@ class ThreatIntelTool:
     def spec(self) -> ToolSpec:
         return ToolSpec(name="threat_intel",
                         description="Reputation/CVE lookup for an IP or hash or CVE id.",
-                        parameters={"type": "object", "properties": {"query": {"type": "string"}}})
+                        parameters={"type": "object", "properties": {"query": {"type": "string"}}},
+                        # A lookup in a local reputation table — read. Swapping in a live third-party feed
+                        # is a different tool and has to be classified by whoever wires it.
+                        action="read")
 
     def run(self, args: dict) -> ToolResult:
         ind = (args.get("query") or "").strip()
@@ -125,7 +133,9 @@ class EdrTimelineTool:
     def spec(self) -> ToolSpec:
         return ToolSpec(name="edr_timeline",
                         description="Recent endpoint process/behavior events for triage.",
-                        parameters={"type": "object", "properties": {"query": {"type": "string"}}})
+                        parameters={"type": "object", "properties": {"query": {"type": "string"}}},
+                        # Reads endpoint events for triage and writes nothing — read.
+                        action="read")
 
     def run(self, args: dict) -> ToolResult:
         events = [
@@ -151,7 +161,12 @@ class BlockIpTool:
                         description="Ban an IP at the edge (CrowdSec decision).",
                         parameters={"type": "object", "properties": {
                             "ip": {"type": "string"}, "duration": {"type": "string"}}},
-                        side_effecting=True, approval_required=True)
+                        side_effecting=True, approval_required=True,
+                        # The platform's own inventory classifies the same capability (`ban_ip`,
+                        # apps/edge-sentinel/operator.py:79) as `write`: it changes live edge policy for a
+                        # third party. The dry-run default is a runtime guard, not a licence to call it a
+                        # read; the grant and the approval are separate checks.
+                        action="write")
 
     def run(self, args: dict) -> ToolResult:
         ip, dur = args.get("ip", "?"), args.get("duration", "4h")
@@ -218,15 +233,24 @@ class SOCTriageTenant:
     whether the verdict was confirmed."""
 
     def __init__(self, runtime: ContextRuntime | None = None, registry: ToolRegistry | None = None,
-                 bandit: EpsilonGreedyBandit | None = None, approver=None):
+                 bandit: EpsilonGreedyBandit | None = None, approver=None,
+                 authorizer=None, local_trust: bool = False, local_trust_reason: str = ""):
         self.runtime = runtime or ContextRuntime.default([])
         self.bandit = bandit or _soc_bandit()
-        self.registry = registry or self._default_registry(approver)
+        # A registry handed in by the caller is already the caller's decision about who answers for a
+        # call; a registry built here names its own answerer (see tools/authz.py).
+        self.registry = registry or self._default_registry(approver, authorizer=authorizer,
+                                                           local_trust=local_trust,
+                                                           local_trust_reason=local_trust_reason)
         self._pending: dict[str, tuple[Plan, SourceBundle, str]] = {}
 
     @staticmethod
-    def _default_registry(approver) -> ToolRegistry:
-        reg = ToolRegistry(ApprovalPolicy(mode="deny_side_effects", approver=approver))
+    def _default_registry(approver, *, authorizer=None, local_trust: bool = False,
+                          local_trust_reason: str = "") -> ToolRegistry:
+        reg = ToolRegistry(ApprovalPolicy(mode="deny_side_effects", approver=approver),
+                           authorizer=resolve_authorizer(authorizer, local_trust=local_trust,
+                                                         local_trust_reason=local_trust_reason,
+                                                         context="edge-sentinel soc tenant"))
         for t in (CrowdSecDecisionsTool(), ThreatIntelTool(), EdrTimelineTool(), BlockIpTool()):
             reg.register(t)
         return reg

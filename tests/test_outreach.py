@@ -14,7 +14,7 @@ def test_bucketing_by_strongest_signal():
     assert outreach_bucket("random company") == "cold"
 
 
-def test_choose_drafts_opener_and_send_is_approval_gated():
+def test_choose_drafts_opener_and_send_is_approval_gated(local_run):
     t = OutreachEngineTenant()
     play = t.choose("their RAG has reranking pain", bucket="tech_pain")
     assert isinstance(play, OutreachPlay)
@@ -28,7 +28,7 @@ def test_choose_drafts_opener_and_send_is_approval_gated():
     assert t2.send_sequence("their RAG has reranking pain")["status"] == "sent"
 
 
-def test_artifact_play_produces_a_teardown_opener():
+def test_artifact_play_produces_a_teardown_opener(local_run):
     t = OutreachEngineTenant()
     # force an artifact play and check the opener is the EXPLAIN teardown (the wedge)
     t.bandit = type(t.bandit)((OutreachPlay("tech_pain", "email", "artifact"),))
@@ -37,7 +37,7 @@ def test_artifact_play_produces_a_teardown_opener():
     assert "EXPLAIN" in opener and "/planner" in opener
 
 
-def test_learns_to_invest_effort_on_high_signal_accounts():
+def test_learns_to_invest_effort_on_high_signal_accounts(local_run):
     t = OutreachEngineTenant(epsilon=0.1)
     # teach: artifact converts on tech_pain (value high); template on tech_pain under-converts.
     def value(play):

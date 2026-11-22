@@ -21,7 +21,8 @@ from dataclasses import dataclass, field
 from itertools import combinations
 
 from ..runtime.runtime import ContextRuntime
-from ..tools.base import ApprovalPolicy, ToolRegistry, ToolResult, ToolSpec, function_tool
+from ..tools.authz import RegistryConfigurationError, resolve_authorizer
+from ..tools.base import ACTIONS, ApprovalPolicy, ToolRegistry, ToolResult, ToolSpec, function_tool
 from ..types import Goal, Hit, Plan, Trace
 from .bandit import EpsilonGreedyBandit
 
@@ -161,15 +162,47 @@ def _source_tool(module: str, source: str):
         hit = Hit(chunk_id=f"{module}:{source}", filename=f"{module}/{source}", source=source,
                   text=f"[{module}/{source}] record relevant to: {q}", score=1.0)
         return ToolResult(ok=True, hits=[hit], text=f"{module}/{source}")
-    return function_tool(f"{module}_{source}", run, description=f"{module} source: {source}")
+    # The source tool reads records out of the module's own bundle and writes nothing — `read`. A
+    # source name is not evidence (the inventory calls `sbom`, a scan, a write and `search_articles`,
+    # a lookup, a read): this class describes the implementation above. An integrator that swaps a
+    # source for a live third-party fetch or scan registers a different tool and classifies it.
+    return function_tool(f"{module}_{source}", run, description=f"{module} source: {source}",
+                         action="read")
+
+
+# What each declared fleet action accomplishes, read off the platform's own classification table
+# (agentic-os docs/TOOL_CLASSIFICATION_INVENTORY.md) wherever the same capability exists there:
+# `refund` moves money (billing.charge = write); `dunning`, `post`, `send_campaign` and
+# `send_sequence` are outbound communications (send_email, post_to_channel, crm.draft_outreach =
+# write); `escalate`, `remediate` (compliance.remediate), `close` (a period close) and `rollback`
+# (infra.rollback_release) change state — `write`; `fulfill_dsar` is the capability the platform
+# lists as `privacy.delete` = `delete`. Declared per action, never derived from the word "action".
+_ACTION_CLASSES: dict[str, str] = {
+    "refund": "write",
+    "dunning": "write",
+    "escalate": "write",
+    "remediate": "write",
+    "close": "write",
+    "post": "write",
+    "send_campaign": "write",
+    "send_sequence": "write",
+    "block_ip": "write",
+    "rollback": "write",
+    "fulfill_dsar": "delete",
+}
 
 
 def _action_tool(module: str, action: str):
     def run(args: dict) -> ToolResult:
         return ToolResult(ok=True, data={"action": action, "applied": False},
                           text=f"[dry-run] {module}.{action}({args})")
+    action_class = _ACTION_CLASSES.get(action)
+    if action_class is None:
+        raise RegistryConfigurationError(
+            f"the fleet action {module}.{action} has no recorded risk class — add it to _ACTION_CLASSES "
+            f"in modules.py with the evidence for what it actually does, instead of defaulting it")
     return function_tool(f"{module}_{action}", run, description=f"{module} action: {action}",
-                         side_effecting=True, approval_required=True)
+                         side_effecting=True, approval_required=True, action=action_class)
 
 
 class ModuleTenant:
@@ -177,12 +210,20 @@ class ModuleTenant:
 
     def __init__(self, spec: ModuleSpec, runtime: ContextRuntime | None = None,
                  bandit: EpsilonGreedyBandit | None = None, approver=None, epsilon: float = 0.12,
-                 persist_path: str | None = None):
+                 persist_path: str | None = None,
+                 authorizer=None, local_trust: bool = False, local_trust_reason: str = ""):
         self.spec = spec
         self.runtime = runtime or ContextRuntime.default([])
         self.arms = _bundles(spec.sources)
         self.bandit = bandit or EpsilonGreedyBandit(self.arms, epsilon=epsilon, persist_path=persist_path)
-        self.registry = ToolRegistry(ApprovalPolicy(mode="deny_side_effects", approver=approver))
+        # The approval policy decides whether a confirmed caller may run a side-effecting tool; who is
+        # allowed to ask at all is a separate answer, named here (explicit ``authorizer``, else a plane
+        # installed with set_default_authorizer, else declared local authority — see tools/authz.py).
+        self.registry = ToolRegistry(ApprovalPolicy(mode="deny_side_effects", approver=approver),
+                                     authorizer=resolve_authorizer(
+                                         authorizer, local_trust=local_trust,
+                                         local_trust_reason=local_trust_reason,
+                                         context=f"module fleet tenant {spec.name!r}"))
         for s in spec.sources:
             self.registry.register(_source_tool(spec.name, s))
         for a in spec.actions:
@@ -227,7 +268,11 @@ class ModuleTenant:
         return hashlib.sha256(q.encode()).hexdigest()[:16]
 
 
-def build_fleet(runtime: ContextRuntime | None = None, approver=None) -> dict[str, ModuleTenant]:
+def build_fleet(runtime: ContextRuntime | None = None, approver=None, *,
+                authorizer=None, local_trust: bool = False,
+                local_trust_reason: str = "") -> dict[str, ModuleTenant]:
     """Instantiate the whole catalog as Context Runtime tenants — the migrated fleet."""
     rt = runtime or ContextRuntime.default([])
-    return {name: ModuleTenant(spec, runtime=rt, approver=approver) for name, spec in CATALOG.items()}
+    return {name: ModuleTenant(spec, runtime=rt, approver=approver, authorizer=authorizer,
+                               local_trust=local_trust, local_trust_reason=local_trust_reason)
+            for name, spec in CATALOG.items()}

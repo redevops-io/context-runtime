@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from ..runtime.runtime import ContextRuntime
+from ..tools.authz import resolve_authorizer
 from ..tools.base import ToolRegistry, ToolResult, function_tool
 from ..types import Goal, Trace
 from .bandit import EpsilonGreedyBandit
@@ -98,16 +99,28 @@ class ControlTowerTenant:
     def __init__(self, runtime: ContextRuntime | None = None,
                  arms: tuple[ControlTowerArm, ...] = DEFAULT_TOWER,
                  bandit: EpsilonGreedyBandit | None = None, epsilon: float = 0.15,
-                 refresh_tool_factory: Callable[[dict], ToolResult] | None = None):
+                 refresh_tool_factory: Callable[[dict], ToolResult] | None = None,
+                 authorizer=None, local_trust: bool = False, local_trust_reason: str = ""):
         self.runtime = runtime or ContextRuntime.default([])
         self.arms = arms
         self.bandit = bandit or _tower_bandit(epsilon=epsilon, arms=arms)
-        self.registry = ToolRegistry()
+        # Who answers for a call in this registry is the deployment's choice, not this tenant's
+        # default: an explicit ``authorizer``, else a plane installed with set_default_authorizer,
+        # else explicitly declared local authority — otherwise construction fails here instead of
+        # denying every call later (see ``context_runtime/tools/authz.py``). Risk classes below
+        # are read off what the tool actually does, never off its name or its ``side_effecting`` flag.
+        # ``refresh_metabase`` re-runs Metabase queries and returns their rows — the same call
+        # agentic-os classifies as ``bi.refresh``/read: a query against the platform's own
+        # warehouse, which writes no business state. Persisting a card or dashboard would not be.
+        self.registry = ToolRegistry(authorizer=resolve_authorizer(
+            authorizer, local_trust=local_trust, local_trust_reason=local_trust_reason,
+            context="control_tower"))
         refresh_fn = refresh_tool_factory or _refresh_queries
         self.registry.register(function_tool(
             name="refresh_metabase",
             description="Refresh the Metabase query set (simulated).",
             fn=refresh_fn,
+            action="read",
         ))
         self._pending: dict[str, tuple[Plan, ControlTowerArm, str, str]] = {}
 

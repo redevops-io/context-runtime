@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from ..runtime.runtime import ContextRuntime
+from ..tools.authz import resolve_authorizer
 from ..tools.base import ToolRegistry, ToolResult, function_tool
 from ..types import Goal, Trace
 from .bandit import EpsilonGreedyBandit
@@ -105,16 +106,27 @@ class AgenticBooksTenant:
     def __init__(self, runtime: ContextRuntime | None = None,
                  arms: tuple[BooksReportBundle, ...] = DEFAULT_BOOKS,
                  bandit: EpsilonGreedyBandit | None = None, epsilon: float = 0.15,
-                 pull_tool_factory: Callable[[dict], ToolResult] | None = None):
+                 pull_tool_factory: Callable[[dict], ToolResult] | None = None,
+                 authorizer=None, local_trust: bool = False, local_trust_reason: str = ""):
         self.runtime = runtime or ContextRuntime.default([])
         self.arms = arms
         self.bandit = _books_bandit(epsilon=epsilon, arms=arms, bandit=bandit)
-        self.registry = ToolRegistry()
+        # Who answers for a call in this registry is the deployment's choice, not this tenant's
+        # default: an explicit ``authorizer``, else a plane installed with set_default_authorizer,
+        # else explicitly declared local authority — otherwise construction fails here instead of
+        # denying every call later (see ``context_runtime/tools/authz.py``). Risk classes below
+        # are read off what the tool actually does, never off its name or its ``side_effecting`` flag.
+        # ``pull_reports`` reads receivables, payables, tax and trial balance for the tenant:
+        # books data, and nothing is written — ``read``.
+        self.registry = ToolRegistry(authorizer=resolve_authorizer(
+            authorizer, local_trust=local_trust, local_trust_reason=local_trust_reason,
+            context="agentic_books"))
         pull_fn = pull_tool_factory or _simulate_pull
         self.registry.register(function_tool(
             name="pull_reports",
             description="Pull the selected ledger/report bundle (simulated).",
             fn=pull_fn,
+            action="read",
         ))
         self._pending: dict[str, tuple] = {}
 
