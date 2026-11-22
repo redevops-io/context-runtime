@@ -8,8 +8,8 @@ RUN pip install --no-cache-dir \
 
 # agent-harness is a base dependency of context_runtime (the application does not import without it); same
 # commit and archive hash as the top-level Dockerfile and pyproject.toml.
-ARG AGENT_HARNESS_COMMIT=7e422f541fc480e4c0cbb8d25789cdae359a9d46
-ARG AGENT_HARNESS_SHA256=231eef6b8877127bf61834e271707cab6c28411e6a7b6236210a44a6704612a8
+ARG AGENT_HARNESS_COMMIT=10e5c2ae7419e096630fb031ef8204fede125ec9
+ARG AGENT_HARNESS_SHA256=1d3dc387512a068556fb7bd3e49bf63fbf8e6dc263368b02c00ac4bcb7b7f200
 RUN pip install --no-cache-dir "agent-harness @ https://github.com/redevops-io/agent-harness/archive/${AGENT_HARNESS_COMMIT}.tar.gz#sha256=${AGENT_HARNESS_SHA256}"
 
 COPY context_runtime /app/context_runtime
