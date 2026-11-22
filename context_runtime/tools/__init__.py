@@ -16,7 +16,7 @@ from .base import (
     ToolSpec,
 )
 from .authz import LOCAL_AUTHORITY_ENV, local_authority, local_authority_from_env, resolve_authorizer
-from .actions import resolve_action
+from .actions import PureRead, pure_read, resolve_action
 from .retriever import ToolRetriever
 
 __all__ = [
@@ -24,4 +24,5 @@ __all__ = [
     "ToolError", "ToolRetriever",
     "resolve_authorizer", "local_authority", "local_authority_from_env", "LOCAL_AUTHORITY_ENV",
     "resolve_action",
+    "PureRead", "pure_read",
 ]

@@ -8,7 +8,7 @@ from typing import Callable
 
 from .bandit import EpsilonGreedyBandit
 from ..runtime.runtime import ContextRuntime
-from ..tools.actions import resolve_action
+from ..tools.actions import PureRead, resolve_action
 from ..tools.authz import resolve_authorizer
 from ..tools.base import ToolRegistry, ToolResult, function_tool
 from ..types import Goal, Plan, Trace
@@ -130,7 +130,7 @@ class GrowthEngineTenant:
                  bandit: EpsilonGreedyBandit | None = None, epsilon: float = 0.15,
                  bucket_fn: Callable[[str], str] = growth_engine_bucket,
                  report_tool_factory: Callable[[dict], ToolResult] | None = None,
-                 report_action: str | None = None,
+                 report_action: str | PureRead | None = None,
                  authorizer=None, local_trust: bool = False, local_trust_reason: str = ""):
         self.runtime = runtime or ContextRuntime.default([])
         self.arms = arms
