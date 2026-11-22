@@ -22,6 +22,7 @@ import re
 from dataclasses import dataclass, field
 
 from ..runtime.runtime import ContextRuntime
+from ..tools.authz import resolve_authorizer
 from ..tools.base import ApprovalPolicy, ToolRegistry, ToolResult, ToolSpec
 from ..types import Goal, Hit, Plan, Trace
 from .bandit import EpsilonGreedyBandit
@@ -107,7 +108,14 @@ class ProviderTool:
         return ToolSpec(name=f"{self.name}_enrich",
                         description=f"Enrich an account via {self.name}.",
                         parameters={"type": "object", "properties": {
-                            "account_id": {"type": "string"}, "need": {"type": "string"}}})
+                            "account_id": {"type": "string"}, "need": {"type": "string"}}},
+                        # A lookup that returns data and mutates nothing — the platform's comparable row is
+                        # ``outreach.enrich`` = read (agentic_os/tool_actions.py). The spend this capability
+                        # causes is measured separately (``external_spend``/PROVIDER_COST) and spending money
+                        # is not the same axis as changing state: ``self.live`` is a flag this class never
+                        # acts on. Whoever wires a real provider call into the registration re-classifies it
+                        # with the call, exactly as the crm slot below is filled by a different class.
+                        action="read")
 
     def run(self, args: dict) -> ToolResult:
         fx = self._fx.get(args.get("account_id", ""))
@@ -130,7 +138,11 @@ class PrepareOutreachTool:
 
     def spec(self) -> ToolSpec:
         return ToolSpec(name="outreach_prepare", description="Draft (not send) an outreach sequence.",
-                        parameters={"type": "object", "properties": {"account_id": {"type": "string"}}})
+                        parameters={"type": "object", "properties": {"account_id": {"type": "string"}}},
+                        # Returns a draft to the caller; nothing is stored and no message is sent. The
+                        # platform splits this pair the same way: ``outreach.draft_pitch``/``draft_followup``
+                        # read, ``outreach.send_all`` writes.
+                        action="read")
 
     def run(self, args: dict) -> ToolResult:
         return ToolResult(ok=True, hits=[], data={"drafted": True, "account_id": args.get("account_id")},
@@ -143,7 +155,12 @@ class SendOutreachTool:
     def spec(self) -> ToolSpec:
         return ToolSpec(name="outreach_send", description="Send an outreach message.",
                         parameters={"type": "object", "properties": {"account_id": {"type": "string"}}},
-                        side_effecting=True, approval_required=True)
+                        side_effecting=True, approval_required=True,
+                        # Mail leaves the building: ``outreach.send_all`` = write on the platform. The
+                        # NO_OUTREACH switch and the approval gate are separate checks from this grant —
+                        # the reason all three are here is that any one of them passing says nothing about
+                        # the other two.
+                        action="write")
 
     def run(self, args: dict) -> ToolResult:
         return ToolResult(ok=True, data={"sent": True, "account_id": args.get("account_id")},
@@ -232,7 +249,14 @@ class RevenueIntelligenceTenant:
 
     def __init__(self, fixtures: dict[str, Fixture], *, runtime: ContextRuntime | None = None,
                  registry: ToolRegistry | None = None, bandit: EpsilonGreedyBandit | None = None,
-                 approver=None, no_outreach: bool = True, segmented: bool = False, crm_tool=None):
+                 approver=None, no_outreach: bool = True, segmented: bool = False, crm_tool=None,
+                 authorizer=None, local_trust: bool = False, local_trust_reason: str = ""):
+        # Who answers for a call in this registry is the deployment's choice, not this tenant's default:
+        # an explicit ``authorizer``, else a plane installed with set_default_authorizer, else explicitly
+        # declared local authority — otherwise construction fails here instead of denying every call later
+        # (see ``context_runtime/tools/authz.py``). Risk classes are read off what each tool does, never off
+        # its name or its ``side_effecting`` flag. A caller passing ``registry=`` brings its own wiring and
+        # is responsible for that registry's authorizer; this path only builds the default one.
         self.fixtures = fixtures
         self.runtime = runtime or ContextRuntime.default([])
         self.bandit = bandit or _gtm_bandit()
@@ -242,7 +266,9 @@ class RevenueIntelligenceTenant:
         self.segmented = segmented
         # ``crm_tool`` (e.g. HubSpotCRMTool) makes the ``crm`` provider a LIVE backend; None keeps the offline
         # fixture. Auto-enabled when a HubSpot Service Key is in the environment.
-        self.registry = registry or self._default_registry(fixtures, approver, crm_tool)
+        self.registry = registry or self._default_registry(
+            fixtures, approver, crm_tool, authorizer=authorizer, local_trust=local_trust,
+            local_trust_reason=local_trust_reason)
         self.external_spend = 0.0
         self.events: list[dict] = []   # per-enrichment trace, for the population governor (arm G)
         self._pending: dict[str, tuple[Plan, ProviderBundle, str]] = {}
@@ -251,8 +277,12 @@ class RevenueIntelligenceTenant:
         return f"{bucket}|{fx.segment}" if self.segmented else bucket
 
     @staticmethod
-    def _default_registry(fixtures, approver, crm_tool=None) -> ToolRegistry:
-        reg = ToolRegistry(ApprovalPolicy(mode="deny_side_effects", approver=approver))
+    def _default_registry(fixtures, approver, crm_tool=None, *, authorizer=None,
+                          local_trust: bool = False, local_trust_reason: str = "") -> ToolRegistry:
+        reg = ToolRegistry(ApprovalPolicy(mode="deny_side_effects", approver=approver),
+                           authorizer=resolve_authorizer(authorizer, local_trust=local_trust,
+                                                         local_trust_reason=local_trust_reason,
+                                                         context="revenue_intelligence"))
         # Live CRM is explicit opt-in (CR_CRM_LIVE=1 + a backend's credentials), so credentials sitting in
         # the environment never silently make the reproducible offline benchmark hit the network. Pick the
         # backend with CR_CRM_BACKEND=hubspot|salesforce, else auto-detect from which creds are present.

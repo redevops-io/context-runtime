@@ -137,7 +137,10 @@ class SalesforceCRMTool:
     def spec(self) -> ToolSpec:
         return ToolSpec(name="crm_enrich", description="Resolve an account against Salesforce (read-only).",
                         parameters={"type": "object", "properties": {
-                            "account_id": {"type": "string"}, "need": {"type": "string"}}})
+                            "account_id": {"type": "string"}, "need": {"type": "string"}}},
+                        # A SOQL query and a fetch of one Account — a read against a platform service, the same
+                        # reading as ``outreach.enrich`` on the platform. Remote is not the same as mutating.
+                        action="read")
 
     def run(self, args: dict) -> ToolResult:
         fx = self._fx.get(args.get("account_id", ""))
@@ -167,7 +170,9 @@ class SalesforceUpdateTool:
         return ToolSpec(name="crm_update", description="Update a Salesforce Account field.",
                         parameters={"type": "object", "properties": {
                             "account_id": {"type": "string"}, "fields": {"type": "object"}}},
-                        side_effecting=True, approval_required=True)
+                        side_effecting=True, approval_required=True,
+                        # Writes a field on a record in the customer's CRM.
+                        action="write")
 
     def run(self, args: dict) -> ToolResult:
         try:

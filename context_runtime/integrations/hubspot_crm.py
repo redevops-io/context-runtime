@@ -107,7 +107,12 @@ class HubSpotCRMTool:
     def spec(self) -> ToolSpec:
         return ToolSpec(name="crm_enrich", description="Resolve an account against HubSpot CRM (read-only).",
                         parameters={"type": "object", "properties": {
-                            "account_id": {"type": "string"}, "need": {"type": "string"}}})
+                            "account_id": {"type": "string"}, "need": {"type": "string"}}},
+                        # A search plus a read of one company — a query against a platform service, which is
+                        # the doctrine's test for ``read`` (the platform's own ``outreach.enrich`` row agrees).
+                        # It is genuinely a network call when a token is present; being remote is not the same
+                        # as changing anything.
+                        action="read")
 
     def run(self, args: dict) -> ToolResult:
         fx = self._fx.get(args.get("account_id", ""))
@@ -138,7 +143,9 @@ class HubSpotUpdateTool:
         return ToolSpec(name="crm_update", description="Update a HubSpot company property.",
                         parameters={"type": "object", "properties": {
                             "company_id": {"type": "string"}, "properties": {"type": "object"}}},
-                        side_effecting=True, approval_required=True)
+                        side_effecting=True, approval_required=True,
+                        # PATCHes a record in the customer's CRM: state change in a system of record.
+                        action="write")
 
     def run(self, args: dict) -> ToolResult:
         try:

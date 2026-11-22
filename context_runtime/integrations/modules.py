@@ -17,6 +17,7 @@ data-driven from a catalog so "migrate all" is a table, not 16 files.
 from __future__ import annotations
 
 import hashlib
+import warnings
 from dataclasses import dataclass, field
 from itertools import combinations
 
@@ -37,6 +38,8 @@ class ModuleSpec:
     sources: tuple[str, ...]        # available context sources (become source tools)
     metric: str                     # the reward signal (its own success measure)
     actions: tuple[str, ...] = ()   # side-effecting, approval-gated actions
+    # True for a row of CATALOG below: this repository wrote those action names, so each one owes an
+    curated_actions: bool = True
 
 
 # Every agentic-os-stack module (migrated) + net-new tenants from Use-cases.odt (new).
@@ -179,6 +182,9 @@ def _source_tool(module: str, source: str):
 # `infra.rollback_release` = write; `fulfill_dsar` is `privacy.delete` = delete. `close` has no
 # counterpart there (the platform registers only `close_status`, a read of whether a period is
 # closed), so it is classified from what closing a period does — it posts entries — as write.
+# `outreach_send` is the GTM module's own action; the platform's comparable row is again
+# `outreach.send_all` = write, and the tool behind it (`SendOutreachTool` in revenue_intelligence.py)
+# is registered side-effecting and approval-gated, so the two axes agree here rather than disagreeing.
 # Declared per action, never derived from the word "action".
 _ACTION_CLASSES: dict[str, str] = {
     "refund": "write",
@@ -191,21 +197,31 @@ _ACTION_CLASSES: dict[str, str] = {
     "send_sequence": "write",
     "block_ip": "write",
     "rollback": "write",
+    "outreach_send": "write",
     "fulfill_dsar": "delete",
 }
 
 
-def _action_tool(module: str, action: str):
+def _action_tool(module: str, action: str, *, curated: bool = True):
     def run(args: dict) -> ToolResult:
         return ToolResult(ok=True, data={"action": action, "applied": False},
                           text=f"[dry-run] {module}.{action}({args})")
     action_class = _ACTION_CLASSES.get(action)
-    if action_class is None:
+    if action_class is None and curated:
         raise RegistryConfigurationError(
             f"the fleet action {module}.{action} has no recorded risk class — add it to _ACTION_CLASSES "
             f"in modules.py with the evidence for what it actually does, instead of defaulting it")
+    if action_class is None:
+        # A module the registry discovered at run time, not a row this file wrote. Nobody has read what
+        # this action does, and "nobody read it" is not a licence to guess read: an unclassified tool is
+        # matched by no grant, so it is denied at the call — the same outcome the platform prescribes for
+        # an unknown effect, without taking the whole fleet down with one unreviewed module.
+        warnings.warn(
+            f"the fleet action {module}.{action} has no recorded risk class: it is registered "
+            f"unclassified, so no grant matches it and every call is denied until someone reads the "
+            f"implementation and records what it does in _ACTION_CLASSES (modules.py).", stacklevel=3)
     return function_tool(f"{module}_{action}", run, description=f"{module} action: {action}",
-                         side_effecting=True, approval_required=True, action=action_class)
+                         side_effecting=True, approval_required=True, action=action_class or "")
 
 
 class ModuleTenant:
@@ -214,7 +230,8 @@ class ModuleTenant:
     def __init__(self, spec: ModuleSpec, runtime: ContextRuntime | None = None,
                  bandit: EpsilonGreedyBandit | None = None, approver=None, epsilon: float = 0.12,
                  persist_path: str | None = None,
-                 authorizer=None, local_trust: bool = False, local_trust_reason: str = ""):
+                 authorizer=None, local_trust: bool = False, local_trust_reason: str = "",
+                 authorizer_on_missing: str = "raise"):
         self.spec = spec
         self.runtime = runtime or ContextRuntime.default([])
         self.arms = _bundles(spec.sources)
@@ -226,11 +243,12 @@ class ModuleTenant:
                                      authorizer=resolve_authorizer(
                                          authorizer, local_trust=local_trust,
                                          local_trust_reason=local_trust_reason,
-                                         context=f"module fleet tenant {spec.name!r}"))
+                                         context=f"module fleet tenant {spec.name!r}",
+                                         on_missing=authorizer_on_missing))
         for s in spec.sources:
             self.registry.register(_source_tool(spec.name, s))
         for a in spec.actions:
-            self.registry.register(_action_tool(spec.name, a))
+            self.registry.register(_action_tool(spec.name, a, curated=spec.curated_actions))
         self._pending: dict[str, tuple[Plan, SourceBundle, str]] = {}
 
     def handle(self, question: str) -> ModuleResult:

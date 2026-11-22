@@ -11,6 +11,7 @@ compound across the whole fleet.
 from __future__ import annotations
 
 import threading
+import warnings
 from dataclasses import dataclass
 
 from pathlib import Path
@@ -19,6 +20,8 @@ from ..costmodel.estimators import HeuristicEstimator
 from ..integrations.modules import CATALOG, ModuleSpec, ModuleTenant
 from ..platform_services import ensure_private_dir, state_dir
 from ..runtime.runtime import ContextRuntime
+from ..tools.authz import local_authority_from_env
+from ..tools.base import default_authorizer_installed
 from .context import Approval, Context
 from .registry import Module, Registry
 
@@ -32,6 +35,33 @@ _ALIAS = {
 }
 
 
+#: the "no plane" fact is a start-up fact: it is said once per process, not once per module up/down.
+_PLANE_WARNING_SHOWN = False
+
+
+def _warn_if_no_plane() -> None:
+    """Say once, at the moment it is cheap to act on, that this fleet stands up with no authorization plane.
+
+    The fleet is a long-lived, request-facing surface, so it follows the same rule as ``AgentConsole`` rather
+    than the tenants' own: standing a module up with no plane yet installed is a start-up the operator can
+    still fix — an embedding application installs its gate a moment after this import — whereas refusing to
+    import is a container that never answers ``/health``. It is not a grant: with no plane every tool call
+    comes back ``missing_authorizer``. Silence is the failure mode this migration exists to remove, because a
+    fleet that denies every tool call looks exactly like a healthy one on ``/status``.
+    """
+    global _PLANE_WARNING_SHOWN
+    if _PLANE_WARNING_SHOWN or default_authorizer_installed() or local_authority_from_env()[0]:
+        return
+    _PLANE_WARNING_SHOWN = True
+    warnings.warn(
+        "the module fleet is standing up with no authorization plane: every tool call its tenants make is "
+        "denied (missing_authorizer) until the embedding application installs one with "
+        "context_runtime.tools.set_default_authorizer(...), or the process declares local authority with "
+        'CR_LOCAL_AUTHORITY="why this process is trusted". The fleet still serves /health and /status on '
+        "purpose: a process that boots and denies is diagnosable, one that refuses to start is not.",
+        stacklevel=3)
+
+
 def spec_for(m: Module) -> ModuleSpec:
     """A CATALOG tenant spec if we have one; otherwise a generic spec from the registry."""
     key = _ALIAS.get(m.name)
@@ -39,10 +69,14 @@ def spec_for(m: Module) -> ModuleSpec:
         return CATALOG[key]
     if m.name in CATALOG:
         return CATALOG[m.name]
+    # Not a CATALOG row: the action names come from a module the registry discovered at run time, so
+    # this file cannot vouch for what they do. They are registered unclassified (denied) rather than
+    # assumed safe — see integrations/modules.py::_action_tool.
     return ModuleSpec(
         name=m.name.replace("-", "_"), core="", pain=m.pain,
         sources=("primary", "secondary", "context"), metric="task_success",
         actions=tuple(a.replace("-", "_") for a in m.approval_required) or tuple(m.agents[:1]),
+        curated_actions=False,
     )
 
 
@@ -76,13 +110,15 @@ class Fleet:
     # --- lifecycle ---
     def up(self, *names: str) -> list[ModuleStatus]:
         out = []
+        _warn_if_no_plane()
         for n in (names or self._names()):
             m = self.registry.get(n)
             # the fleet gates approvals (via Context); the tenant's own tools default-deny.
             # each tenant's learned policy persists to the /data volume → survives restarts.
             self.tenants[n] = ModuleTenant(
                 spec_for(m), runtime=self.runtime, approver=lambda a: False,
-                persist_path=str(self.home / "bandits" / f"{n}.json"))
+                persist_path=str(self.home / "bandits" / f"{n}.json"),
+                authorizer_on_missing="deny_later")
             self._up.add(n)
             out.append(ModuleStatus(n, True, m.agents, "context-runtime tenant"))
         return out
