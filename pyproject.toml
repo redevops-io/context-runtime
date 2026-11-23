@@ -7,9 +7,16 @@ requires-python = ">=3.12"
 license = { text = "AGPL-3.0-or-later WITH Commons-Clause" }
 # v0.1 core runs fully offline with the stub plugins. agent-harness (tool contract, approval gate) is
 # standard-library only, so it adds no transitive dependencies. Pinned to a commit; bump deliberately.
+# The floor is the commit that puts the risk class on the registration: the integrations pass action= to
+# ToolSpec and call registry.classification()/validate(), and tools/authz.py hands the registry a plane built
+# from Authorization/PolicyReason — all of which arrive with the authz line (C1 fail-closed, C2 risk class).
+# It then has to reach the commit that adds engine_authorizer_of: a tenant that names no authorizer inherits
+# the process default, and below that commit the registry reads a platform plane's "allowed" as silence and
+# denies the call it was just granted. The pin is one commit past the last thing this repository calls,
+# because what it depends on now is what the engine does with what it was handed.
 dependencies = [
     "pyyaml>=6.0",
-    "agent-harness @ git+https://github.com/redevops-io/agent-harness.git@6b8ba3a596a5e2caf0fdf009f2af013517591662",
+    "agent-harness @ git+https://github.com/redevops-io/agent-harness.git@1259d1b338e80414b32b863bcc97a0db93db8cd2",
 ]
 
 [project.optional-dependencies]

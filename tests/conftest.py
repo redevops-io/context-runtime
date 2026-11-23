@@ -6,6 +6,20 @@
   caller already chose one.
 * Per-test state: an autouse fixture points the home variables at the test's own ``tmp_path`` so no test
   reads another test's files or writes into the working directory.
+* Per-test authorization plane: an autouse fixture starts every test with no process-wide authorizer
+  installed, and leaves none behind.
+
+The third is the one that decides what the authorization tests actually prove. Since agent-harness C1 a
+registry with no authorizer denies every tool call, so a test that expects a tool to *run* has to say who
+authorizes it — the same decision a deployment makes at start-up. ``local_run`` makes that declaration once
+per test (the harness's attributed local-trust authorizer, installed process-wide, exactly as
+``agentic_os.app_gate.install_gate`` installs a real plane) rather than smuggling an unnamed allow-all
+lambda into each registry. Tests that assert the fail-closed behaviour deliberately do *not* ask for it.
+
+And the autouse cleanup is not decoration: a process-wide authorizer leaked by one test silently converts
+every later fail-closed assertion into a passing one, which is the exact direction this migration is
+worried about. It is declared after ``_per_test_home`` so a test can never reach the plane assertion
+without the state directory that other fixtures expect to exist.
 """
 
 from __future__ import annotations
@@ -22,8 +36,45 @@ if not any(os.environ.get(v) for v in _HOME_VARS):
     _SESSION_HOME = tempfile.TemporaryDirectory(prefix="cr-test-home-")
     os.environ["CONTEXT_RUNTIME_HOME"] = _SESSION_HOME.name
 
+# Imported after the home variables are set: this package must not be imported before the isolation above
+# exists, for the same reason the import-time note above exists.
+from context_runtime.tools.base import (default_authorizer_installed, local_trusted_authorizer,  # noqa: E402
+                                        set_default_authorizer)
+
+# ── the posture the control plane is imported in ─────────────────────────────────────────────
+# ``context_runtime.control_plane.app`` stands its fleet up at import, and a fleet that runs tools refuses
+# to be built with nothing to ask (``tools.authz.require_plane``) — importing it with no plane is now an
+# error, not a warning. So the suite makes the choice a governed deployment makes, before the import that
+# reads it: install a plane, then import the service. It is the harness's attributed local-trust authorizer
+# under a name that says where it came from, and the session fixture below takes it back out again before
+# any test runs, so nothing downstream inherits it.
+#
+# The three variables are popped rather than set: the suite must not be able to change posture because of
+# something in the developer's shell. A test that wants the diagnostic mode says so for its own process
+# (see tests/test_authorization_negative_controls.py), and a test that wants local authority asks for
+# ``local_run``, which is audited and per-test.
+for _posture_var in ("CR_EXECUTION_MODE", "CR_DIAGNOSTIC_REASON", "CR_LOCAL_AUTHORITY"):
+    os.environ.pop(_posture_var, None)
+set_default_authorizer(local_trusted_authorizer(plane="pytest_import_time"))
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _STRAY = (".context-runtime", ".agentic-os")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _import_time_plane_removed_before_any_test():
+    """The plane exists to get the service imported. It must not survive into a single assertion.
+
+    Session-scoped and declared here so it runs after collection — by the time the first test body starts,
+    every module-level ``app`` import has happened, and this takes the grant away. The per-test
+    ``_clean_authorizer_plane`` fixture would fail the run if it were still installed; this fixture is the
+    reason it does not, and it says so out loud rather than leaving a process-wide allow-all in place for
+    1,900 tests that assert the opposite.
+    """
+    if default_authorizer_installed():
+        set_default_authorizer(None)
+    assert not default_authorizer_installed(), "a process-wide plane survived into the test session"
+    yield
 
 
 @pytest.fixture(autouse=True)
@@ -35,6 +86,16 @@ def _per_test_home(tmp_path, monkeypatch):
     yield home
 
 
+@pytest.fixture(autouse=True)
+def _clean_authorizer_plane():
+    """Start each test with no process-wide plane, and leave none behind."""
+    assert not default_authorizer_installed(), (
+        "a process-wide authorizer is already installed — an earlier test did not clean up, and every "
+        "fail-closed assertion from here on would be testing the wrong thing")
+    yield
+    set_default_authorizer(None)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _no_stray_state_in_cwd():
     """Fail the run if a test left a state directory in the working directory or the repository root."""
@@ -43,6 +104,18 @@ def _no_stray_state_in_cwd():
     yield
     created = [str(p / s) for p in places for s in _STRAY if (p / s).exists() and (p / s) not in before]
     assert not created, f"tests wrote state into the working tree: {created}"
+
+
+@pytest.fixture
+def local_run():
+    """Run this test's registries under a declared local authority (an attributed wildcard grant).
+
+    Returns the ``plane`` name the decisions are audited under, so a test can assert who authorized the call
+    instead of only that it ran.
+    """
+    plane = "pytest_local"
+    set_default_authorizer(local_trusted_authorizer(plane=plane))
+    return plane
 
 
 def pytest_terminal_summary(terminalreporter):

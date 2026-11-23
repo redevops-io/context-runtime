@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from typing import Callable
 
 from ..runtime.runtime import ContextRuntime
+from ..tools.actions import PureRead, resolve_action
+from ..tools.authz import resolve_authorizer
 from ..tools.base import ToolRegistry, ToolResult, function_tool
 from ..types import Goal, Trace
 from .bandit import EpsilonGreedyBandit
@@ -130,16 +132,33 @@ class SocialAutopilotTenant:
     def __init__(self, runtime: ContextRuntime | None = None,
                  strategies: tuple[SocialStrategy, ...] = DEFAULT_STRATEGIES,
                  bandit: EpsilonGreedyBandit | None = None, epsilon: float = 0.15,
-                 caption_tool_factory: Callable[[dict], ToolResult] | None = None):
+                 caption_tool_factory: Callable[[dict], ToolResult] | None = None,
+                 caption_action: str | PureRead | None = None,
+                 authorizer=None, local_trust: bool = False, local_trust_reason: str = ""):
         self.runtime = runtime or ContextRuntime.default([])
         self.strategies = strategies
         self.bandit = bandit or _social_bandit(epsilon=epsilon, strategies=strategies)
-        self.registry = ToolRegistry()
+        # Who answers for a call in this registry is the deployment's choice, not this tenant's
+        # default: an explicit ``authorizer``, else a plane installed with set_default_authorizer,
+        # else explicitly declared local authority — otherwise construction fails here instead of
+        # denying every call later (see ``context_runtime/tools/authz.py``). Risk classes below
+        # are read off what the tool actually does, never off its name or its ``side_effecting`` flag.
+        # ``draft_caption`` returns drafted copy to the caller and the shipped implementation is a
+        # local simulation, so it reads. Two named divergences from the platform table, both deliberate:
+        # agentic-os classes ``social.draft`` write because its draft calls an external generator, and
+        # the publish/schedule call is a separate consequential path (``social.publish`` write). Passing
+        # ``caption_tool_factory`` replaces the simulation, so that function declares its own class with
+        # ``caption_action`` — construction refuses rather than hand a live generator a read grant.
+        self.registry = ToolRegistry(authorizer=resolve_authorizer(
+            authorizer, local_trust=local_trust, local_trust_reason=local_trust_reason,
+            context="social_autopilot"))
         caption_fn = caption_tool_factory or _draft_caption
         self.registry.register(function_tool(
             name="draft_caption",
             description="Draft a caption for the chosen social strategy (simulated).",
             fn=caption_fn,
+            action=resolve_action(shipped="read", injected=caption_tool_factory, declared=caption_action,
+                                  param="caption_action", tool="draft_caption", context="social_autopilot"),
         ))
         self._pending: dict[str, tuple[Plan, SocialStrategy, str, str]] = {}
 

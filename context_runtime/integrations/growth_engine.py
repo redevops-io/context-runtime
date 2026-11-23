@@ -8,6 +8,8 @@ from typing import Callable
 
 from .bandit import EpsilonGreedyBandit
 from ..runtime.runtime import ContextRuntime
+from ..tools.actions import PureRead, resolve_action
+from ..tools.authz import resolve_authorizer
 from ..tools.base import ToolRegistry, ToolResult, function_tool
 from ..types import Goal, Plan, Trace
 
@@ -127,17 +129,34 @@ class GrowthEngineTenant:
                  arms: tuple[AttributionArm, ...] = DEFAULT_GROWTH,
                  bandit: EpsilonGreedyBandit | None = None, epsilon: float = 0.15,
                  bucket_fn: Callable[[str], str] = growth_engine_bucket,
-                 report_tool_factory: Callable[[dict], ToolResult] | None = None):
+                 report_tool_factory: Callable[[dict], ToolResult] | None = None,
+                 report_action: str | PureRead | None = None,
+                 authorizer=None, local_trust: bool = False, local_trust_reason: str = ""):
         self.runtime = runtime or ContextRuntime.default([])
         self.arms = arms
         self.bandit = bandit or _growth_bandit(epsilon=epsilon, arms=arms)
         self.bucket_fn = bucket_fn
-        self.registry = ToolRegistry()
+        # Who answers for a call in this registry is the deployment's choice, not this tenant's
+        # default: an explicit ``authorizer``, else a plane installed with set_default_authorizer,
+        # else explicitly declared local authority — otherwise construction fails here instead of
+        # denying every call later (see ``context_runtime/tools/authz.py``). Risk classes below
+        # are read off what the tool actually does, never off its name or its ``side_effecting`` flag.
+        # ``draft_attribution_report`` composes an attribution answer from analytics it reads;
+        # the text goes back to the caller and nothing is published — ``read``. Publishing the
+        # report is a separate route and is classified ``write`` where it is registered.
+        # ``report_tool_factory`` replaces that function, and the class does not come with the slot it
+        # fills: a live report that lands in a warehouse or a dashboard is not the same call as this one.
+        self.registry = ToolRegistry(authorizer=resolve_authorizer(
+            authorizer, local_trust=local_trust, local_trust_reason=local_trust_reason,
+            context="growth_engine"))
         report_fn = report_tool_factory or _draft_attribution_report
         self.registry.register(function_tool(
             name="draft_attribution_report",
             description="Draft an attribution breakdown for the chosen arm (simulated).",
             fn=report_fn,
+            action=resolve_action(shipped="read", injected=report_tool_factory, declared=report_action,
+                                  param="report_action", tool="draft_attribution_report",
+                                  context="growth_engine"),
         ))
         self._pending: dict[str, tuple[Plan, AttributionArm, str, str]] = {}
 

@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from typing import Callable
 
 from ..runtime.runtime import ContextRuntime
+from ..tools.actions import PureRead, resolve_action
+from ..tools.authz import resolve_authorizer
 from ..tools.base import ToolRegistry, ToolResult, function_tool
 from ..types import Goal, Plan, Trace
 from .bandit import EpsilonGreedyBandit
@@ -122,18 +124,35 @@ class OutreachEngineTenant:
                  bandit: EpsilonGreedyBandit | None = None, epsilon: float = 0.15,
                  bucket_fn: Callable[[str], str] = outreach_bucket,
                  teardown_tool_factory: Callable[[dict], ToolResult] | None = None,
-                 approver: Callable[[str], bool] | None = None):
+                 teardown_action: str | PureRead | None = None,
+                 approver: Callable[[str], bool] | None = None,
+                 authorizer=None, local_trust: bool = False, local_trust_reason: str = ""):
         self.runtime = runtime or ContextRuntime.default([])
         self.arms = arms
         self.bandit = bandit or _outreach_bandit(epsilon=epsilon, arms=arms)
         self.bucket_fn = bucket_fn
         # human-in-the-loop: send_sequence is approval-gated (default-deny), like the other modules.
         self.approver = approver or (lambda action: False)
-        self.registry = ToolRegistry()
+        # Who answers for a call in this registry is the deployment's choice, not this tenant's
+        # default: an explicit ``authorizer``, else a plane installed with set_default_authorizer,
+        # else explicitly declared local authority — otherwise construction fails here instead of
+        # denying every call later (see ``context_runtime/tools/authz.py``). Risk classes below
+        # are read off what the tool actually does, never off its name or its ``side_effecting`` flag.
+        # ``draft_teardown`` writes nothing and contacts nobody: it returns the drafted opener.
+        # ``send_sequence`` below is the external communication and stays approval-gated with a
+        # default-deny approver, so drafting is ``read`` while sending needs both gates.
+        # ``teardown_tool_factory`` replaces that function, and the class does not come with the slot it
+        # fills: a live opener that sends, posts or creates something in a campaign is not a read.
+        self.registry = ToolRegistry(authorizer=resolve_authorizer(
+            authorizer, local_trust=local_trust, local_trust_reason=local_trust_reason,
+            context="outreach_engine"))
+        teardown_fn = teardown_tool_factory or _draft_teardown
         self.registry.register(function_tool(
             name="draft_teardown",
             description="Draft the personalized opener (EXPLAIN teardown for artifact plays).",
-            fn=teardown_tool_factory or _draft_teardown,
+            fn=teardown_fn,
+            action=resolve_action(shipped="read", injected=teardown_tool_factory, declared=teardown_action,
+                                  param="teardown_action", tool="draft_teardown", context="outreach_engine"),
         ))
         self._pending: dict[str, tuple[Plan, OutreachPlay, str, str]] = {}
 

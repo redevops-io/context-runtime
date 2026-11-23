@@ -77,7 +77,7 @@ def test_bearer_header_attached(monkeypatch):
     assert seen["url"].startswith("https://api.hubapi.com/crm/v3/objects/companies/search")
 
 
-def test_tenant_falls_back_to_fixture_without_key(monkeypatch):
+def test_tenant_falls_back_to_fixture_without_key(monkeypatch, local_run):
     monkeypatch.delenv("HUBSPOT_SERVICE_KEY", raising=False)
     monkeypatch.delenv("HUBSPOT_API_KEY", raising=False)
     fx = {"a1": Fixture("a1", "Acme", "acme.io", "company_identity", "pdl", "Acme Inc")}

@@ -27,15 +27,26 @@ from __future__ import annotations
 
 import json
 import math
+import logging
 import re
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from ..adapters.model_openai import OpenAICompatibleModel
 from ..adapters.model_stub import StubModel
-from ..tools.base import ApprovalPolicy, ToolRegistry, ToolResult, ToolSpec
+from ..tools.authz import (
+    DIAGNOSTIC,
+    PrivilegedExecutionUnavailable,
+    RegistryConfigurationError,
+    execution_mode,
+    resolve_authorizer,
+)
+from ..tools.base import (ACTIONS, ApprovalPolicy, ToolRegistry, ToolResult, ToolSpec,
+                          ValidationReport, default_authorizer_installed)
 from ..types import ModelRequest
+
+_log = logging.getLogger(__name__)
 
 _WORD = re.compile(r"[a-z0-9]+")
 
@@ -122,14 +133,26 @@ def tool(
     *,
     parameters: dict | None = None,
     side_effecting: bool = False,
+    action: str = "write",
 ) -> _Tool:
-    """Declare an app capability. ``fn`` takes an args dict and returns a dict/str/ToolResult."""
+    """Declare an app capability. ``fn`` takes an args dict and returns a dict/str/ToolResult.
+
+    ``action`` is the risk class the console asks for when this tool runs — declared by whoever wrote
+    ``fn``, because the console cannot see what it does. It defaults to ``write``, the strictest class
+    every capability must clear; a capability that erases data says so with ``action="delete"``, and a
+    genuinely read-only one with ``action="read"``. ``side_effecting`` remains the *approval* axis —
+    the two are separate checks and neither substitutes for the other.
+    """
+    if action not in ACTIONS:
+        raise RegistryConfigurationError(
+            f"tool {name!r} declares action={action!r}, which is not one of the vocabulary {ACTIONS}")
     return _Tool(
         ToolSpec(
             name=name,
             description=description,
             parameters=parameters or {"type": "object", "properties": {}},
             side_effecting=side_effecting,
+            action=action,
         ),
         fn,
     )
@@ -176,9 +199,12 @@ class AgentConsole:
         model: Any = None,
         allow_side_effects: list[str] | None = None,
         authorizer=None,
+        local_trust: bool = False,
+        local_trust_reason: str = "",
         commands=None,
         policy=None,
         app: str = "",
+        privileged: Optional[bool] = None,
     ):
         self.tenant = tenant
         self.subtitle = subtitle or f"Ask about {tenant} — how things work, or get something done."
@@ -186,10 +212,30 @@ class AgentConsole:
         self.index = PrimerIndex(self.primer)
         self.suggestions = list(suggestions)
         self.model = model if model is not None else (OpenAICompatibleModel.from_env() or StubModel())
-        # authorizer (optional, enterprise): gates every tool by the request principal — falls back to
-        # the process-wide default (set_default_authorizer), so one install() call governs all consoles.
-        self.registry = ToolRegistry(ApprovalPolicy(mode="allowlist", allow=list(allow_side_effects or [])),
-                                     authorizer=authorizer)
+        # The console is a request-facing surface: an enterprise deployment hands it the request's principal
+        # as ``authorizer``, otherwise it inherits the process-wide plane installed with
+        # set_default_authorizer, so one install() governs every console (tools/authz.py).
+        #
+        # ``on_missing="defer_to_plane"`` is the one place this module resolves differently from a tenant, and
+        # the distinction is the whole point of it: a console is a COMPONENT, not a service. An app builds one
+        # at module import and its gate installs the plane moments later, so refusing to build here refuses to
+        # import an app that was about to be configured correctly. What is NOT negotiable is what happens
+        # next — the application that owns this console must gate on ``validate()`` before it serves
+        # (``agentic_os.app_gate.validate_console``: no plane means no start when authorization was asked for,
+        # and a readiness failure in the health record when it was not). Building without a plane is allowed;
+        # SERVING without one is the failure mode, and it belongs to the service, not to this constructor.
+        self._authorizer = resolve_authorizer(authorizer, local_trust=local_trust,
+                                              local_trust_reason=local_trust_reason,
+                                              context=f"agent console for tenant {tenant!r}",
+                                              on_missing="defer_to_plane")
+        if self._authorizer is None and not default_authorizer_installed():
+            _log.warning("agent console %r has no authorization plane: every tool call will be denied with "
+                         "missing_explicit_grant. Pass authorizer=..., install one with "
+                         "context_runtime.tools.set_default_authorizer(...) before building the console, or "
+                         "declare local execution with local_trust=True and a written reason.", tenant)
+        self.registry = ToolRegistry(
+            ApprovalPolicy(mode="allowlist", allow=list(allow_side_effects or [])),
+            authorizer=self._authorizer)
         # Policy Runtime: /commands are dispatched here (dual-path); `policy` enforces input/output/tool
         # phases and emits PolicyDecisions. Both optional and fall back to the process default → one
         # install governs the fleet. app = the policy scope slug (e.g. "market-radar").
@@ -197,26 +243,69 @@ class AgentConsole:
         self._policy = policy
         self.app = app
         self._tools: dict[str, _Tool] = {}
-        for t in tools:
-            self.registry.register(t)
-            self._tools[t.spec().name] = t
+        # A diagnostic instance does not get tools, which is what makes its read-only promise structural
+        # rather than a denial the operator has to trust: nothing is registered, so nothing can be offered to
+        # the model, dispatched, or re-approved into running. The alternative — register everything and let
+        # the plane say no on every call — is the state this repository just stopped calling healthy.
+        # ``privileged=False`` is the same declaration made in code rather than in the environment, for the
+        # surfaces an application builds as read-only regardless of how the process is configured.
+        mode_privileged = execution_mode(context=f"agent console for tenant {tenant!r}")[0] != DIAGNOSTIC
+        self.privileged = mode_privileged if privileged is None else privileged
+        if not self.privileged:
+            _log.warning("agent console %r is running in the diagnostic mode: %d tool(s) the app passed are "
+                         "not registered, so this instance can plan and answer but cannot act.", tenant,
+                         len(list(tools)))
+        else:
+            for t in tools:
+                self.registry.register(t)
+                self._tools[t.spec().name] = t
 
-    def mount_mcp(self, client, *, prefix: str | None = None, allow: list[str] | None = None) -> list[str]:
+    def mount_mcp(self, client, *, prefix: str | None = None, allow: list[str] | None = None,
+                  actions: dict[str, str] | None = None,
+                  default_action: Optional[str] = None) -> list[str]:
         """Mount an external MCP tool server's tools into this console.
 
         Registers each tool in the agent-harness registry AND the classify/dispatch catalog, so
-        the assistant can pick and run them like any native tool. Read-only MCP tools
-        (``readOnlyHint``) run ungated; side-effecting ones stay gated unless named in ``allow``.
-        Returns the mounted tool names.
+        the assistant can pick and run them like any native tool.
+
+        Risk classes come from ``actions`` — ``{"ffmpeg.convert_video": "read", ...}`` — decided by
+        whoever mounts the server, after reading what that server does. A tool outside that map gets
+        ``default_action``, and with no ``default_action`` it is not mounted at all: an MCP server is
+        code this console did not write, so a class it would fall back to is a grant nobody chose.
+        A server's own ``readOnlyHint`` still moves the *approval* gate (an announced read-only tool
+        need not be confirmed) but never the authorization class, because the thing asking to be run is
+        not allowed to grade its own risk.
+
+        ``allow`` is the approval allowlist and is unchanged. Returns the mounted tool names.
         """
+        if not self.privileged:
+            raise PrivilegedExecutionUnavailable(
+                "mount_mcp() is refused on a diagnostic console: mounting a tool server is how a read-only "
+                "instance acquires an execution path, which is the one thing its mode promise rules out.")
         from ..tools.mcp import mount_mcp as _mount_mcp
 
-        names = _mount_mcp(self.registry, client, prefix=prefix)
+        names = _mount_mcp(self.registry, client, prefix=prefix, actions=actions,
+                           default_action=default_action)
         for n in names:
             self._tools[n] = self.registry.get(n)  # classify() sees it, respond() dispatches it
         if allow:
             self.registry.policy.allow.update(allow)
         return names
+
+    def validate(self, *, strict: bool = True) -> ValidationReport:
+        """Start-up check: every tool must carry a class the plane can ask about, and there must be a plane.
+
+        An app calls this at boot (``console = AgentConsole(...); console.validate()``) and refuses to serve
+        when it answers anything. With no plane the console still builds — an app's gate installs one a moment
+        later, and refusing to import an app is a worse failure than the console denying — but a console that
+        *serves* without one answers every tool call with ``missing_explicit_grant``, which is a support ticket
+        rather than a diagnostic. This turns that into a start-up failure. The report's ``problems`` are the
+        reasons not to serve, its ``warnings`` the reachability facts a reviewer should see (a gated tool the
+        approval policy can never approve); ``strict=True``, the default, raises
+        :class:`~context_runtime.tools.base.RegistryConfigurationError` on a problem instead of returning it,
+        which is what a constructor wants.
+        """
+        return self.registry.validate(strict=strict)
 
     # ---- helpers -------------------------------------------------------------
 
@@ -299,7 +388,37 @@ class AgentConsole:
         from ..policy import current_policy
         return self._policy or current_policy()
 
+    def _denied_by_authorization(self, name: str, result) -> bool:
+        """Whether a failed result is the AUTHORIZATION gate refusing, not the APPROVAL gate holding the call.
+
+        The two answers read differently to a user — "you are not allowed to do that" versus "this needs a
+        confirmation first" — and conflating them tells someone with no grant that pressing confirm would help.
+
+        :mod:`agent_harness.tools` has never carried a ``denied`` flag on ``ToolResult``, so asking for one
+        raised ``AttributeError`` and a denied console call answered 500 instead of its reason. The flag is used
+        when a result has one; otherwise the registry's own audit trail is read: an authorization outcome is the
+        entry that carries the plane's attribution (``policy_reason``/``plane``), while an approval hold writes
+        only the four keys it has always written. No entry at all is not a denial — an unregistered tool, a tool
+        that crashed, and a policy block each failed somewhere else, and say so.
+        """
+        explicit = getattr(result, "denied", None)
+        if explicit is not None:
+            return bool(explicit)
+        if not (result.error or "").startswith("denied:"):
+            return False
+        for entry in reversed(self.registry.audit):
+            if entry.get("tool") != name:
+                continue
+            return entry.get("allowed") is False and "policy_reason" in entry
+        return False
+
     def _answer_tool(self, name: str, args: dict, principal=None) -> dict:
+        # Nothing is registered in a diagnostic console, so this is unreachable by accident of construction —
+        # and an answer this important is not left to an accident. Explicit refusal, not a lookup miss.
+        if not self.privileged:
+            raise PrivilegedExecutionUnavailable(
+                f"{name} was refused: this agent console is a diagnostic instance, so privileged execution is "
+                f"not available in it — no tool is registered. Run the execution instance instead.")
         # tool-phase policy: an approval rule pauses an irreversible action; a deny rule blocks it.
         policy = self._effective_policy()
         if policy is not None:
@@ -315,7 +434,12 @@ class AgentConsole:
         evidence = [{"tool": name, "args": args, "gate": gate.get("reason") or gate.get("decision", ""), "ok": result.ok}]
         summary = result.text or (json.dumps(result.data)[:800] if result.data is not None else "")
         if not result.ok:
-            body = summary or "That action needs confirmation before it can run."
+            # A denial carries its own reason and must show it: "this needs confirmation" is what a held
+            # side effect says, and it is the wrong thing to tell someone whose action was denied.
+            if self._denied_by_authorization(name, result):
+                body = summary or result.error or "That action is not authorized."
+            else:
+                body = summary or "That action needs confirmation before it can run."
             return {"intent": "action", "tool": name, "text": body, "evidence": evidence, "data": result.data, "approved": False}
         if self._live and summary:
             system = (

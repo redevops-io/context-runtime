@@ -14,8 +14,8 @@ RUN pip install --no-cache-dir "fastapi>=0.110" "uvicorn>=0.29" "httpx>=0.27" "p
 # application does not import without it. Pinned to the same commit as pyproject.toml, from the commit's
 # source archive (no git in this image) and verified against the archive's sha256.
 # tests/test_container.py checks that this commit equals the one in pyproject.toml.
-ARG AGENT_HARNESS_COMMIT=6b8ba3a596a5e2caf0fdf009f2af013517591662
-ARG AGENT_HARNESS_SHA256=d67eadb33c161df00b70bad4f20c80f43d2f477031dce3259ee5d465c8844a47
+ARG AGENT_HARNESS_COMMIT=1259d1b338e80414b32b863bcc97a0db93db8cd2
+ARG AGENT_HARNESS_SHA256=5e7ac02ec1fdb6e00aba7d7871db870d08f5b89084c4464173354a4ef036e04c
 RUN pip install --no-cache-dir "agent-harness @ https://github.com/redevops-io/agent-harness/archive/${AGENT_HARNESS_COMMIT}.tar.gz#sha256=${AGENT_HARNESS_SHA256}"
 ENV PYTHONPATH=/app
 

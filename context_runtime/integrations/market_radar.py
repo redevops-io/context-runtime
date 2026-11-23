@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from typing import Callable
 
 from ..runtime.runtime import ContextRuntime
+from ..tools.actions import PureRead, resolve_action
+from ..tools.authz import resolve_authorizer
 from ..tools.base import ToolRegistry, ToolResult, function_tool
 from ..types import Goal, Trace
 from .bandit import EpsilonGreedyBandit
@@ -133,16 +135,34 @@ class MarketRadarTenant:
     def __init__(self, runtime: ContextRuntime | None = None,
                  arms: tuple[RadarArm, ...] = DEFAULT_RADAR,
                  bandit: EpsilonGreedyBandit | None = None, epsilon: float = 0.15,
-                 scrape_tool_factory: Callable[[dict], ToolResult] | None = None):
+                 scrape_tool_factory: Callable[[dict], ToolResult] | None = None,
+                 scrape_action: str | PureRead | None = None,
+                 authorizer=None, local_trust: bool = False, local_trust_reason: str = ""):
         self.runtime = runtime or ContextRuntime.default([])
         self.arms = arms
         self.bandit = bandit or _radar_bandit(epsilon=epsilon, arms=arms)
-        self.registry = ToolRegistry()
+        # Who answers for a call in this registry is the deployment's choice, not this tenant's
+        # default: an explicit ``authorizer``, else a plane installed with set_default_authorizer,
+        # else explicitly declared local authority — otherwise construction fails here instead of
+        # denying every call later (see ``context_runtime/tools/authz.py``). Risk classes below
+        # are read off what the tool actually does, never off its name or its ``side_effecting`` flag.
+        # ``perform_sweep`` is not a read: it initiates outbound fetches against the watch set
+        # (pricing page, changelog, careers, blog), downloads their content, and the result is
+        # persisted as tenant state. Third-party fetching with stored consequences is ``write``
+        # under the platform's own inventory (compare crm.research, sbom, add_watch). The shipped
+        # default is the offline simulation; a real fetcher must be registered by whoever wires it.
+        # That is enforced, not asked for: a function in ``scrape_tool_factory`` has to say its own class
+        # with ``scrape_action``, or construction refuses — the class is not inherited from the slot.
+        self.registry = ToolRegistry(authorizer=resolve_authorizer(
+            authorizer, local_trust=local_trust, local_trust_reason=local_trust_reason,
+            context="market_radar"))
         scrape_fn = scrape_tool_factory or _scrape_watch
         self.registry.register(function_tool(
             name="perform_sweep",
             description="Perform the selected market radar sweep (simulated).",
             fn=scrape_fn,
+            action=resolve_action(shipped="write", injected=scrape_tool_factory, declared=scrape_action,
+                                  param="scrape_action", tool="perform_sweep", context="market_radar"),
         ))
         self._pending: dict[str, tuple[Plan, RadarArm, str, ToolResult]] = {}
 

@@ -15,9 +15,38 @@ from .base import (
     ToolResult,
     ToolSpec,
 )
+from .authz import (
+    DIAGNOSTIC,
+    DIAGNOSTIC_REASON_ENV,
+    EXECUTE,
+    EXECUTION_MODE_ENV,
+    LOCAL_AUTHORITY_ENV,
+    PrivilegedExecutionUnavailable,
+    execution_mode,
+    local_authority,
+    local_authority_from_env,
+    require_plane,
+    resolve_authorizer,
+)
+from .actions import (
+    INERT_ROOTS,
+    MIN_DELEGATED_CLASS,
+    Delegated,
+    PureRead,
+    delegated,
+    opaque_callees,
+    pure_read,
+    resolve_action,
+)
 from .retriever import ToolRetriever
 
 __all__ = [
     "ToolSpec", "ToolResult", "ToolPlugin", "ToolRegistry", "ApprovalPolicy",
     "ToolError", "ToolRetriever",
+    "resolve_authorizer", "local_authority", "local_authority_from_env", "LOCAL_AUTHORITY_ENV",
+    "require_plane", "execution_mode", "PrivilegedExecutionUnavailable",
+    "EXECUTION_MODE_ENV", "DIAGNOSTIC_REASON_ENV", "EXECUTE", "DIAGNOSTIC",
+    "resolve_action",
+    "PureRead", "pure_read",
+    "delegated", "Delegated", "opaque_callees", "INERT_ROOTS", "MIN_DELEGATED_CLASS",
 ]

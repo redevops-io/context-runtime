@@ -461,7 +461,10 @@ def test_control_plane_state_defaults_to_no_working_directory_path(tmp_path, mon
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "h"))
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "h" / "AppData" / "Local"))
     monkeypatch.chdir(tmp_path)
-    fleet = Fleet(Registry.load())
+    # A privileged fleet now refuses to be built with no plane to ask, so the state-path check asks for the
+    # one fleet that has nothing to authorize: diagnostic, no tenants, no execution path. The subject of the
+    # test is where the fleet keeps its files, and that answer does not depend on the posture.
+    fleet = Fleet(Registry.load(), privileged=False)
     assert fleet.home.is_absolute() and str(tmp_path / "h") in str(fleet.home)
     assert not (tmp_path / ".context-runtime").exists()
 

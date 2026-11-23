@@ -79,7 +79,7 @@ def test_decisive_present_beats_the_wrong_trap():
     assert outcome_for(ProviderBundle(("apollo", "pdl")), fx) == "correct"
 
 
-def test_runs_offline_and_denies_outreach():
+def test_runs_offline_and_denies_outreach(local_run):
     t = RevenueIntelligenceTenant(_fixtures(), approver=lambda spec: False, no_outreach=True)
     r = t.enrich("c2")
     assert r.outcome in ("correct", "wrong", "missing")
@@ -89,7 +89,7 @@ def test_runs_offline_and_denies_outreach():
     assert t.registry.audit[-1]["allowed"] is False
 
 
-def test_learns_decisive_provider_per_need():
+def test_learns_decisive_provider_per_need(local_run):
     t = RevenueIntelligenceTenant(_fixtures(), bandit=_gtm_bandit(0.1), approver=lambda spec: False)
     ids = list(_fixtures())
     for i in range(200):
@@ -102,7 +102,7 @@ def test_learns_decisive_provider_per_need():
             assert decisive in bundle.providers, f"{need}: learned {key} lacks decisive {decisive}"
 
 
-def test_adaptive_beats_fixed_pipeline():
+def test_adaptive_beats_fixed_pipeline(local_run):
     fx = _fixtures()
     t = RevenueIntelligenceTenant(fx, bandit=_gtm_bandit(0.1), approver=lambda spec: False)
     ids = list(fx)
@@ -125,7 +125,7 @@ def test_adaptive_beats_fixed_pipeline():
     assert adaptive_cost / n <= fixed.cost
 
 
-def test_learned_arm_f_cheaper_than_e_at_equal_quality():
+def test_learned_arm_f_cheaper_than_e_at_equal_quality(local_run):
     """Phase 3: conditioning on segment (arm F) resolves every need at strictly lower cost than the
     need-only policy (arm E), because E must buy a segment-covering bundle where F buys the cheap single."""
     fx = _segmented_fixtures()

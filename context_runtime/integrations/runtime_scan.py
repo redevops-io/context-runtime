@@ -178,5 +178,8 @@ def mount_deploy_scan(registry: ToolRegistry, *, python: str | None = None, env:
     server_env.update(env or {})
     client = MCPClient.stdio([python or sys.executable, "-m",
                               "context_runtime.tools.mcp_servers.deploy_scan"], env=server_env)
-    names = mount_mcp(registry, client, prefix="scan", default_side_effecting=True)
+    # The scan server ships in this repository (tools/mcp_servers/deploy_scan.py), and every tool on it
+    # launches a scan — so the class is stated here rather than inherited from a default that no longer
+    # exists: mount_mcp now mounts nothing at all for a tool nobody gave a class.
+    names = mount_mcp(registry, client, prefix="scan", default_side_effecting=True, default_action="write")
     return client, names

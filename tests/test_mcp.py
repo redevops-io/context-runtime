@@ -94,7 +94,10 @@ def _run_with_client_and_registry(policy: ApprovalPolicy | None = None):
             f.write(FAKE_SERVER)
         client = MCPClient.stdio([sys.executable, fake_path])
         try:
-            names = mount_mcp(reg, client)
+            # No class is declared for this fake server's tools, so the mount says in one place that the
+            # whole server is assumed consequential. mount_mcp has no default class of its own to fall
+            # back to: with neither an actions map nor a default, it mounts nothing at all.
+            names = mount_mcp(reg, client, default_action="write")
             return reg, names, client
         except Exception:
             client.close()
@@ -110,7 +113,7 @@ def test_mcp_mount_registers_tools_via_real_stdio():
         client.close()
 
 
-def test_mcp_echo_runs_under_bypass_and_returns_text():
+def test_mcp_echo_runs_under_bypass_and_returns_text(local_run):
     reg, names, client = _run_with_client_and_registry(policy=ApprovalPolicy(mode="bypass"))
     try:
         assert "echo" in reg.list()
@@ -123,13 +126,16 @@ def test_mcp_echo_runs_under_bypass_and_returns_text():
         client.close()
 
 
-def test_mcp_tools_are_gated_by_approval_policy():
-    # default policy (deny_side_effects) blocks side-effecting MCP tool (default_side=True)
+def test_mcp_tools_are_gated_by_approval_policy(local_run):
+    # default policy (deny_side_effects) blocks side-effecting MCP tool (default_side=True). local_run is what
+    # makes this the approval gate's denial: with no authorizer installed, the call would already have been
+    # stopped at authorization and this test would prove nothing about the approval policy.
     reg, names, client = _run_with_client_and_registry()
     try:
         res = reg.run("echo", {"text": "hi"})
         assert res.ok is False
         assert "denied" in (res.error or "")
+        assert "explicit_grant" not in (res.error or "")     # stopped by the approval gate, not by authz
     finally:
         client.close()
 
@@ -141,7 +147,7 @@ def test_mcp_tools_are_gated_by_approval_policy():
             f.write(FAKE_SERVER)
         client2 = MCPClient.stdio([sys.executable, fake_path])
         try:
-            mount_mcp(reg2, client2)
+            mount_mcp(reg2, client2, default_action="write")
             res2 = reg2.run("echo", {"text": "allow"})
             assert res2.ok is True
             assert "allow" in res2.text
@@ -149,7 +155,7 @@ def test_mcp_tools_are_gated_by_approval_policy():
             client2.close()
 
 
-def test_mcp_iserror_maps_to_toolresult_failure():
+def test_mcp_iserror_maps_to_toolresult_failure(local_run):
     reg, names, client = _run_with_client_and_registry(policy=ApprovalPolicy(mode="bypass"))
     try:
         res = reg.run("echo", {"text": "ERR"})

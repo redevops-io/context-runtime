@@ -20,7 +20,11 @@ def _configured_server(monkeypatch):
 
 
 def test_health_reports_registry():
-    assert anonymous.get("/health").json() == {"status": "ok"}      # liveness only, no operational detail
+    # Liveness, and exactly two fields beyond it: whether this process can execute at all. A fleet that
+    # denies every call used to answer this route identically to one that works, which is how a broken
+    # authorization plane survived a green dashboard. Nothing else about the deployment belongs here.
+    assert anonymous.get("/health").json() == {"status": "ok", "mode": "execute",
+                                              "privileged_execution": True}
     assert len(client.get("/modules").json()) >= 14
 
 
@@ -51,7 +55,9 @@ def test_money_action_is_approval_gated():
     assert d.json()["kind"] == "approval"
 
 
-def test_down_up_cycle_changes_deployed_state():
+def test_down_up_cycle_changes_deployed_state(local_run):
+    """Taking a module down and up again. ``local_run`` because /up builds the tenant, and a tenant that
+    can execute refuses to be built with nothing to ask — the same refusal that stops a container."""
     client.post("/down", json=["agentic-billing"])
     after = {m["name"]: m["deployed"] for m in client.get("/status").json()}
     assert after["agentic-billing"] is False

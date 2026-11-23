@@ -17,11 +17,13 @@ data-driven from a catalog so "migrate all" is a table, not 16 files.
 from __future__ import annotations
 
 import hashlib
+import warnings
 from dataclasses import dataclass, field
 from itertools import combinations
 
 from ..runtime.runtime import ContextRuntime
-from ..tools.base import ApprovalPolicy, ToolRegistry, ToolResult, ToolSpec, function_tool
+from ..tools.authz import PrivilegedExecutionUnavailable, RegistryConfigurationError, resolve_authorizer
+from ..tools.base import ACTIONS, ApprovalPolicy, ToolRegistry, ToolResult, ToolSpec, function_tool
 from ..types import Goal, Hit, Plan, Trace
 from .bandit import EpsilonGreedyBandit
 
@@ -36,6 +38,8 @@ class ModuleSpec:
     sources: tuple[str, ...]        # available context sources (become source tools)
     metric: str                     # the reward signal (its own success measure)
     actions: tuple[str, ...] = ()   # side-effecting, approval-gated actions
+    # True for a row of CATALOG below: this repository wrote those action names, so each one owes an
+    curated_actions: bool = True
 
 
 # Every agentic-os-stack module (migrated) + net-new tenants from Use-cases.odt (new).
@@ -161,15 +165,63 @@ def _source_tool(module: str, source: str):
         hit = Hit(chunk_id=f"{module}:{source}", filename=f"{module}/{source}", source=source,
                   text=f"[{module}/{source}] record relevant to: {q}", score=1.0)
         return ToolResult(ok=True, hits=[hit], text=f"{module}/{source}")
-    return function_tool(f"{module}_{source}", run, description=f"{module} source: {source}")
+    # The source tool reads records out of the module's own bundle and writes nothing — `read`. A
+    # source name is not evidence (the inventory calls `sbom`, a scan, a write and `search_articles`,
+    # a lookup, a read): this class describes the implementation above. An integrator that swaps a
+    # source for a live third-party fetch or scan registers a different tool and classifies it.
+    return function_tool(f"{module}_{source}", run, description=f"{module} source: {source}",
+                         action="read")
 
 
-def _action_tool(module: str, action: str):
+# What each declared fleet action accomplishes, read off the platform's own classification table
+# (agentic_os/tool_actions.py, evidence rows in docs/TOOL_CLASSIFICATION_INVENTORY.md) wherever the
+# same capability exists there — and only where it does: `refund` and `dunning` are the platform's
+# own `refund` / `billing.refund` / `billing.dunning` = write; `post` is `social.publish` = write;
+# `send_campaign` and `send_sequence` are `outreach.send_all` = write; `escalate` is
+# `support.escalate` = write; `remediate` is `compliance.remediate` = write; `rollback` is
+# `infra.rollback_release` = write; `fulfill_dsar` is `privacy.delete` = delete. `close` has no
+# counterpart there (the platform registers only `close_status`, a read of whether a period is
+# closed), so it is classified from what closing a period does — it posts entries — as write.
+# `outreach_send` is the GTM module's own action; the platform's comparable row is again
+# `outreach.send_all` = write, and the tool behind it (`SendOutreachTool` in revenue_intelligence.py)
+# is registered side-effecting and approval-gated, so the two axes agree here rather than disagreeing.
+# Declared per action, never derived from the word "action".
+_ACTION_CLASSES: dict[str, str] = {
+    "refund": "write",
+    "dunning": "write",
+    "escalate": "write",
+    "remediate": "write",
+    "close": "write",
+    "post": "write",
+    "send_campaign": "write",
+    "send_sequence": "write",
+    "block_ip": "write",
+    "rollback": "write",
+    "outreach_send": "write",
+    "fulfill_dsar": "delete",
+}
+
+
+def _action_tool(module: str, action: str, *, curated: bool = True):
     def run(args: dict) -> ToolResult:
         return ToolResult(ok=True, data={"action": action, "applied": False},
                           text=f"[dry-run] {module}.{action}({args})")
+    action_class = _ACTION_CLASSES.get(action)
+    if action_class is None and curated:
+        raise RegistryConfigurationError(
+            f"the fleet action {module}.{action} has no recorded risk class — add it to _ACTION_CLASSES "
+            f"in modules.py with the evidence for what it actually does, instead of defaulting it")
+    if action_class is None:
+        # A module the registry discovered at run time, not a row this file wrote. Nobody has read what
+        # this action does, and "nobody read it" is not a licence to guess read: an unclassified tool is
+        # matched by no grant, so it is denied at the call — the same outcome the platform prescribes for
+        # an unknown effect, without taking the whole fleet down with one unreviewed module.
+        warnings.warn(
+            f"the fleet action {module}.{action} has no recorded risk class: it is registered "
+            f"unclassified, so no grant matches it and every call is denied until someone reads the "
+            f"implementation and records what it does in _ACTION_CLASSES (modules.py).", stacklevel=3)
     return function_tool(f"{module}_{action}", run, description=f"{module} action: {action}",
-                         side_effecting=True, approval_required=True)
+                         side_effecting=True, approval_required=True, action=action_class or "")
 
 
 class ModuleTenant:
@@ -177,16 +229,30 @@ class ModuleTenant:
 
     def __init__(self, spec: ModuleSpec, runtime: ContextRuntime | None = None,
                  bandit: EpsilonGreedyBandit | None = None, approver=None, epsilon: float = 0.12,
-                 persist_path: str | None = None):
+                 persist_path: str | None = None,
+                 authorizer=None, local_trust: bool = False, local_trust_reason: str = "",
+                 authorizer_on_missing: str = "raise", privileged: bool = True):
         self.spec = spec
+        # ``privileged=False`` is a promise about this object, not a request: it says the caller is a
+        # read-only surface, so ``act`` is refused here as well as at the registry. A surface that could
+        # execute and asked to be built without a plane is refused at construction instead.
+        self.privileged = privileged
         self.runtime = runtime or ContextRuntime.default([])
         self.arms = _bundles(spec.sources)
         self.bandit = bandit or EpsilonGreedyBandit(self.arms, epsilon=epsilon, persist_path=persist_path)
-        self.registry = ToolRegistry(ApprovalPolicy(mode="deny_side_effects", approver=approver))
+        # The approval policy decides whether a confirmed caller may run a side-effecting tool; who is
+        # allowed to ask at all is a separate answer, named here (explicit ``authorizer``, else a plane
+        # installed with set_default_authorizer, else declared local authority — see tools/authz.py).
+        self.registry = ToolRegistry(ApprovalPolicy(mode="deny_side_effects", approver=approver),
+                                     authorizer=resolve_authorizer(
+                                         authorizer, local_trust=local_trust,
+                                         local_trust_reason=local_trust_reason,
+                                         context=f"module fleet tenant {spec.name!r}",
+                                         on_missing=authorizer_on_missing, privileged=privileged))
         for s in spec.sources:
             self.registry.register(_source_tool(spec.name, s))
         for a in spec.actions:
-            self.registry.register(_action_tool(spec.name, a))
+            self.registry.register(_action_tool(spec.name, a, curated=spec.curated_actions))
         self._pending: dict[str, tuple[Plan, SourceBundle, str]] = {}
 
     def handle(self, question: str) -> ModuleResult:
@@ -205,6 +271,11 @@ class ModuleTenant:
         return ModuleResult(self.spec.name, kind, bundle, tuple(hits), context, action, plan)
 
     def act(self, action: str, **args) -> ToolResult:
+        if not self.privileged:
+            raise PrivilegedExecutionUnavailable(
+                f"{self.spec.name}.{action} was refused: this tenant was built as a read-only surface "
+                f"(privileged=False), so it has no execution path to authorize a call through. A service that "
+                f"means to act builds a privileged tenant and installs a plane to ask.")
         return self.registry.run(f"{self.spec.name}_{action}", args)
 
     def record_outcome(self, question: str, success: bool) -> float:
@@ -227,7 +298,11 @@ class ModuleTenant:
         return hashlib.sha256(q.encode()).hexdigest()[:16]
 
 
-def build_fleet(runtime: ContextRuntime | None = None, approver=None) -> dict[str, ModuleTenant]:
+def build_fleet(runtime: ContextRuntime | None = None, approver=None, *,
+                authorizer=None, local_trust: bool = False,
+                local_trust_reason: str = "") -> dict[str, ModuleTenant]:
     """Instantiate the whole catalog as Context Runtime tenants — the migrated fleet."""
     rt = runtime or ContextRuntime.default([])
-    return {name: ModuleTenant(spec, runtime=rt, approver=approver) for name, spec in CATALOG.items()}
+    return {name: ModuleTenant(spec, runtime=rt, approver=approver, authorizer=authorizer,
+                               local_trust=local_trust, local_trust_reason=local_trust_reason)
+            for name, spec in CATALOG.items()}

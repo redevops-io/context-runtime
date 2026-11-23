@@ -11,6 +11,7 @@ compound across the whole fleet.
 from __future__ import annotations
 
 import threading
+import warnings
 from dataclasses import dataclass
 
 from pathlib import Path
@@ -19,6 +20,12 @@ from ..costmodel.estimators import HeuristicEstimator
 from ..integrations.modules import CATALOG, ModuleSpec, ModuleTenant
 from ..platform_services import ensure_private_dir, state_dir
 from ..runtime.runtime import ContextRuntime
+from ..tools.authz import (
+    DIAGNOSTIC,
+    PrivilegedExecutionUnavailable,
+    execution_mode,
+    require_plane,
+)
 from .context import Approval, Context
 from .registry import Module, Registry
 
@@ -32,6 +39,22 @@ _ALIAS = {
 }
 
 
+#: Recorded once per process so /health can say what this fleet was allowed to become. It is a start-up fact,
+#: which is exactly why it is no longer a warning: see ``require_plane``.
+_MODE: tuple[str, str] | None = None
+
+
+def mode() -> tuple[str, str]:
+    """``("execute", "")`` or ``("diagnostic", reason)`` for this fleet — decided once, at construction.
+
+    The control plane is a privileged execution service: it stands up tenants whose tools block IPs, file
+    tickets and bill customers. It therefore refuses to come up at all with nothing to ask, and the only
+    instance of it that may boot without a plane is one where execution has been taken out of the build —
+    no tenants, no dispatch, nothing for a missing grant to be about.
+    """
+    return _MODE if _MODE is not None else execution_mode(context="module fleet")
+
+
 def spec_for(m: Module) -> ModuleSpec:
     """A CATALOG tenant spec if we have one; otherwise a generic spec from the registry."""
     key = _ALIAS.get(m.name)
@@ -39,10 +62,14 @@ def spec_for(m: Module) -> ModuleSpec:
         return CATALOG[key]
     if m.name in CATALOG:
         return CATALOG[m.name]
+    # Not a CATALOG row: the action names come from a module the registry discovered at run time, so
+    # this file cannot vouch for what they do. They are registered unclassified (denied) rather than
+    # assumed safe — see integrations/modules.py::_action_tool.
     return ModuleSpec(
         name=m.name.replace("-", "_"), core="", pain=m.pain,
         sources=("primary", "secondary", "context"), metric="task_success",
         actions=tuple(a.replace("-", "_") for a in m.approval_required) or tuple(m.agents[:1]),
+        curated_actions=False,
     )
 
 
@@ -56,8 +83,16 @@ class ModuleStatus:
 
 class Fleet:
     def __init__(self, registry: Registry, router=None, context: Context | None = None,
-                 workdir=None, runtime: ContextRuntime | None = None, home: str | None = None):
+                 workdir=None, runtime: ContextRuntime | None = None, home: str | None = None,
+                 privileged: bool | None = None):
+        global _MODE
         self.registry = registry
+        # Decided once, here, before anything can run: a privileged fleet refuses construction without a plane
+        # (``require_plane``), a diagnostic one comes up and is handed nothing to execute with.
+        _MODE = execution_mode(context="module fleet")
+        self.privileged = (_MODE[0] != DIAGNOSTIC) if privileged is None else privileged
+        if self.privileged:
+            require_plane(context="module fleet")
         self.router = router                      # kept for app compatibility; unused
         self.home = Path(home) if home else state_dir()   # persistence root (the /data volume in a container)
         self.context = context or Context(ensure_private_dir(self.home))
@@ -75,6 +110,12 @@ class Fleet:
 
     # --- lifecycle ---
     def up(self, *names: str) -> list[ModuleStatus]:
+        if not self.privileged:
+            raise PrivilegedExecutionUnavailable(
+                "this fleet is diagnostic: it does not stand modules up. It exists to show a fleet that has no "
+                "execution path — no tenants, no tool registry, nothing a missing grant could be about — and "
+                "standing one up would be the moment it silently became an execution service again. Run the "
+                "execution instance for that.")
         out = []
         for n in (names or self._names()):
             m = self.registry.get(n)
@@ -103,6 +144,11 @@ class Fleet:
     # --- dispatch (now a Context Runtime plan, not a raw model call) ---
     def dispatch(self, module_name: str, agent: str, action: str, prompt: str,
                  capability: str = "reason", background: bool = False) -> Approval | dict:
+        if not self.privileged:
+            raise PrivilegedExecutionUnavailable(
+                f"dispatch({module_name}/{action}) is refused: this fleet is diagnostic, so it has no tenants "
+                f"and no tool path behind them. A diagnostic instance answers questions about a fleet; it does "
+                f"not act as one.")
         m = self.registry.get(module_name)
         if agent not in m.agents:
             raise ValueError(f"module {module_name} has no agent {agent!r} (agents: {m.agents})")
