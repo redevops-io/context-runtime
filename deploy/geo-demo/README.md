@@ -32,8 +32,9 @@ How it behaves:
 - `/geo` (no trailing slash) redirects to `/geo/` with status 307. The `Location` is a path only (`/geo/`, query string
   kept), never an absolute URL, so it cannot carry the internal host name.
 - The page builds every request URL from the prefix that the server injects into it (`const BASE = "/geo"`), so it
-  works at any depth. Its single link to the host's own root (`Enterprise plugins`) is written relative to the prefix
-  depth (`../enterprise-plugins` under `/geo`). With no prefix the page requests the same root paths as before.
+  works at any depth. Its two links to the marketing site (`Enterprise plugins`, `architecture`) are absolute
+  `https://redevops.io/...` URLs: the page used to link the host root (`../enterprise-plugins` under `/geo`), which does
+  not exist on `demo.redevops.app`, so the link 404ed there. With no prefix the page requests the same root paths as before.
 - The app sets no cookies. If one is ever added it must use `Path=<prefix>`.
 - The data and the zoning results are the same under every prefix; only the paths change.
 - Health: the app answers health only at `<prefix>/healthz` when a prefix is set, and only at `/healthz` when it is not.

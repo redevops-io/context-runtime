@@ -88,17 +88,17 @@ def configured_base_path() -> str:
     return validate_base_path(os.environ.get(ENV_BASE_PATH, ""))
 
 
-# The page is a template: the two placeholders are filled once per app instance from the validated prefix.
+# The page is a template: the one placeholder is filled once per app instance from the validated prefix.
 _PAGE_TEMPLATE = (STATIC / "index.html").read_text(encoding="utf-8")
-_PLACEHOLDERS = ("__BASE_PATH_JSON__", "__SITE_ROOT__")
+_PLACEHOLDERS = ("__BASE_PATH_JSON__",)
 
 
 def render_page(base_path: str) -> str:
     """The page with its URL prefix filled in. Every URL the page requests is built from `BASE` (the prefix as a
-    JSON string); the one link that points at the host's root rather than at this app is relative to the prefix
-    depth (`../` per segment), or the plain root path when there is no prefix."""
-    site_root = "../" * len(base_path.split("/")[1:]) if base_path else "/"
-    page = _PAGE_TEMPLATE.replace("__BASE_PATH_JSON__", json.dumps(base_path)).replace("__SITE_ROOT__", site_root)
+    JSON string). The page's links to the marketing site (Enterprise plugins, architecture) are absolute
+    `https://redevops.io/...` URLs: this app is served on hosts (demo.redevops.app) whose root does not have those pages,
+    so a host-relative link 404s there."""
+    page = _PAGE_TEMPLATE.replace("__BASE_PATH_JSON__", json.dumps(base_path))
     assert not any(ph in page for ph in _PLACEHOLDERS)
     return page
 
