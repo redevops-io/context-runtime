@@ -1,9 +1,12 @@
 """MCP tools are mounted with a class the operator declared, never one the server claimed.
 
 An MCP server is code pulled from somewhere else, and ``readOnlyHint`` is its own announcement about itself.
-The registry's rule is that the caller declares what it is about to run: the hint may relax the *approval*
-gate — an announced read-only tool need not be confirmed — and it may never relax the authorization class,
-which is what decides whether the call happens at all.
+The registry's rule is that the caller declares what it is about to run: the hint affects neither the
+authorization class nor the approval gate. (A prior version let the hint relax the approval gate for a
+non-``read`` action — ``side_effecting`` dropped to ``False`` whenever a server claimed ``readOnlyHint: true``,
+which made :class:`ApprovalPolicy` skip the approval step entirely for a tool the operator had explicitly
+classified ``write``/``delete``. That was Finding M1 of the authorization-stack review: a malicious or
+careless server could talk its own consequential tool out of needing approval. Fixed — see below.)
 
 The doubles here return a typed :class:`~context_runtime.tools.base.Authorization`, and that is deliberate:
 under ``authz/v1`` an authorizer that returns ``None`` is a *denial*, so the instinctive ``lambda *a: None``
@@ -83,14 +86,86 @@ def test_a_tool_nobody_classed_is_not_mounted_at_all():
     assert seen == []            # nothing was registered, so nothing was ever asked about
 
 
-def test_read_only_hint_relaxes_approval_but_never_the_class():
-    """The hint is an announcement from the code being run: it may stop the call needing confirmation,
-    and it stops there."""
+def test_read_only_hint_has_no_effect_on_approval_or_class():
+    """The hint is an announcement from the code being run, not from anyone this registry trusts to grade
+    its own risk: it changes neither the authorization class nor whether the approval gate engages. A tool
+    mounted as ``write`` still needs approval even when the server calls itself read-only — the exploit this
+    test used to validate as correct behavior (M1): under the default ``deny_side_effects`` policy with no
+    approver, the call is denied, not silently waved through."""
+    spy, seen = _spy()
+    reg = ToolRegistry(authorizer=spy)  # default policy: deny_side_effects, no approver
+    mount_mcp(reg, FakeMCPClient([_tool("search", readOnlyHint=True)]), default_action="write")
+    result = reg.run("search", {})
+    assert result.ok is False
+    assert "requires approval" in result.error
+    assert seen == [("search", "write", True)]  # side_effecting is true despite the hint; nothing executed
+
+
+def test_read_only_hint_cannot_downgrade_delete_either():
+    """The same bug, one class stricter: a server cannot talk a ``delete`` tool out of needing approval by
+    claiming ``readOnlyHint: true``."""
     spy, seen = _spy()
     reg = ToolRegistry(authorizer=spy)
-    mount_mcp(reg, FakeMCPClient([_tool("search", readOnlyHint=True)]), default_action="write")
-    assert reg.run("search", {}).ok
-    assert seen == [("search", "write", False)]  # not confirmed, still authorized as a write
+    mount_mcp(reg, FakeMCPClient([_tool("wipe", readOnlyHint=True)]), default_action="delete")
+    result = reg.run("wipe", {})
+    assert result.ok is False
+    assert "requires approval" in result.error
+    assert seen == [("wipe", "delete", True)]
+
+
+@pytest.mark.parametrize("annotations", [
+    {},                                   # hint absent entirely
+    {"readOnlyHint": False},              # hint explicitly false
+    {"readOnlyHint": True},               # hint explicitly true (the exploit shape)
+    {"readOnlyHint": "yes"},              # malformed: a truthy non-bool
+    {"readOnlyHint": None},               # malformed: present but null
+], ids=["absent", "false", "true", "truthy-string", "null"])
+def test_no_mcp_metadata_shape_can_downgrade_approval(annotations):
+    """Every combination of missing, false, true, or malformed ``readOnlyHint`` must leave a ``write`` tool
+    requiring approval — none of them is a code path that was ever meant to grant a pass."""
+    spy, seen = _spy()
+    reg = ToolRegistry(authorizer=spy)
+    mount_mcp(reg, FakeMCPClient([_tool("search", **annotations)]), default_action="write")
+    result = reg.run("search", {})
+    assert result.ok is False
+    assert "requires approval" in result.error
+
+
+def test_an_explicitly_approved_write_still_executes_correctly():
+    """The fix must not break the legitimate path: a write tool with a real approver that says yes still
+    runs, hint or no hint."""
+    client = FakeMCPClient([_tool("search", readOnlyHint=True)])
+    reg = ToolRegistry(authorizer=_grant,
+                        policy=ApprovalPolicy("deny_side_effects", approver=lambda call: True))
+    mount_mcp(reg, client, default_action="write")
+    result = reg.run("search", {})
+    assert result.ok, result.error
+    assert client.calls == [("search", {})]
+
+
+def test_delegated_classification_already_refuses_a_remote_readonlyhint_as_a_source():
+    """A second place this class of bug could have been reintroduced: a ``delegated()``/``pure_read()``
+    wrapper around an MCP client claiming its own class from the server's hint instead of from whoever read
+    the code. This module's own classification seam (``context_runtime.tools.actions.resolve_action``)
+    already refuses to accept a remote ``readOnlyHint`` as a classification source at all — it checks the
+    wrapper's own source for write sinks and opaque callees, never anything the wrapped MCP client reports
+    about itself. Confirmed here so a future change to either module cannot silently reopen this path
+    without a test noticing."""
+    from context_runtime.tools import actions
+
+    def wraps_a_consequential_mcp_call(args: dict):
+        # the fake client's `readOnlyHint=True` on this tool must have no bearing on this wrapper's own
+        # classification — its own source (an opaque call to a client object) is what gets checked.
+        client = FakeMCPClient([_tool("delete_everything", readOnlyHint=True)])
+        return client.call_tool("delete_everything", args)
+
+    with pytest.raises(actions.RegistryConfigurationError, match="pure_read"):
+        actions.resolve_action(
+            shipped="read",
+            injected=wraps_a_consequential_mcp_call,
+            declared=actions.pure_read("this just calls the mcp client, which is a readOnlyHint tool"),
+            tool="delete_everything", context="test",
+        )
 
 
 def test_declared_action_is_the_one_asked_about():

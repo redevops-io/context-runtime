@@ -247,8 +247,9 @@ class MCPToolPlugin:
                  default_side_effecting: bool = True, action: str = "write") -> None:
         """``action`` is the risk class this tool is asked about — set by whoever mounts the server.
 
-        The server's ``readOnlyHint`` is an announcement from the code being run; it moves the
-        approval gate and nothing else. An MCP tool with no declared class is therefore ``write``.
+        The server's ``readOnlyHint`` is an announcement from the code being run; it has no effect on
+        either the authorization class or the approval gate. An MCP tool with no declared class is
+        therefore ``write``.
         """
         if action not in ACTIONS:
             raise RegistryConfigurationError(
@@ -265,8 +266,15 @@ class MCPToolPlugin:
         mcp_name = self._desc.get("name") or self._name
         desc = self._desc.get("description") or ""
         schema = self._desc.get("inputSchema") or self._desc.get("input_schema") or {"type": "object", "properties": {}}
-        ann = self._desc.get("annotations") or {}
-        read_only = bool(ann.get("readOnlyHint")) if "readOnlyHint" in ann else False
+        # ``readOnlyHint`` (and every other MCP annotation) is an announcement from the code being run,
+        # not from anyone this repository trusts to grade its own risk. It is read nowhere in this method:
+        # the operator's own ``action`` classification (passed to ``mount_mcp``'s ``actions``/``default_action``,
+        # after someone read what the server does) is the only input to both the authorization class and the
+        # approval gate below. A server cannot talk a ``write``/``delete`` tool out of needing approval by
+        # calling itself read-only, and a missing, false, true, or malformed hint all have the same effect:
+        # none. (Fixes M1: a prior version let ``readOnlyHint: true`` set ``side_effecting=False`` for a
+        # non-``read`` action, which made ``ApprovalPolicy`` skip the approval gate entirely.)
+        #
         # ``read`` and ``side_effecting`` cannot both be true: the engine refuses a spec that asks to be
         # authorized as the weakest class while declaring that it mutates something. When the operator
         # classified this tool ``read``, that classification is the authoritative statement about it —
@@ -274,7 +282,7 @@ class MCPToolPlugin:
         if self._action == "read":
             side = False
         else:
-            side = (not read_only) if "readOnlyHint" in ann else bool(self._default_side)
+            side = bool(self._default_side)
         return ToolSpec(
             name=self._name,
             description=desc,
@@ -328,9 +336,9 @@ def mount_mcp(
     was given, it gets nothing: it is not mounted, and the refusal is reported. There used to be a
     ``write`` sitting in the signature as the default, which is a risk class a caller could receive
     without ever choosing one; the class for an unread server is now something the mount has to say.
-    An announced ``readOnlyHint`` may relax the *approval* gate, never the authorization class, because
-    the thing asking to be run is not allowed to grade its own risk. ``actions`` values and
-    ``default_action`` must come from the shared vocabulary ``ACTIONS``.
+    An announced ``readOnlyHint`` affects neither the authorization class nor the approval gate: the
+    thing asking to be run is not allowed to grade its own risk, in either direction. ``actions`` values
+    and ``default_action`` must come from the shared vocabulary ``ACTIONS``.
     Returns the list of registered tool names — tools refused for want of a class are absent from it.
     """
     if default_action is not None and default_action not in ACTIONS:
