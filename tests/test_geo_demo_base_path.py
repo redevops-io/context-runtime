@@ -158,8 +158,6 @@ def check_contract(mod: types.ModuleType, base: str) -> None:
             if host == "redevops.io":
                 continue
             u = urlsplit(u).path
-        if u == "/enterprise-plugins":                              # the one link to the host's root, not to this app
-            continue
         assert u == base or u.startswith(base + "/"), f"outside the prefix: {u}"
         r = fetch(u)
         assert r.status == 200, (u, r.status)
@@ -245,7 +243,7 @@ def test_empty_prefix_serves_at_the_root_exactly_as_before():
     assert get(app, "/geo/api/summary").status == 404
     assert get(app, "/missing").status == 404
     # the one link that leaves the app is the same root path it always was
-    assert 'href="/enterprise-plugins"' in page.text
+    assert 'href="https://redevops.io/enterprise-plugins/"' in page.text
 
 
 def test_results_are_identical_under_every_prefix_and_deterministic():
@@ -270,11 +268,45 @@ def test_page_has_no_remaining_root_relative_url_when_a_prefix_is_set():
         assert "__BASE_PATH_JSON__" not in page and "__SITE_ROOT__" not in page
         for word in ("/api/summary", "/api/evaluate", "/api/spatial", "/static"):
             assert f"'{word}" not in page and f'"{word}' not in page and f"`{word}" not in page
-        # the site-root link resolves to the host root whatever the prefix depth
-        href = re.search(r'href="([^"]*enterprise-plugins)"', page).group(1)
-        assert urlsplit(urljoin(f"http://h{base}/", href)).path == "/enterprise-plugins"
+        # the Enterprise plugins link is absolute, so it resolves the same whatever host or prefix serves the page
+        href = re.search(r'href="([^"]*enterprise-plugins[^"]*)"', page).group(1)
+        assert urljoin(f"http://h{base}/", href) == "https://redevops.io/enterprise-plugins/"
     # the template itself holds no root-relative literal at all: everything is built from the injected base
     assert scan_root_relative(INDEX_HTML.read_text(encoding="utf-8"), "") == []
+
+
+def test_no_link_in_the_page_points_at_the_host_root_or_a_relative_path():
+    """Regression: `Enterprise plugins` was `../enterprise-plugins` (-> https://demo.redevops.app/enterprise-plugins, a 404).
+    Every link in the page must be an absolute https URL or an in-page anchor."""
+    for base in PREFIXES:
+        page = get(load_module().create_app(base), base + "/").text
+        hrefs = re.findall(r"""<a\s[^>]*href\s*=\s*["']([^"']*)""", page)
+        assert hrefs and "https://redevops.io/enterprise-plugins/" in hrefs
+        assert all(h.startswith(("https://", "#")) for h in hrefs), hrefs
+
+
+def test_page_has_a_main_landmark_a_labelled_focusable_scroll_region_and_aa_pill_colours():
+    page = INDEX_HTML.read_text(encoding="utf-8")
+    assert len(re.findall(r"<main\b", page)) == 1 and "</main>" in page
+    region = re.search(r'<div class="scroll"[^>]*>', page).group(0)
+    assert 'tabindex="0"' in region and 'role="region"' in region and "aria-label" in region
+    css = dict(re.findall(r"--([a-z]+):(#[0-9a-fA-F]{6})", page))
+
+    def lum(h):
+        c = [int(h[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        c = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
+        return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+
+    def ratio(a, b):
+        a, b = sorted((lum(a), lum(b)), reverse=True)
+        return (a + .05) / (b + .05)
+
+    for cls, var in (("PERMITTED", "green"), ("PROHIBITED", "red"), ("UNKNOWN", "amber")):
+        fg = re.search(r"\." + cls + r"\{color:(#[0-9a-fA-F]{6});", page).group(1)
+        assert ratio(fg, css[var]) >= 4.5, (cls, ratio(fg, css[var]))
+    for fg in ("muted", "teal", "amber"):                                         # text tokens on the page and card surfaces
+        for bg in ("bg", "card"):
+            assert ratio(css[fg], css[bg]) >= 4.5, (fg, bg)
 
 
 def test_the_scan_detects_what_it_is_meant_to_detect():
@@ -315,7 +347,6 @@ MUTATIONS = {
     "oauth redirect at the root": ('swagger_ui_oauth2_redirect_url=f"{base}/docs/oauth2-redirect"',
                                    'swagger_ui_oauth2_redirect_url="/docs/oauth2-redirect"'),
     "page built for the root": ("json.dumps(base_path)", 'json.dumps("")'),
-    "site-root link not adjusted": ('"../" * len(base_path.split("/")[1:]) if base_path else "/"', '"/"'),
 }
 
 
