@@ -10,6 +10,7 @@ The CR tenant / bandit / reward live in ``runtime_scan.py``.
 from __future__ import annotations
 
 import json
+import ipaddress
 import os
 import re
 import shutil
@@ -27,25 +28,48 @@ _SEV_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 # ──────────────────────────── scope (fail-closed) ────────────────────────────
 
 
-def host_of(target: str) -> str:
-    """Host portion of a URL / host:port / bare host."""
+_HOST_RE = re.compile(r"^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$")
+
+
+def _parts(target: str) -> tuple[str, str | None] | None:
+    """``(host, port)`` of a URL / host:port / bare host, or ``None`` when the target is not one this module
+    will hand to a scanner. ONE parse decides both what the scope check sees and what the tools are given
+    (see ``_as_url``): the host is read from the URL exactly as a scanner reads it. A target with user
+    information (``allowed.example:80@other.example``: the part before the ``@`` is a user name, the host is
+    what follows), a backslash, a blank or a control character, a scheme other than http(s), or a host that
+    is not a DNS name or an IP address (a leading ``-`` would be read by a tool as an option) is refused."""
     t = (target or "").strip()
-    if "://" in t:
-        return (urllib.parse.urlparse(t).hostname or "").lower()
-    return t.split("/")[0].split(":")[0].lower()
+    if not t or any(ch <= " " or ch == "\\" or ch == "\x7f" for ch in t):
+        return None
+    url = t if "://" in t else f"http://{t}"
+    try:
+        u = urllib.parse.urlsplit(url)
+        port = u.port
+    except ValueError:
+        return None
+    if u.scheme.lower() not in ("http", "https") or "@" in u.netloc:
+        return None
+    host = (u.hostname or "").lower()
+    if not host:
+        return None
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        if not _HOST_RE.match(host):
+            return None
+    return host, (str(port) if port else None)
+
+
+def host_of(target: str) -> str:
+    """Host portion of a URL / host:port / bare host; ``""`` for a target that is refused (see ``_parts``)."""
+    parts = _parts(target)
+    return parts[0] if parts else ""
 
 
 def port_of(target: str) -> str | None:
     """Explicit port from a URL / host:port, else None."""
-    t = (target or "").strip()
-    if "://" in t:
-        p = urllib.parse.urlparse(t).port
-        return str(p) if p else None
-    seg = t.split("/")[0]
-    if ":" in seg:
-        pt = seg.rsplit(":", 1)[1]
-        return pt if pt.isdigit() else None
-    return None
+    parts = _parts(target)
+    return parts[1] if parts else None
 
 
 def load_allowlist(env: str | None = None) -> list[str]:
@@ -159,6 +183,8 @@ class DeploymentScanner:
         return {t: bool(shutil.which(t)) for t in self.TOOLS}
 
     def _guard(self, target: str) -> None:
+        if not host_of(target):
+            raise OutOfScopeError("the target is not a host, host:port or http(s) URL this scanner accepts — refusing to scan (fail-closed)")
         if not in_scope(target, self.allowlist):
             raise OutOfScopeError(
                 f"{host_of(target)!r} is not in SCAN_ALLOWLIST — refusing to scan (fail-closed)")
@@ -294,6 +320,7 @@ ACTIVE_PROFILES = {"web-active", "full"}
 
 
 def _as_url(target: str) -> str:
+    target = (target or "").strip()
     return target if "://" in target else f"http://{target}"
 
 

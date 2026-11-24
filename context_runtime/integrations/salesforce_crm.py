@@ -42,6 +42,25 @@ def token_present() -> bool:
     return bool(cid and secret and instance)
 
 
+def _soql_text(value: object) -> str:
+    """``value`` as the inside of a SOQL string literal: the backslash and both quotes escaped, control characters dropped."""
+    text = "".join(ch for ch in str(value) if ch >= " ")
+    return text.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
+
+
+def _soql_like(value: object) -> str:
+    """The same, for the operand of ``LIKE``: its two wildcards are escaped too, so the value matches only itself."""
+    return _soql_text(value).replace("%", "\\%").replace("_", "\\_")
+
+
+def _record_id(value: object) -> str:
+    """A Salesforce record id (15 or 18 letters and digits). Anything else would be read as part of the request path."""
+    text = str(value or "")
+    if len(text) not in (15, 18) or not text.isascii() or not text.isalnum():
+        raise SalesforceError("not a Salesforce record id")
+    return text
+
+
 class SalesforceCRM:
     """Thin client over the Salesforce Account API. Fetches a client-credentials token on first use and
     reuses it (re-fetching on a 401)."""
@@ -95,16 +114,18 @@ class SalesforceCRM:
 
     def search_account(self, *, domain: str | None = None, name: str | None = None) -> dict | None:
         fields = ", ".join(_ACCOUNT_FIELDS)
+        # ``domain`` and ``name`` arrive from a tool call or from lead data: they are values, never query text
         if domain:
-            where = f"Website LIKE '%{domain}%'"
+            where = f"Website LIKE '%{_soql_like(domain)}%'"
         elif name:
-            where = f"Name = '{name}'"
+            where = f"Name = '{_soql_text(name)}'"
         else:
             return None
         rows = self.query(f"SELECT {fields} FROM Account WHERE {where} LIMIT 1")
         return rows[0] if rows else None
 
     def get_account(self, account_id: str) -> dict:
+        _record_id(account_id)
         return self._request("GET", f"/services/data/{_API_VERSION}/sobjects/Account/{account_id}")
 
     def create_account(self, fields: dict) -> str:
@@ -112,6 +133,7 @@ class SalesforceCRM:
         return res.get("id", "")
 
     def update_account(self, account_id: str, fields: dict) -> dict:
+        _record_id(account_id)
         # Salesforce PATCH returns 204 No Content on success
         self._request("PATCH", f"/services/data/{_API_VERSION}/sobjects/Account/{account_id}", fields)
         return {"id": account_id, "updated": True}

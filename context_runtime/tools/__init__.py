@@ -29,6 +29,7 @@ from .authz import (
     resolve_authorizer,
 )
 from .actions import (
+    INERT_MODULES,
     INERT_ROOTS,
     MIN_DELEGATED_CLASS,
     Delegated,
@@ -48,5 +49,5 @@ __all__ = [
     "EXECUTION_MODE_ENV", "DIAGNOSTIC_REASON_ENV", "EXECUTE", "DIAGNOSTIC",
     "resolve_action",
     "PureRead", "pure_read",
-    "delegated", "Delegated", "opaque_callees", "INERT_ROOTS", "MIN_DELEGATED_CLASS",
+    "delegated", "Delegated", "opaque_callees", "INERT_ROOTS", "INERT_MODULES", "MIN_DELEGATED_CLASS",
 ]
