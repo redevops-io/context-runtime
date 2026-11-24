@@ -41,7 +41,7 @@ def _computed(args):
 
 def _path(args):
     from pathlib import Path
-    Path(args["p"]).open("w").close()
+    Path(args["p"]).open("w", encoding="utf-8").close()
 
 
 def _alias(args):
