@@ -38,7 +38,8 @@ def test_every_observation_says_who_produced_it(tmp_path):
     who = [e["provenance"] for e in _entries(b)]
     assert who == [{"source": "verifier", "run_id": "r1"}, {"source": "user-feedback", "principal": "alice"}, {"source": "unattributed"}]
     assert ledger.same_learning(ledger.rebuild(_entries(b)), b.stats)
-    assert oct(os.stat(b.ledger_path).st_mode & 0o777) == "0o600"
+    if os.name == "posix":                                     # Windows has no owner/group/other bits to set or read
+        assert oct(os.stat(b.ledger_path).st_mode & 0o777) == "0o600"
 
 
 def test_the_ledger_takes_no_request_data(tmp_path):
