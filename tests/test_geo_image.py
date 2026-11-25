@@ -112,3 +112,8 @@ def test_tag_policy_source_checkout_and_signing():
     for name in ("Log in to GHCR", "Build and push", "Sign the image by digest", "Attest the SBOM"):
         block = WF.split(f"- name: {name}", 1)[1].split("- name:", 1)[0]
         assert "if: env.PUBLISH == 'true'" in block, name
+
+
+def test_the_static_job_runs_without_the_repository_conftest():
+    """It installs only pytest; the conftest needs the runtime and its dependencies."""
+    assert "pytest tests/test_geo_image.py --noconftest" in WF
