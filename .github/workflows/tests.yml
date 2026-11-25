@@ -47,7 +47,19 @@ jobs:
           # Download and run a small real ONNX embedding model in the vector-parity test (second network use).
           CR_TEST_PARITY_MODEL: "1"
           HF_HUB_DISABLE_SYMLINKS_WARNING: "1"
-        run: python -X warn_default_encoding -m pytest tests -q -rs
+        run: python -X warn_default_encoding -m pytest tests -q -rs --junitxml="${{ runner.temp }}/context-runtime-tests.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@v0.4.12
+        with:
+          junit: ${{ runner.temp }}/context-runtime-tests.xml
+          project: context-runtime
+          suite: unit
+          platform: linux-x64
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
 
   # Native-OS lanes: the same suite and install recipe as the Ubuntu job, on GitHub-hosted Windows and
   # macOS (Apple Silicon; macOS 14 images are being retired, so the lanes use macos-15 and macos-26) runners. They are
@@ -91,7 +103,19 @@ jobs:
           # Download and run a small real ONNX embedding model in the vector-parity test (second network use).
           CR_TEST_PARITY_MODEL: "1"
           HF_HUB_DISABLE_SYMLINKS_WARNING: "1"
-        run: python -X warn_default_encoding -m pytest tests -q -rs
+        run: python -X warn_default_encoding -m pytest tests -q -rs --junitxml="${{ runner.temp }}/context-runtime-tests.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@v0.4.12
+        with:
+          junit: ${{ runner.temp }}/context-runtime-tests.xml
+          project: context-runtime
+          suite: unit
+          platform: windows-x64
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
 
   pytest-macos:
     name: "pytest (macos-15)"
@@ -128,7 +152,19 @@ jobs:
           # Download and run a small real ONNX embedding model in the vector-parity test (second network use).
           CR_TEST_PARITY_MODEL: "1"
           HF_HUB_DISABLE_SYMLINKS_WARNING: "1"
-        run: python -X warn_default_encoding -m pytest tests -q -rs
+        run: python -X warn_default_encoding -m pytest tests -q -rs --junitxml="${{ runner.temp }}/context-runtime-tests.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@v0.4.12
+        with:
+          junit: ${{ runner.temp }}/context-runtime-tests.xml
+          project: context-runtime
+          suite: unit
+          platform: macos-15-arm64
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
 
   # The newest Apple Silicon image GitHub offers today (macos-latest points here); macos-15 above stays as well.
   pytest-macos-26:
@@ -166,4 +202,16 @@ jobs:
           # Download and run a small real ONNX embedding model in the vector-parity test (second network use).
           CR_TEST_PARITY_MODEL: "1"
           HF_HUB_DISABLE_SYMLINKS_WARNING: "1"
-        run: python -X warn_default_encoding -m pytest tests -q -rs
+        run: python -X warn_default_encoding -m pytest tests -q -rs --junitxml="${{ runner.temp }}/context-runtime-tests.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@v0.4.12
+        with:
+          junit: ${{ runner.temp }}/context-runtime-tests.xml
+          project: context-runtime
+          suite: unit
+          platform: macos-26-arm64
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
