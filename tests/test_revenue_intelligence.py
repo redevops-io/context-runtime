@@ -159,3 +159,13 @@ def test_governor_provider_storm_counts_distinct_accounts():
                    "outcome": "correct"} for _ in range(20)]
     findings = GtmPopulationGovernor(DEFAULT_POPULATION_RULES, mode="OBSERVE").evaluate(spammy_one)
     assert "expensive-provider storm" not in {f.rule for f in findings}
+
+
+def test_no_outreach_holds_for_a_call_through_the_registry_even_when_an_approver_says_yes(local_run):
+    """The switch lived in the tenant's send_outreach method only: a model's tool call or a mounted console reaches the
+    tool through the registry, where an approving approver was then enough to send under NO_OUTREACH."""
+    t = RevenueIntelligenceTenant(_fixtures(), approver=lambda spec: True, no_outreach=True)
+    direct = t.registry.run("outreach_send", {"account_id": "c2"})
+    assert direct.ok is False and "NO_OUTREACH" in direct.text and not (direct.data or {}).get("sent")
+    t.no_outreach = False                                          # the switch is read at call time
+    assert t.registry.run("outreach_send", {"account_id": "c2"}).data.get("sent") is True

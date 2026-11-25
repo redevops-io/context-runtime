@@ -150,7 +150,14 @@ class PrepareOutreachTool:
 
 
 class SendOutreachTool:
-    """Send outreach — SIDE-EFFECTING + APPROVAL-REQUIRED, and denied outright under NO_OUTREACH."""
+    """Send outreach — SIDE-EFFECTING + APPROVAL-REQUIRED, and denied outright under NO_OUTREACH.
+
+    The NO_OUTREACH switch is enforced HERE, in the tool. It used to live only in the tenant's ``send_outreach``
+    method, so anything that reached the tool through the registry (a model's tool call, a mounted console) met the
+    approval gate and not the switch: with an approver that says yes, mail left under NO_OUTREACH."""
+
+    def __init__(self, no_outreach=None):
+        self.no_outreach = no_outreach or (lambda: False)
 
     def spec(self) -> ToolSpec:
         return ToolSpec(name="outreach_send", description="Send an outreach message.",
@@ -163,6 +170,8 @@ class SendOutreachTool:
                         action="write")
 
     def run(self, args: dict) -> ToolResult:
+        if self.no_outreach():
+            return ToolResult(ok=False, data={"denied": True}, text="denied by NO_OUTREACH policy")
         return ToolResult(ok=True, data={"sent": True, "account_id": args.get("account_id")},
                           text=f"sent to {args.get('account_id')}")
 
@@ -269,6 +278,10 @@ class RevenueIntelligenceTenant:
         self.registry = registry or self._default_registry(
             fixtures, approver, crm_tool, authorizer=authorizer, local_trust=local_trust,
             local_trust_reason=local_trust_reason)
+        # the switch is read by the tool at call time, whoever calls it (a registry the caller brought included)
+        for _tool in getattr(self.registry, "_tools", {}).values():
+            if isinstance(_tool, SendOutreachTool):
+                _tool.no_outreach = lambda: self.no_outreach
         self.external_spend = 0.0
         self.events: list[dict] = []   # per-enrichment trace, for the population governor (arm G)
         self._pending: dict[str, tuple[Plan, ProviderBundle, str]] = {}

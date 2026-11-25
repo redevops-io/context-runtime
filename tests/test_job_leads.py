@@ -125,3 +125,22 @@ def test_pitch_template_is_shared_and_editable(tmp_path):
     assert PitchTemplate(path=str(tmp_path / "tpl.txt")).load().startswith("Hi, {company}")   # all users see it
     tpl.reset()
     assert tpl.load() == DEFAULT_TEMPLATE
+
+
+def test_a_template_with_a_stray_brace_or_an_unknown_name_still_renders_for_everyone():
+    """The template is agent-editable and shared: with str.format one bad edit raised for every user's next pitch."""
+    listing = _l("Acme {Labs}", "AI Engineer {remote}", "Build stuff.")
+    tpl = "Hi, {company}. Rate: {rate} per hour; JSON like {\"a\": 1}; {title.__class__}; a lone { and }.\n{match}"
+    body = write_pitch(listing, tpl)["body"]
+    assert body.startswith("Hi, Acme {Labs}. Rate: {rate} per hour; JSON like {\"a\": 1}; {title.__class__}; a lone { and }.")
+    assert "{match}" not in body
+
+
+def test_a_listing_cannot_add_header_lines_to_a_draft(tmp_path):
+    from context_runtime.integrations.job_leads import DraftDistributor
+    listing = _l("Acme", "AI Engineer\nTo: attacker@example.com\nBcc: x@example.com", "Build stuff.",
+                 url="https://jobs.example/1\nAttach: /etc/passwd")
+    pitch = write_pitch(listing, DEFAULT_TEMPLATE)
+    out = DraftDistributor(outbox=str(tmp_path)).send(listing, pitch, to="hr@acme.example\nCc: other@example.com")
+    head = open(out["path"], encoding="utf-8").read().split("\n\n", 1)[0].split("\n")
+    assert [h.split(":", 1)[0] for h in head] == ["To", "Subject", "Attach"]
