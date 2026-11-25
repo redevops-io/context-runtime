@@ -141,3 +141,43 @@ def test_mcp_unknown_profile(local_run):
         assert (r.data or {}).get("error") and "profile" in r.data["error"].lower()
     finally:
         client.close()
+
+
+# ── scope: the host that is checked is the host that is scanned ─────────────
+@pytest.mark.parametrize("target", [
+    "vibexgen.io:80@other.example",                 # the part before the @ is a user name; the host is other.example
+    "vibexgen.io:x@other.example/path",
+    "https://vibexgen.io@other.example/",
+    "https://vibexgen.io:443@other.example/",
+    "http://other.example\\.vibexgen.io/",          # a browser-style parser reads the backslash as a slash
+    "http://other.example\\@vibexgen.io/",
+    "--script=x.vibexgen.io",                       # a tool would read this as an option
+    "-iLtargets.vibexgen.io",
+    "vibexgen.io other.example",
+    "vibexgen.io\tother.example",
+    "vibexgen.io\nother.example",
+    "ftp://vibexgen.io/",
+    "file://vibexgen.io/etc/passwd",
+    "vibexgen.io:notaport",
+    "http://[vibexgen.io",
+    "",
+])
+def test_a_target_whose_host_cannot_be_read_one_way_only_is_out_of_scope_and_never_reaches_a_tool(target, monkeypatch):
+    assert in_scope(target, ALLOW) is False
+    assert host_of(target) == ""
+    scanner = DeploymentScanner(live=True, allowlist=ALLOW)
+    monkeypatch.setattr(scanner, "_run", lambda *a, **k: pytest.fail(f"a process was started for {target!r}"))
+    for scan in (scanner.nmap_scan, scanner.nuclei_scan, scanner.zap_baseline, scanner.zap_active):
+        with pytest.raises(OutOfScopeError):
+            scan(target)
+
+
+@pytest.mark.parametrize("target,host", [
+    ("vibexgen.io", "vibexgen.io"), ("vibexgen.io:8443", "vibexgen.io"), ("https://app.vibexgen.io/login?next=/a@b", "app.vibexgen.io"),
+    ("192.168.40.105:8230", "192.168.40.105"), ("http://192.168.40.105/x", "192.168.40.105"), ("  VIBEXGEN.io  ", "vibexgen.io"),
+])
+def test_an_ordinary_target_is_still_in_scope_and_the_url_given_to_a_tool_has_the_checked_host(target, host):
+    import urllib.parse
+    from context_runtime.integrations.runtime_scan_engine import _as_url
+    assert in_scope(target, ALLOW) is True and host_of(target) == host
+    assert urllib.parse.urlsplit(_as_url(target)).hostname == host

@@ -102,9 +102,25 @@ _BARE_TRUTHY = frozenset({"1", "true", "t", "yes", "y", "on", "enable", "enabled
 #: someone typed is a label ("SEC-41", "checked", "vendor") and a later reader has nothing to check.
 _MIN_SENTENCE = 24
 
+#: The modules behind :data:`INERT_ROOTS`, by the name an ``import`` statement spells. An import inside the
+#: callable binds a name in its source, and a bound name used to count as visible: ``import subprocess`` two
+#: lines above ``subprocess.getoutput(...)`` made the call look local. What a name is bound TO decides, so an
+#: import makes its name visible only when the module is one of these.
+INERT_MODULES = frozenset({
+    "json", "re", "math", "string", "textwrap", "datetime", "collections", "itertools", "typing",
+    "dataclasses", "hashlib", "base64", "urllib.parse",
+})
+
+#: Builtins that reach code or objects by a name computed at run time, or outside the process. A sweep that
+#: reads names cannot follow them, so calling one is an opaque callee, not an inert builtin.
+_REFLECTIVE_BUILTINS = frozenset({
+    "getattr", "setattr", "delattr", "__import__", "eval", "exec", "compile", "globals", "locals", "vars",
+    "open", "input", "breakpoint", "help", "memoryview",
+})
+
 #: Names that need no provenance because calling them cannot reach outside the process. Derived, not typed
-#: out, so the list cannot drift from the interpreter's own answer.
-_BUILTINS = frozenset(dir(builtins))
+#: out, so the list cannot drift from the interpreter's own answer; the reflective ones are taken back out.
+_BUILTINS = frozenset(dir(builtins)) - _REFLECTIVE_BUILTINS
 
 
 @dataclass(frozen=True)
@@ -241,7 +257,10 @@ def opaque_callees(fn: Callable[[dict], object]) -> tuple[str, ...]:
     """What ``fn`` calls that this module cannot see inside — the delegation a sink sweep is blind to.
 
     A call is visible when its root is a parameter or a local of ``fn``, a name bound inside its own body, a
-    builtin, or an entry of :data:`INERT_ROOTS`. Anything else — a client built at module scope, an object
+    builtin that is not reflective, or an entry of :data:`INERT_ROOTS`. A name bound by an ``import`` inside the
+    callable is visible only when the module is one of :data:`INERT_MODULES`: the statement is in the source,
+    the module it names is not. A callee that is computed (``getattr(x, name)(...)``) is never visible.
+    Anything else — a client built at module scope, an object
     closed over by a factory, a method on an injected session — is where the effect of the call goes, and this
     file has no way to know what it is. An unreadable callable is reported as one opaque callee rather than as
     zero, because "could not look" and "found nothing" have to stay different answers.
@@ -257,7 +276,13 @@ def opaque_callees(fn: Callable[[dict], object]) -> tuple[str, ...]:
     except SyntaxError:
         return ("<unparseable source>",)
     code = getattr(fn, "__code__", None) or getattr(getattr(fn, "__func__", None), "__code__", None)
-    bound = set(getattr(code, "co_varnames", ()))
+    imported: set[str] = set()
+    for node in ast.walk(tree):                          # the names an import inside the callable binds
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            imported.update((a.asname or a.name.split(".")[0]) for a in node.names)
+    # co_varnames lists every local, the imported ones included: they are graded by what they import, below
+    bound = set(getattr(code, "co_varnames", ())) - imported
+    imported = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             bound.add(node.id)
@@ -267,17 +292,36 @@ def opaque_callees(fn: Callable[[dict], object]) -> tuple[str, ...]:
             if args is not None:
                 bound.update(a.arg for a in (list(getattr(args, "posonlyargs", [])) + list(args.args)
                                              + list(args.kwonlyargs)))
-        elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            bound.update((a.asname or a.name.split(".")[0]) for a in node.names)
+        elif isinstance(node, ast.Import):
+            for a in node.names:
+                # ``import urllib.parse`` binds ``urllib``, through which every other submodule is reachable:
+                # only the aliased or the undotted form binds a name that means the inert module and nothing else
+                inert = a.name in INERT_MODULES and (a.asname is not None or "." not in a.name)
+                (bound if inert else imported).add(a.asname or a.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            inert = node.level == 0 and (node.module or "") in INERT_MODULES
+            for a in node.names:
+                (bound if inert and a.name != "*" else imported).add(a.asname or a.name)
         elif isinstance(node, ast.arg):
             bound.add(node.arg)
-    invisible = _BUILTINS | INERT_ROOTS | bound
+    # a name imported from anywhere else is opaque even where the same name is also assigned: the import wins
+    invisible = (_BUILTINS | INERT_ROOTS | bound) - imported
     found: set[str] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        root = (_receiver_name(node.func) if isinstance(node.func, ast.Attribute)
-                else node.func.id if isinstance(node.func, ast.Name) else "")
+        func = node.func
+        if isinstance(func, ast.Attribute):
+            target = func.value
+            while isinstance(target, ast.Attribute):
+                target = target.value
+            # ``Path(p).open("w")`` and ``pick()(x)``: the receiver is itself the result of a call or a
+            # subscript. Its own call is graded where the walk meets it; a name is the only root this can read.
+            root = target.id if isinstance(target, ast.Name) else ("" if isinstance(target, (ast.Call, ast.Constant, ast.JoinedStr, ast.Subscript)) else "<computed callee>")
+        elif isinstance(func, ast.Name):
+            root = func.id
+        else:
+            root = "<computed callee>"                    # getattr(x, name)(...), table[key](...), (lambda: ...)()
         if root and root not in invisible:
             found.add(root)
     return tuple(sorted(found))

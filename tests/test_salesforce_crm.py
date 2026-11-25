@@ -106,3 +106,52 @@ def test_token_refresh_on_401(monkeypatch):
 @pytest.mark.skipif(not sf.token_present(), reason="no Salesforce credentials in env")
 def test_live_query_smoke():
     sf.SalesforceCRM().search_account(domain="example-does-not-exist-zzz.io")
+
+
+def _capture_soql(monkeypatch):
+    """A client whose query() records the SOQL it was asked to run."""
+    seen = []
+    client = sf.SalesforceCRM()
+    monkeypatch.setattr(client, "query", lambda soql: seen.append(soql) or [])
+    return client, seen
+
+
+@pytest.mark.parametrize("value", ["x' OR Name != '", "%' OR Id != '", "a\\' OR Name LIKE '%", "acme.io'--", "o'neil.example"])
+def test_a_domain_is_a_value_in_the_query_and_never_query_text(monkeypatch, value):
+    client, seen = _capture_soql(monkeypatch)
+    client.search_account(domain=value)
+    soql = seen[0]
+    head, tail = "SELECT " + ", ".join(sf._ACCOUNT_FIELDS) + " FROM Account WHERE Website LIKE '%", "%' LIMIT 1"
+    assert soql.startswith(head) and soql.endswith(tail)
+    literal = soql[len(head):len(soql) - len(tail)]
+    # inside the literal every quote, backslash and wildcard is escaped: reading it back gives the value and nothing else
+    out, i = [], 0
+    while i < len(literal):
+        assert literal[i] not in "'%_", f"an unescaped {literal[i]!r} ends or widens the literal: {soql}"
+        if literal[i] == "\\":
+            i += 1
+        out.append(literal[i])
+        i += 1
+    assert "".join(out) == value
+
+
+def test_a_name_with_a_quote_stays_inside_its_literal(monkeypatch):
+    client, seen = _capture_soql(monkeypatch)
+    client.search_account(name="O'Neil' OR Name != '")
+    assert seen[0].endswith("WHERE Name = 'O\\'Neil\\' OR Name != \\'' LIMIT 1")
+
+
+@pytest.mark.parametrize("bad", ["", "001", "../../sobjects/User/005000000000001", "001xx000003DGb2AA?x=1", "001xx000003DGb2A/"])
+def test_an_account_id_that_is_not_a_record_id_is_refused_before_any_request(monkeypatch, bad):
+    client = sf.SalesforceCRM()
+    monkeypatch.setattr(client, "_request", lambda *a, **k: pytest.fail("a request was made"))
+    with pytest.raises(sf.SalesforceError):
+        client.get_account(bad)
+    with pytest.raises(sf.SalesforceError):
+        client.update_account(bad, {"Name": "x"})
+
+
+def test_a_record_id_is_accepted(monkeypatch):
+    client = sf.SalesforceCRM()
+    monkeypatch.setattr(client, "_request", lambda method, path, body=None, **k: {"path": path})
+    assert client.get_account("001xx000003DGb2AAG")["path"].endswith("/sobjects/Account/001xx000003DGb2AAG")
