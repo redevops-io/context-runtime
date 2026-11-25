@@ -547,14 +547,19 @@ class LibreChatTenant:
         if entry is None:
             return 0.0
         plan, strategy, hits, ctx_key = entry
-        return self._learn(request, plan, strategy, SIGNAL_REWARDS.get(signal, 0.5), hits, ctx_key)
+        from ..learning.ledger import default_provenance
+        # the signal's NAME only, and only a known one: what a client sends is not copied into the ledger
+        with default_provenance(source=f"librechat-feedback:{signal if signal in SIGNAL_REWARDS else 'unknown'}"):
+            return self._learn(request, plan, strategy, SIGNAL_REWARDS.get(signal, 0.5), hits, ctx_key)
 
     def _learn(self, request: str, plan: Plan, strategy: RetrievalStrategy, score: float,
                hits: tuple[Hit, ...] = (), ctx_key: str | None = None) -> float:
         ctx = ctx_key or plan.intent.bucket
         quality, cost_norm, reward = reward_components(
             score, strategy, self.strategies, rel_signal=self._served_relevance(hits), beta=self.reward_beta)
-        self.bandit.update(ctx, strategy, reward)
+        from ..learning.ledger import default_provenance
+        with default_provenance(source="librechat-score"):      # a caller that did not say more (the judge path names itself)
+            self.bandit.update(ctx, strategy, reward)
         if self.quality_ledger is not None:   # keep quality apart from cost, for routing + EXPLAIN
             self.quality_ledger.observe(ctx, strategy.key, quality, cost_norm)
         self.runtime.estimator.observe(plan, Trace(
@@ -595,7 +600,9 @@ class LibreChatTenant:
         if entry is None:
             return 0.0
         plan, strategy, hits, ctx_key = entry
-        return self._learn(request, plan, strategy, score, hits, ctx_key)
+        from ..learning.ledger import default_provenance
+        with default_provenance(source="librechat-judgment"):
+            return self._learn(request, plan, strategy, score, hits, ctx_key)
 
     def handle(self, request: str, judge: Judge | None = None) -> tuple[ChatContext, float, float]:
         """Retrieve → judge → learn, in one call. Returns (context, judged_score, reward)."""
