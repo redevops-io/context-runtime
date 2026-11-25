@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.5.0 — 2026-11-25
+
+Upgrade notes: [docs/release-0.5.0.md](docs/release-0.5.0.md).
+
+- **Security fix (a policy-rejected plan was executed).** When no candidate was both within the hard limits and permitted, `KnapsackOptimizer` and `BanditOptimizer` fell back to all candidates and served a rejected plan as feasible; a candidate over a hard limit was never shown to the policy. The fallback is now limited to permitted candidates, and `PolicyDenied` is raised when there are none. **Breaking:** callers with a policy must handle it. (#99)
+- **Security fix (a cached plan was replayed against the policy).** `ContextRuntime.plan()` returned the cached plan whatever the policy now said, including one cached for another identity. A cached plan is replayed only if the policy permits it now. (#100)
+- **Learning:** a ledger with provenance for the shared bandit, per-context rollback and reset, a kill switch, and a registry of every learner; a corrupt policy file is set aside, not overwritten ([docs/LEARNERS.md](docs/LEARNERS.md)). (#98)
+- **Fix:** a reward that is not a finite number is refused, and a policy file poisoned by one is healed on load. (#97)
 - **Fix (CrowdSec decisions tool showed simulated bans when the configured CrowdSec could not be read).** `crowdsec_decisions` fell back to its built-in sample feed on any failure of the live local API and answered `ok` with three made-up banned addresses. A configured CrowdSec that is unreachable, refuses the key or answers something that is not a list of decisions is now an error with no decisions; "no decisions" (`null`) is an empty list. The sample feed is used only where no CrowdSec is configured, and every row and line of it says `simulated`.
 - **Vulnerability feeds: a failed feed can be told from an empty one.** `fetch_nvd`, `fetch_osv`, `fetch_osv_by_id`, `fetch_snyk` and `collect` take `errors=` (a list) and add one entry per feed that could not be read. Without it they answer `[]` as before, which is also what "no known vulnerabilities" looks like. Advisory and organisation ids are written into feed URLs as one path segment.
 
