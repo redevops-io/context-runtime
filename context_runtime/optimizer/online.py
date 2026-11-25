@@ -24,7 +24,7 @@ from dataclasses import replace
 
 from ..constraints.hard import feasible as _hard_feasible
 from ..integrations.bandit import EpsilonGreedyBandit
-from ..plugins.base import CostEstimator, PolicyProvider, TrustProvider
+from ..plugins.base import CostEstimator, PolicyProvider, TrustProvider, policy_permitted
 from ..types import Candidate, Goal, Intent, Plan, PlanScore
 
 
@@ -145,7 +145,9 @@ class BanditOptimizer:
                     ok, reason = False, f"policy: {pr}"
             (pool if ok else rejected).append((cand, sc) if ok else (cand, reason or "infeasible"))
 
-        eff_pool = pool or [(c, s) for c, s in scored]   # never fail to produce a plan
+        # never fail to produce a plan for a cost or latency limit (it is marked infeasible) - but exploration and
+        # exploitation both stay inside what policy permits
+        eff_pool = pool or [(c, replace(s, feasible=False)) for c, s in policy_permitted(scored, self.policy, goal)]
         m = len(eff_pool)
 
         # greedy (exploit) reference — argmax learned/estimated value

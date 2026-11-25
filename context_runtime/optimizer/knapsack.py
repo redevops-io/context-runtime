@@ -14,7 +14,7 @@ the enterprise layer injects concrete PolicyEngine / TrustLedger adapters.
 from __future__ import annotations
 
 from ..constraints.hard import feasible
-from ..plugins.base import CostEstimator, PolicyProvider, TrustProvider
+from ..plugins.base import CostEstimator, PolicyProvider, TrustProvider, policy_permitted
 from ..types import Candidate, Goal, Plan, PlanScore
 from dataclasses import replace
 
@@ -69,7 +69,9 @@ class KnapsackOptimizer:
             else:
                 rejected.append((cand, reason or "infeasible"))
 
-        pool = feasible_set or scored   # never fail to produce a plan; mark infeasible
+        # When nothing meets the hard constraints a plan is still produced, marked infeasible - but only from what POLICY
+        # permits. Falling back to all candidates served a policy-rejected plan, marked feasible.
+        pool = feasible_set or [(c, replace(s, feasible=False)) for c, s in policy_permitted(scored, self.policy, goal)]
         chosen, chosen_score = max(pool, key=self._utility(goal))
         for cand, sc in pool:
             if cand is not chosen:
