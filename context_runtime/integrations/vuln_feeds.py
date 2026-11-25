@@ -81,7 +81,16 @@ def _as_tuple(seq) -> tuple:
 # --------------------------------------------------------------------------- NVD
 
 
-def fetch_nvd(query: str, limit: int = 20) -> list[VulnRecord]:
+def _failed(source: str, exc: Exception, errors: list | None) -> list:
+    """A feed that could not be read. The answer is still an empty list, for callers written against that; but an empty list from a feed
+    that failed is not "no known vulnerabilities", so a caller that passes ``errors`` gets one entry per failed feed and can say so. The
+    entry carries the kind of failure only: no URL, no header, no response body."""
+    if errors is not None:
+        errors.append({"source": source, "error": type(exc).__name__})
+    return []
+
+
+def fetch_nvd(query: str, limit: int = 20, *, errors: list | None = None) -> list[VulnRecord]:
     """GET the NVD 2.0 keyword-search endpoint and normalize into VulnRecords."""
     url = (
         "https://services.nvd.nist.gov/rest/json/cves/2.0"
@@ -141,8 +150,8 @@ def fetch_nvd(query: str, limit: int = 20) -> list[VulnRecord]:
                 )
             )
         return out
-    except Exception:
-        return []
+    except Exception as e:  # noqa: BLE001
+        return _failed("nvd", e, errors)
 
 
 # --------------------------------------------------------------------------- OSV
@@ -216,7 +225,7 @@ def _osv_to_record(vuln: dict) -> VulnRecord | None:
     )
 
 
-def fetch_osv(package: str, ecosystem: str, limit: int = 50) -> list[VulnRecord]:
+def fetch_osv(package: str, ecosystem: str, limit: int = 50, *, errors: list | None = None) -> list[VulnRecord]:
     """POST the OSV.dev query endpoint for a package/ecosystem pair."""
     body = {"package": {"name": package, "ecosystem": ecosystem}}
     try:
@@ -227,31 +236,31 @@ def fetch_osv(package: str, ecosystem: str, limit: int = 50) -> list[VulnRecord]
             if rec is not None:
                 out.append(rec)
         return out
-    except Exception:
-        return []
+    except Exception as e:  # noqa: BLE001
+        return _failed("osv", e, errors)
 
 
-def fetch_osv_by_id(vuln_id: str) -> list[VulnRecord]:
+def fetch_osv_by_id(vuln_id: str, *, errors: list | None = None) -> list[VulnRecord]:
     """GET a single OSV advisory by id."""
     try:
-        data = _get_json(f"https://api.osv.dev/v1/vulns/{vuln_id}")
+        data = _get_json(f"https://api.osv.dev/v1/vulns/{urllib.parse.quote(str(vuln_id), safe='')}")
         rec = _osv_to_record(data)
         return [rec] if rec is not None else []
-    except Exception:
-        return []
+    except Exception as e:  # noqa: BLE001
+        return _failed("osv", e, errors)
 
 
 # --------------------------------------------------------------------------- Snyk
 
 
-def fetch_snyk(org_id: str = "", limit: int = 50) -> list[VulnRecord]:
+def fetch_snyk(org_id: str = "", limit: int = 50, *, errors: list | None = None) -> list[VulnRecord]:
     """Best-effort GET of Snyk org issues; returns [] immediately when SNYK_TOKEN is unset."""
     token = os.environ.get("SNYK_TOKEN")
     if not token:
         return []
     try:
         org = org_id or os.environ.get("SNYK_ORG_ID", "")
-        url = f"https://api.snyk.io/rest/orgs/{org}/issues?version=2024-01-01&limit={int(limit)}"
+        url = f"https://api.snyk.io/rest/orgs/{urllib.parse.quote(str(org), safe='')}/issues?version=2024-01-01&limit={int(limit)}"
         headers = {"Authorization": f"token {token}"}
         data = _get_json(url, headers=headers)
         out: list[VulnRecord] = []
@@ -292,8 +301,8 @@ def fetch_snyk(org_id: str = "", limit: int = 50) -> list[VulnRecord]:
                 )
             )
         return out
-    except Exception:
-        return []
+    except Exception as e:  # noqa: BLE001
+        return _failed("snyk", e, errors)
 
 
 # --------------------------------------------------------------------------- dedupe / ingest
@@ -356,14 +365,16 @@ def collect(
     nvd_query: str | None = None,
     osv_packages: list | None = None,
     snyk: bool = False,
+    errors: list | None = None,
 ) -> list[VulnRecord]:
-    """Run the requested fetchers and return a single deduped, combined list."""
+    """Run the requested fetchers and return a single deduped, combined list. Pass ``errors`` (a list) to learn which feeds could not be
+    read: without it a feed that failed and a feed with nothing to report both contribute nothing."""
     records: list[VulnRecord] = []
     if nvd_query:
-        records.extend(fetch_nvd(nvd_query))
+        records.extend(fetch_nvd(nvd_query, errors=errors))
     for pkg in osv_packages or []:
         name, ecosystem = pkg if isinstance(pkg, (tuple, list)) else (pkg, "")
-        records.extend(fetch_osv(name, ecosystem))
+        records.extend(fetch_osv(name, ecosystem, errors=errors))
     if snyk:
-        records.extend(fetch_snyk())
+        records.extend(fetch_snyk(errors=errors))
     return dedupe(records)
