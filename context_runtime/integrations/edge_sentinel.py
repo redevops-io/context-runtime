@@ -52,6 +52,10 @@ def extract_indicator(question: str) -> str | None:
 # ──────────────────────────── tools (the real seam) ────────────────────────────
 
 
+class CrowdSecUnavailable(RuntimeError):
+    """A configured CrowdSec local API could not be read. Carries no credential and no response body."""
+
+
 class CrowdSecDecisionsTool:
     """Read live CrowdSec decisions over the LAPI; simulated fallback when unset."""
 
@@ -69,24 +73,42 @@ class CrowdSecDecisionsTool:
                         action="read")
 
     def run(self, args: dict) -> ToolResult:
-        rows = self._live() if (self.lapi_url and self.bouncer_key) else self._sim(args.get("query", ""))
+        live = bool(self.lapi_url and self.bouncer_key)
+        if live:
+            try:
+                rows = self._live()
+            except CrowdSecUnavailable as e:
+                # A configured CrowdSec that cannot be read is an error, never a list of decisions: the simulated feed below names
+                # addresses, and handing those out here would tell an analyst that hosts are banned which no CrowdSec ever saw.
+                return ToolResult(ok=False, hits=[], data=[], error=str(e), text=f"CrowdSec could not be read: {e}. No decisions are shown.")
+        else:
+            rows = [dict(r, simulated=True) for r in self._sim(args.get("query", ""))]
         hits = [Hit(chunk_id=f"cs::{i}", filename=f"crowdsec:{r['type']}",
-                    text=f"{r['type']} {r['value']} — scenario {r['scenario']} (scope {r['scope']}, {r['duration']})",
+                    text=("[simulated] " if r.get("simulated") else "")
+                         + f"{r['type']} {r['value']} — scenario {r['scenario']} (scope {r['scope']}, {r['duration']})",
                     score=1.0, source="crowdsec", meta=r) for i, r in enumerate(rows)]
         return ToolResult(ok=True, hits=hits, data=rows,
-                          text=f"{len(rows)} CrowdSec decisions")
+                          text=f"{len(rows)} CrowdSec decisions" + ("" if live else " (simulated: no CrowdSec is configured)"))
 
     def _live(self) -> list[dict]:
         req = urllib.request.Request(f"{self.lapi_url}/v1/decisions",
                                      headers={"X-Api-Key": self.bouncer_key})
         try:
             with urllib.request.urlopen(req, timeout=10) as r:
-                data = json.loads(r.read().decode()) or []
-        except (urllib.error.URLError, json.JSONDecodeError):
-            return self._sim("")
+                data = json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            raise CrowdSecUnavailable(f"the local API answered {e.code}") from None
+        except (urllib.error.URLError, OSError) as e:
+            raise CrowdSecUnavailable(f"the local API is unreachable ({getattr(e, 'reason', e)})") from None
+        except ValueError:
+            raise CrowdSecUnavailable("the local API answered something that is not JSON") from None
+        if data is None:                                   # CrowdSec answers `null` for "no decisions"
+            data = []
+        if not isinstance(data, list):
+            raise CrowdSecUnavailable("the local API answered something that is not a list of decisions")
         return [{"type": d.get("type", "ban"), "value": d.get("value", "?"),
                  "scenario": d.get("scenario", "?"), "scope": d.get("scope", "Ip"),
-                 "duration": d.get("duration", "4h")} for d in data]
+                 "duration": d.get("duration", "4h")} for d in data if isinstance(d, dict)]
 
     @staticmethod
     def _sim(query: str) -> list[dict]:

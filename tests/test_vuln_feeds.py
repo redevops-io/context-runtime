@@ -155,3 +155,35 @@ def test_ingest_dedupes_and_upserts(monkeypatch):
     assert count == 1
     assert len(store.records) == 1
     assert store.records[0].cve_id == "CVE-2024-5555"
+
+
+# --------------------------------------------------------------------------- a feed that failed is not a feed with nothing to report
+
+
+def _boom(*a, **k):
+    raise OSError("network is unreachable")
+
+
+def test_a_failed_feed_is_reported_to_a_caller_that_asks_and_still_answers_an_empty_list(monkeypatch):
+    monkeypatch.setattr(vuln_feeds, "_get_json", _boom)
+    monkeypatch.setattr(vuln_feeds, "_post_json", _boom)
+    monkeypatch.setenv("SNYK_TOKEN", "t")
+    assert fetch_nvd("acme-lib") == [] and fetch_osv("acme-lib", "PyPI") == []            # unchanged for a caller that does not ask
+    errors: list = []
+    assert vuln_feeds.collect(nvd_query="acme-lib", osv_packages=[("acme-lib", "PyPI")], snyk=True, errors=errors) == []
+    assert [e["source"] for e in errors] == ["nvd", "osv", "snyk"] and all(e["error"] == "OSError" for e in errors)
+    assert "unreachable" not in str(errors) and "http" not in str(errors)                # the kind of failure only
+
+
+def test_a_feed_that_answers_with_nothing_reports_no_error(monkeypatch):
+    monkeypatch.setattr(vuln_feeds, "_get_json", lambda url, headers=None: {"vulnerabilities": []})
+    monkeypatch.setattr(vuln_feeds, "_post_json", lambda url, body, headers=None: {"vulns": []})
+    errors: list = []
+    assert vuln_feeds.collect(nvd_query="acme-lib", osv_packages=[("acme-lib", "PyPI")], errors=errors) == [] and errors == []
+
+
+def test_an_advisory_id_is_one_path_segment(monkeypatch):
+    seen = []
+    monkeypatch.setattr(vuln_feeds, "_get_json", lambda url, headers=None: seen.append(url) or {})
+    vuln_feeds.fetch_osv_by_id("GHSA-xxxx/../../query?x=1")
+    assert seen == ["https://api.osv.dev/v1/vulns/GHSA-xxxx%2F..%2F..%2Fquery%3Fx%3D1"]
