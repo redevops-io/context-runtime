@@ -140,7 +140,9 @@ def apply_feedback(optimizer, plan, answer: str, context: str, *, question: str 
     # feed the same loop as retrieval; learn_from_plan reads plan.extra['bandit'] (arm includes strategy)
     if hasattr(optimizer, "learn_from_plan"):
         optimizer.learn_from_plan(plan, reward)
-    event = OutcomeEvent.from_plan(plan, reward, verified=not signals["abstained"])
+    # "verified" means the answer PASSED this check. It used to be set for every answer that was not an abstention, so an
+    # answer scored unfaithful and sent up the escalation ladder was still recorded in the learning stream as verified.
+    event = OutcomeEvent.from_plan(plan, reward, verified=(not signals["abstained"]) and not should_escalate(reward))
     strat = next((s.params.get("strategy") for s in plan.chosen.steps if s.type == "reason"), None)
     bucket = bucket or (getattr(getattr(plan, "intent", None), "bucket", "") or "")
     escalate_to = next_strategy(bucket, strat) if should_escalate(reward) else None

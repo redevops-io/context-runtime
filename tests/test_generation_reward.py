@@ -89,3 +89,18 @@ def test_apply_feedback_flags_escalation_on_a_weak_answer():
     assert out["reward"] == verify.ABSTAIN_FLOOR
     assert out["escalate_to"] == "reason"          # the next (costlier) rung to shadow
     assert out["event"].arm == plan_key(decompose) and out["event"].reward == verify.ABSTAIN_FLOOR
+
+
+def test_an_answer_that_fails_the_check_is_not_recorded_as_verified():
+    """`verified` in the learning stream means the answer passed. It was set for every answer that was not an abstention, so an
+    unfaithful answer on its way up the escalation ladder was recorded as verified."""
+    opt = BanditOptimizer(_Est(), epsilon=0.0)
+    decompose = _cand("hybrid", "decompose")
+    plan = Plan(intent=Intent(bucket="multi_hop"), chosen=decompose, score=PlanScore(),
+                extra={"bandit": {"context": "multi_hop", "arm": plan_key(decompose)}})
+    bad = apply_feedback(opt, plan, "the moon is made of green cheese and pirates", _CTX, bucket="multi_hop")
+    assert bad["signals"]["abstained"] is False and bad["reward"] < verify.ESCALATE_BELOW and bad["escalate_to"] == "reason"
+    assert bad["event"].verified is False
+    good = apply_feedback(opt, plan, "token expiry", _CTX, bucket="multi_hop")
+    assert good["reward"] >= verify.ESCALATE_BELOW and good["event"].verified is True
+    assert apply_feedback(opt, plan, "NOT FOUND", _CTX, bucket="multi_hop")["event"].verified is False

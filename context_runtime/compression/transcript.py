@@ -15,6 +15,7 @@ import ``agent_harness`` at module load except for the tool contract.
 from __future__ import annotations
 
 import json
+import os
 import re
 import tempfile
 from dataclasses import dataclass, field
@@ -50,7 +51,10 @@ class Archive:
         # (or at interpreter exit), so no directory is leaked. An explicit directory is never removed.
         self._tmpdir = None if directory else tempfile.TemporaryDirectory(prefix="cr-archive-")
         self.directory = Path(directory) if directory else Path(self._tmpdir.name)
-        self.directory.mkdir(parents=True, exist_ok=True)
+        # Archived items are whole tool outputs and tool arguments: whatever a tool printed, credentials included. A directory
+        # this class creates is private to the user, and so is every file (an explicit directory used to be created 0755 and
+        # its files 0644 under the usual umask: readable by every local account). An existing directory keeps its mode.
+        self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         if retriever is None:
             from ..adapters.store_inmemory import InMemoryStore
             retriever = InMemoryStore(source="archive")
@@ -61,7 +65,9 @@ class Archive:
     def add(self, text: str, *, kind: str, tool: str, turn: int, derived_from: tuple[str, ...] = ()) -> str:
         aid = f"A{len(self.entries) + 1:04d}"
         path = self.directory / f"{aid}__{kind}__{re.sub(r'[^A-Za-z0-9_-]', '_', tool)[:40]}.txt"
-        path.write_text(text, encoding="utf-8")
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
         self.entries[aid] = ArchiveEntry(aid, kind, tool, turn, len(text), derived_from, str(path))
         docs = getattr(self.retriever, "docs", None)
         if isinstance(docs, list):                       # in-memory BM25: add passages directly
