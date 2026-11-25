@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.5.1 — 2026-11-25
+
+Notes: [docs/release-0.5.1.md](docs/release-0.5.1.md).
+
+- **Fix:** an answer that failed the generation check was recorded in the learning stream as verified. (#102)
+- **Security fix:** the compaction archive wrote whole tool outputs readable by every local account (`0755` directory, `0644` files). New directories are `0700` and files `0600`; existing ones keep their modes. (#102)
+- **CI:** the geo demo image publishes from a version tag again; the `v0.5.0` tag published none. (#103)
+
 ## 0.5.0 — 2026-11-25
 
 Upgrade notes: [docs/release-0.5.0.md](docs/release-0.5.0.md).
