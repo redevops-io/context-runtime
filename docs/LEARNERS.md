@@ -41,6 +41,18 @@ line) it refuses, because it could not say what the policy would have been.
 **A damaged policy file** is renamed to `<policy>.corrupt-<time>` with one warning and learning starts blank. If it cannot be
 renamed it is never overwritten.
 
+## Selecting from a Self-Improvement Memory
+
+`context_runtime/learning/sim_select.py` chooses what to show of an agent-harness `agent-harness.sim/1` record when the
+complete record, which the method (arXiv:2611.18856 §3.2) gives the optimizer, does not fit a budget. It is not a learner
+and stores nothing. When the record fits, it is returned unchanged. Otherwise it returns a view for one decision in which
+no problem disappears (shown, or listed with its failed predictions and broken tasks), a shown problem keeps every attempt
+and every measured field, regression evidence bearing on the decision is always shown, and relationships between problems
+are stated; if that does not fit it raises rather than drop evidence. `select()` also returns a report (tokens, what was
+compacted or omitted, relevant problems omitted) for comparing it with complete memory.
+
+**Not established:** that an optimizer does as well with a view as with the complete record. No optimizer run exists yet.
+
 ## Not built
 
 A record of lessons separate from the learned values; a promotion gate for anything stronger than a choice among declared
