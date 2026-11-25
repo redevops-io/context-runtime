@@ -24,16 +24,16 @@ def test_a_non_finite_reward_is_refused_and_changes_nothing(tmp_path, bad):
     with pytest.raises(ValueError, match="finite number"):
         b.update("ctx", A, bad)
     assert b.value("ctx", "a") == before
-    assert "NaN" not in path.read_text() and "Infinity" not in path.read_text()
+    assert "NaN" not in path.read_text(encoding="utf-8") and "Infinity" not in path.read_text(encoding="utf-8")
 
 
 def test_before_the_fix_one_nan_made_the_arm_nan_forever_and_a_poisoned_file_is_healed_on_load(tmp_path):
     path = tmp_path / "policy.json"
-    path.write_text('{"ctx": {"a": [3, NaN], "b": [2, 0.4]}}')            # what a NaN reward left on disk
+    path.write_text('{"ctx": {"a": [3, NaN], "b": [2, 0.4]}}', encoding="utf-8")            # what a NaN reward left on disk
     b = EpsilonGreedyBandit((A, B), epsilon=0.0, persist_path=str(path))
     n, mean = b.value("ctx", "a")
     assert n == 0 and mean == b.optimistic and math.isfinite(mean)       # forgotten, tried again as unseen
     assert b.value("ctx", "b") == (2, 0.4)
     b.update("ctx", A, 0.2)
-    n, mean = json.loads(path.read_text())["ctx"]["a"]
+    n, mean = json.loads(path.read_text(encoding="utf-8"))["ctx"]["a"]
     assert n == 1 and mean == pytest.approx(0.2)
