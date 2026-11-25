@@ -68,6 +68,34 @@ class CostOptimizer(Protocol):
 # imports the enterprise types — it depends only on the interface, exactly like every other plugin.
 
 
+class PolicyDenied(Exception):
+    """Policy rejected EVERY candidate, so there is no plan that may be executed. Raised by the optimizers instead of
+    falling back to one of the rejected plans. ``rejected`` holds (candidate, reason) for explaining why."""
+
+    def __init__(self, rejected) -> None:
+        self.rejected = tuple(rejected)
+        reasons = sorted({r for _, r in self.rejected})
+        super().__init__(f"no plan is permitted by policy ({len(self.rejected)} candidate(s) rejected: {'; '.join(reasons)[:300]})")
+
+
+def policy_permitted(scored, policy, goal):
+    """For an optimizer's fallback when nothing meets the HARD constraints: the candidates policy still permits. A candidate
+    that failed a cost or latency limit was never shown to policy, so every one is asked here. Raises ``PolicyDenied`` when
+    none is permitted. Without a policy everything is returned unchanged."""
+    if policy is None:
+        return list(scored)
+    permitted, denied = [], []
+    for cand, sc in scored:
+        reason = policy.feasible(cand, goal, sc)
+        if reason is None:
+            permitted.append((cand, sc))
+        else:
+            denied.append((cand, f"policy: {reason}"))
+    if scored and not permitted:
+        raise PolicyDenied(denied)
+    return permitted
+
+
 @runtime_checkable
 class PolicyProvider(Protocol):
     """Policy-Constrained Planning (Whitepaper v3): filter the feasible execution space BEFORE cost
