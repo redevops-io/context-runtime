@@ -60,3 +60,21 @@ def test_policy_summary_folds_allows(tmp_path):
 def test_backward_compatible_without_policy_or_commands():
     out = AgentConsole("T", "primer").respond("hello")           # no policy/commands ⇒ unchanged path
     assert "text" in out and "policy" not in out
+
+
+def test_the_panel_refuses_a_mount_or_endpoint_that_would_add_markup_or_script():
+    """``mount`` becomes element ids and ``endpoint`` a script string; the template escapes neither."""
+    import pytest
+    from context_runtime.integrations.agent_console import AgentConsole
+    c = AgentConsole.__new__(AgentConsole)
+    c.tenant, c.subtitle, c.suggestions = "Acme <b>", "sub", ["hi <i>"]
+    html = c.panel_html()
+    assert 'id="agent"' in html and 'EP="api/agent"' in html and "Acme &lt;b&gt;" in html and "hi &lt;i&gt;" in html
+    assert "esc(e.n)" in html                                        # an evidence index is escaped like every other field
+    assert 'EP="/t/1/api/agent?x=1&y=2"' in c.panel_html(mount="a-1", endpoint="/t/1/api/agent?x=1&y=2")
+    for mount in ('a"><script>alert(1)</script>', "1x", "", "a b"):
+        with pytest.raises(ValueError):
+            c.panel_html(mount=mount)
+    for endpoint in ('";alert(1);//', "</script><script>alert(1)</script>", "javascript:alert(1)", "a b", ""):
+        with pytest.raises(ValueError):
+            c.panel_html(endpoint=endpoint)

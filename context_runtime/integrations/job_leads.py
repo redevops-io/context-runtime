@@ -263,6 +263,22 @@ def _needs_resume(listing: JobListing) -> bool:
     return bool(re.search(r"\b(resume|cv|curriculum vitae)\b", listing.description, re.I))
 
 
+_PLACEHOLDER = re.compile(r"\{(title|company|match)\}")
+
+
+def render_template(template: str, **values: str) -> str:
+    """Fill ``{title}``, ``{company}`` and ``{match}`` and leave every other character as written. The template is
+    edited by agents and shared by all users: with ``str.format`` one stray brace or an unknown ``{name}`` raised for
+    every user's next pitch, and ``{title.__class__}`` walked attributes of the values. A value is inserted as text:
+    braces inside a listing's title are not read as placeholders."""
+    return _PLACEHOLDER.sub(lambda m: str(values.get(m.group(1), m.group(0))), template)
+
+
+def _one_line(text: str) -> str:
+    """A listing field as one line: a title from a job board must not start a new header line in a draft."""
+    return " ".join((text or "").split())
+
+
 def write_pitch(listing: JobListing, template: str | None = None, *, model=None,
                 resume_path: str | None = None) -> dict:
     """Render a listing-tailored pitch. ``{match}`` is written by the model from the listing when one is
@@ -271,9 +287,9 @@ def write_pitch(listing: JobListing, template: str | None = None, *, model=None,
     match = _DEFAULT_MATCH
     if model is not None and listing.description:
         match = _llm_match(listing, model) or match
-    body = tpl.format(title=listing.title.strip() or "AI role",
-                      company=listing.company.strip() or "your team", match=match)
-    subject = f"Re: your {listing.title.strip() or 'AI'} opening — an execution layer for enterprise AI"
+    body = render_template(tpl, title=_one_line(listing.title) or "AI role",
+                           company=_one_line(listing.company) or "your team", match=match)
+    subject = f"Re: your {_one_line(listing.title) or 'AI'} opening — an execution layer for enterprise AI"
     attach = (resume_path or os.getenv("RESUME_PATH", "")) if _needs_resume(listing) else ""
     return {"subject": subject, "body": body, "to_hint": listing.url, "attach": attach}
 
@@ -447,8 +463,9 @@ class DraftDistributor:
     def send(self, listing: JobListing, pitch: dict, *, to: str = "") -> dict:
         p = ensure_private_dir(self.outbox)
         fname = re.sub(r"[^a-z0-9]+", "-", listing.key().replace("|", "-")).strip("-") + ".txt"
-        doc = (f"To: {to or '(find via ' + (listing.url or 'company site') + ')'}\n"
-               f"Subject: {pitch['subject']}\n"
-               f"Attach: {pitch['attach'] or '(none)'}\n\n{pitch['body']}\n")
+        # every header is one line: the recipient, the subject and the attachment come from a listing or a caller
+        doc = (f"To: {_one_line(to) or '(find via ' + (_one_line(listing.url) or 'company site') + ')'}\n"
+               f"Subject: {_one_line(pitch['subject'])}\n"
+               f"Attach: {_one_line(pitch['attach']) or '(none)'}\n\n{pitch['body']}\n")
         atomic_write(p / fname, doc)
         return {"mode": "draft", "path": str(p / fname), "subject": pitch["subject"], "attach": pitch["attach"]}

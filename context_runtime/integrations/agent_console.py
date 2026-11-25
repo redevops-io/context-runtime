@@ -510,6 +510,12 @@ class AgentConsole:
         chips = "".join(
             f'<button class="ac-chip" onclick="acAsk(this.textContent)">{_esc(s)}</button>' for s in self.suggestions
         )
+        # ``mount`` becomes element ids and ``endpoint`` a script string: neither is escaped by the template, so a host
+        # page that passes a request value through must not be able to add markup or script with it.
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", mount or ""):
+            raise ValueError("mount must be an element id: a letter, then letters, digits, '_' or '-' (at most 64)")
+        if not re.fullmatch(r"[A-Za-z0-9_./:?&=%~+-]{1,512}", endpoint or "") or endpoint.lower().startswith(("javascript:", "data:")):
+            raise ValueError("endpoint must be a plain URL or path")
         return _PANEL_TMPL.format(
             mount=mount, endpoint=endpoint, tenant=_esc(self.tenant), subtitle=_esc(self.subtitle), chips=chips
         )
@@ -574,7 +580,7 @@ _PANEL_TMPL = """
     var html=tag+"<div>"+esc(d.text||"").replace(/\\n/g,"<br>")+"</div>";
     var ev=(d.evidence||[]);
     if(ev.length){{var rows=ev.map(function(e){{
-      if(e.text!=null)return '<div class="ac-ev">['+e.n+'] '+esc(e.text)+'</div>';
+      if(e.text!=null)return '<div class="ac-ev">['+esc(e.n)+'] '+esc(e.text)+'</div>';
       return '<div class="ac-ev">tool <b>'+esc(e.tool||"")+'</b> · gate: '+esc(e.gate||"")+' · '+(e.ok?"ok":"blocked")+'</div>';
     }}).join("");
       html+='<details class="ac-work"><summary>show work'+(d.model?" · "+esc(d.model):"")+'</summary>'+rows+'</details>';}}
