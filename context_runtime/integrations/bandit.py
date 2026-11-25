@@ -73,6 +73,12 @@ class EpsilonGreedyBandit:
 
     def update(self, ctx: str, arm, reward: float) -> None:
         import json
+        import math
+        # One NaN or infinite reward used to make the arm's mean NaN for good (every later update keeps it NaN), the
+        # snapshot written to disk carried it across restarts, and ``max`` over values that include NaN picks an arm by
+        # dictionary order. A reward that is not a finite number is a caller's defect: refuse it, learn nothing.
+        if isinstance(reward, bool) or not isinstance(reward, (int, float)) or not math.isfinite(reward):
+            raise ValueError("a bandit reward must be a finite number")
         with self._lock:
             arms = self._ctx(ctx)
             n, mean = arms[arm.key]
@@ -93,8 +99,17 @@ class EpsilonGreedyBandit:
             try:
                 with open(self.persist_path, encoding="utf-8") as fh:
                     raw = json.load(fh)
+                import math
+
+                def clean(v) -> list:
+                    # a value that is not a finite number (written before non-finite rewards were refused) is forgotten:
+                    # the arm starts again as unseen instead of staying NaN
+                    n, mean = v[0], v[1]
+                    if not all(isinstance(x, (int, float)) and math.isfinite(x) for x in (n, mean)):
+                        return [0.0, self.optimistic]
+                    return [n, mean]
                 with self._lock:
-                    self.stats = {ctx: {k: list(v) for k, v in arms.items()} for ctx, arms in raw.items()}
+                    self.stats = {ctx: {k: clean(v) for k, v in arms.items()} for ctx, arms in raw.items()}
             except Exception:
                 pass
 
