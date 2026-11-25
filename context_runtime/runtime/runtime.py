@@ -138,14 +138,25 @@ class ContextRuntime:
 
     def plan(self, goal, *, sources=None, constraints=None) -> Plan:
         g = self._coerce_goal(goal, sources, constraints)
-        # consult the (v0.1 null) plan cache
+        # the fresh selection runs first (with a policy it raises PolicyDenied when nothing is permitted), then the cache
         plan, _, intent = self._make_plan(g)
         key = build_key(intent, g)
         cached = self.plan_cache.get(key)
-        if cached is not None:
+        if cached is not None and self._may_replay(cached, plan, g):
             return replace(cached, cache="hit")
         self.plan_cache.put(key, plan)
         return plan
+
+    def _may_replay(self, cached: Plan, fresh: Plan, goal: Goal) -> bool:
+        """Whether a cached plan may be executed NOW. The cache key covers the goal, its sources, constraints, tenant and
+        permissions - not what policy decides. Policy can change while a process runs, and two identities can share a key,
+        so a replayed plan is asked again: policy must still permit it, and the optimizer must not rank it infeasible when
+        it has a feasible plan to offer. Anything else falls back to the fresh selection, which then replaces it."""
+        score = self.optimizer.score(cached.chosen, goal)
+        policy = getattr(self.optimizer, "policy", None)
+        if policy is not None and policy.feasible(cached.chosen, goal, score) is not None:
+            return False
+        return score.feasible or not fresh.score.feasible
 
     # ──────────────────────────── context assembly ────────────────────────────
 
