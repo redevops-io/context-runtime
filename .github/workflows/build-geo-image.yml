@@ -126,7 +126,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Static invariants (Dockerfile, workflow)
-        run: python3 -m pip install --quiet pytest && python3 -m pytest tests/test_geo_image.py -q -p no:cacheprovider
+        # --noconftest: these read files only, and this job installs nothing but pytest. The repo's conftest imports the
+        # runtime (and so agent-harness), which made the first tag build after that import fail before building anything.
+        run: python3 -m pip install --quiet pytest && python3 -m pytest tests/test_geo_image.py --noconftest -q -p no:cacheprovider
       - uses: docker/setup-buildx-action@v3
 
       # 1. Build for CI only (loaded, not pushed), then scan and smoke-test the exact image that would ship.
