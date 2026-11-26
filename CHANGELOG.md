@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.5.2 — 2026-11-25
+
+Notes: [docs/release-0.5.2.md](docs/release-0.5.2.md).
+
 - **Self-Improvement Memory selection** (`context_runtime.learning.sim_select`): when an `agent-harness.sim/1` record does not fit a budget, a view that keeps every problem visible, every attempt and measured field of a shown problem, and the regression evidence that bears on the decision; the complete record is returned when it fits. No claim that a view is as good as the complete record.
 
 ## 0.5.1 — 2026-11-25
