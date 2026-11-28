@@ -1,0 +1,13 @@
+claim_id: cr_exactness_dev_set
+claim: "With require_exact and the estimator fix, the shipped text-to-SQL path passes 11/17 of an internal development set where v0.5.2 passes 4/17; routing, not SQL quality, accounts for the difference."
+status: Internally reproduced
+code_commit: "7d047c980130da57f999412b70e5b12e99778c34"
+dataset: "17-question internal development set over three tabular public-record sources (not in this repository); strict token-boundary evaluator frozen before the final runs"
+protocol: "docs/exactness-and-completeness.md. v0.5.2: 2 runs (4/17, 4/17). Candidate: 3 runs (11/17 each). Temperature 0, same local model, same warehouse, same questions."
+model: "local 27B instruction model served on the same machine for every run"
+metrics: "pass count per run out of 17; tokens per run about 43,800 (v0.5.2) and 31,800 (candidate)"
+baselines: "v0.5.2 unmodified"
+reproduce: "NOT_IN_REPO: the development set and the harness are in the qualification repository; the 44 unit tests in tests/test_exactness_feasibility.py reproduce the routing behaviour without it"
+artifacts: "tests/test_exactness_feasibility.py"
+limitations: "Development set; no holdout result. One model. Remaining failures are model-written SQL errors. Says nothing about cost-based optimisation."
+review: "none; no external review"
