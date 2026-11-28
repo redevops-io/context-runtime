@@ -139,7 +139,24 @@ class ContextRuntime:
         # contextual bandit on it; the static optimizer ignores it.
         plan = self.optimizer.select(scored, goal, context=intent.bucket)
         plan = replace(plan, intent=intent)   # attach the real intent
-        return plan, scored, intent
+        return self._mark_representation_fallback(plan, goal), scored, intent
+
+    def _mark_representation_fallback(self, plan: Plan, goal: Goal) -> Plan:
+        """A question that reads as ANALYTICAL (an aggregate, a structured lookup) but is not served by a provider that declares ``exact`` for the method the plan chose is not an error
+        when exactness was not required, and it is not silent either: the plan says what was detected, what actually answers it and that the answer is not exact (a document store
+        returns top-k whatever the method label says). With ``require_exact`` / ``require_complete`` the request is refused instead (``NoEligiblePlan``), so this only ever marks the
+        unconstrained path. Mirrors the Go engine's ``plan.Extra["representation_fallback"]``."""
+        from ..planner import representations  # noqa: PLC0415
+        c = goal.constraints
+        if plan.intent.representation != "analytical" or c.require_exact or c.require_complete or not plan.chosen.steps:
+            return plan
+        method = plan.chosen.steps[0].params.get("method", "hybrid")
+        if representations.representation_for(method) == "analytical" and "exact" in self._method_capabilities(method):
+            return plan
+        used = representations.representation_for(method)
+        note = {"detected": "analytical", "used": "document" if used == "analytical" else used, "method": method, "exact": False,
+                "reason": "the question reads as analytical but no bound provider declares the exact capability for it; answered from document retrieval (top-k, not exact)"}
+        return replace(plan, extra={**plan.extra, "representation_fallback": note})
 
     def _method_capabilities(self, method: str) -> frozenset:
         """Capabilities the bound provider declares for a retrieval method. A router answers per method; a plain retriever declares the
