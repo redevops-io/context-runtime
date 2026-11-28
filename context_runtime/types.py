@@ -444,6 +444,8 @@ class RunResult:
     refresh: bool = False
     refresh_reason: str = ""
     limitation: "Limitation | None" = None
+    path: str = "full"                 # "fast": answered by the deterministic fast path (no plan selection, context build or model call)
+    narration: object | None = None    # verification.narration.NarrationReport when typed facts were checked
 
 
 @dataclass(frozen=True)

@@ -92,6 +92,12 @@ class HopRouterRetriever:
             return frozenset()
         return frozenset(getattr(self.analytical, "natural_query_methods", frozenset()))
 
+    @property
+    def typed_resolver(self):
+        """The bound analytical provider when it can resolve typed operations (the runtime's deterministic fast path), else None."""
+        a = self.analytical
+        return a if a is not None and hasattr(a, "resolve") and hasattr(a, "execute") else None
+
     def method_capabilities(self, method: str) -> frozenset:
         """What the retriever bound to ``method`` declares ("exact", ...). An unbound analytical/multimodal method has none."""
         if method in _ANALYTICAL_METHODS:
