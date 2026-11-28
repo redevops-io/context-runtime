@@ -24,7 +24,7 @@ Routing probe, 17 questions, shipped v0.5.2: every question whose representation
 
 ## Compatibility
 
-* Defaults change nothing **except** estimator precedence (D-1), which is a behaviour fix on the default path: a request that is analytical by representation is no longer costed by its temporal / multi-hop bucket. The Go port already behaves this way (`estimator` has no bucket branch).
+* Defaults change nothing **except** estimator precedence (D-1), which is a behaviour fix on the default path: a request that is analytical by representation is no longer costed by its temporal / multi-hop bucket. The Go port (`context-runtime-go` @ `47cd956`) does not have this defect, but only because its planner never routes to `sql`: its keyword head never yields the analytical representation and `MethodForRepresentation` maps it to `hybrid`, so on all 29 probe questions it chose `hybrid`. It has no exactness constraint either. That is a separate parity gap, tracked in the Go port, not covered by this change.
 * Test suite on the base commit: 1108 passed, 0 failed, 34 skipped. With this change: 1152 passed (1108 + 44 new), 0 failed, 34 skipped. Run with a clean environment (`env -i`).
 * `tests/test_exactness_feasibility.py` (44 tests) is cross-domain (finance, procurement, inventory, temporal) and names no customer or domain in the runtime. Each test fails when its change is reverted.
 
