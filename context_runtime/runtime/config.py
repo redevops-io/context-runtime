@@ -17,6 +17,7 @@ class Config:
     store: str = "inmemory"           # "inmemory" | "redevops_rag"
     default_tier: str = "local"
     top_k: int = 50
+    natural_question: bool = False    # True: reasoners are asked the user's own question instead of the normalised (sorted, de-duplicated) cache key
     final_k: int = 8
     target_tokens: int = 3000
     max_tokens: int | None = 120000

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+Notes: [docs/exactness-and-completeness.md](docs/exactness-and-completeness.md).
+
+- **Fix (an exact aggregate was costed as a temporal or multi-hop question).** `HeuristicEstimator` tested the bucket before the analytical representation, so `hybrid` top-k retrieval outranked `sql` for questions that need a computed answer. The representation is now evaluated first. Behaviour change on the default path.
+- **Fix (the retriever and the model were shown the plan-cache key as the question).** The normalised key is sorted and de-duplicated. Exactness-constrained requests, and any request with `Config.natural_question=True`, now carry the user's own question to the retriever and the reasoners. Other requests are unchanged.
+- **Feature:** `Constraints.require_exact` / `require_complete`. Feasibility (a provider that declares the `exact` capability) is checked before cost; with none, `NoEligiblePlan` / a typed `Limitation`, never a silent top-k answer. Defaults are off and plan-cache keys are unchanged when they are off.
+
 ## 0.5.2 — 2026-11-25
 
 Notes: [docs/release-0.5.2.md](docs/release-0.5.2.md).

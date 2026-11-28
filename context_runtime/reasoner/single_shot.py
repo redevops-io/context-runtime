@@ -22,7 +22,7 @@ class SingleShotReasoner:
 
     def reason(self, req: ReasonRequest) -> ModelResult:
         ctx = req.context
-        prompt = f"Context:\n{ctx.assembled_text}\n\nQuestion: {ctx.plan.intent.normalized or ctx.plan.id}"
+        prompt = f"Context:\n{ctx.assembled_text}\n\nQuestion: {getattr(ctx, 'question', None) or ctx.plan.intent.normalized or ctx.plan.id}"
         mreq = ModelRequest(
             messages=({"role": "user", "content": prompt},),
             capability=req.capability,

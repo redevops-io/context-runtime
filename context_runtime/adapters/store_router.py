@@ -85,6 +85,27 @@ class HopRouterRetriever:
                 out[name] = r.index(path)
         return out
 
+    @property
+    def natural_query_methods(self) -> frozenset:
+        """Methods whose bound retriever wants the user's own words (text-to-SQL), not the plan-cache key."""
+        if self.analytical is None:
+            return frozenset()
+        return frozenset(getattr(self.analytical, "natural_query_methods", frozenset()))
+
+    def method_capabilities(self, method: str) -> frozenset:
+        """What the retriever bound to ``method`` declares ("exact", ...). An unbound analytical/multimodal method has none."""
+        if method in _ANALYTICAL_METHODS:
+            r = self.analytical
+        elif method in _MULTIMODAL_METHODS:
+            r = self.multimodal
+        elif method in _TEMPORAL_METHODS:
+            r = self.temporal
+        else:
+            r = None
+        if r is None or not hasattr(r, "info"):
+            return frozenset()
+        return frozenset(c for c in r.info().capabilities if c not in _ANALYTICAL_METHODS | _MULTIMODAL_METHODS | _TEMPORAL_METHODS)
+
     def info(self) -> PluginInfo:
         caps = set()
         for r in (self.single_hop, self.graph, self.community, self.temporal,

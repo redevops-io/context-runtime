@@ -28,7 +28,7 @@ from .single_shot import SingleShotReasoner, _SYSTEM as _ANSWER_SYSTEM
 # --- 1. concrete multi-shot reasoner plugins ------------------------------------------------
 
 def _question(ctx) -> str:
-    return ctx.plan.intent.normalized or ctx.plan.id
+    return getattr(ctx, "question", None) or ctx.plan.intent.normalized or ctx.plan.id
 
 
 def _rollup(calls: list[ModelResult], final_text: str) -> ModelResult:

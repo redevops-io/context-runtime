@@ -42,6 +42,12 @@ class Constraints:
     # the enterprise overlay guarantees this from the authenticated Identity even if a caller forgets.
     tenant: str | None = None
     permissions: tuple[str, ...] = ()
+    # Execution-correctness requirements (hard, evaluated before any cost optimisation). Defaults keep every existing request unchanged.
+    #   require_exact:    the answer must be COMPUTED by an engine over the whole scope (aggregate, count, join), never estimated from the top-k of a
+    #                     retrieval. Only plans whose retrieval method is served by a provider that declares the "exact" capability are eligible.
+    #   require_complete: additionally, the evidence must not be cut at a row cap; a cut result is reported as incomplete, not summarised.
+    require_exact: bool = False
+    require_complete: bool = False
 
 
 SourceKind = Literal["docs", "code", "logs", "metrics", "api", "graph", "memory"]
@@ -399,6 +405,16 @@ class Verdict:
 
 
 @dataclass(frozen=True)
+class Limitation:
+    """A typed "cannot answer as required" result (instead of a prose guess). ``kind`` is one of: ``no_eligible_plan`` (no provider can
+    satisfy the exactness/completeness requirement), ``empty_exact_result`` (the exact query returned no rows), ``incomplete_evidence``
+    (the exact result was cut at a row cap)."""
+    kind: str
+    reason: str
+    detail: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class BuiltContext:
     """A Plan turned into assembled context + the graph to execute (SPEC §9)."""
 
@@ -407,6 +423,10 @@ class BuiltContext:
     hits: tuple[Hit, ...] = ()
     assembled_text: str = ""
     token_budget: dict[str, int] = field(default_factory=dict)
+    limitation: "Limitation | None" = None
+    # The user's own question, carried to the reasoners ONLY for exactness-constrained requests (or when Config.natural_question is on). Left None
+    # otherwise: reasoners then use plan.intent.normalized (the sorted, de-duplicated plan-cache key), exactly as before.
+    question: str | None = None
 
 
 @dataclass
@@ -423,6 +443,7 @@ class RunResult:
     freshness: float = 1.0
     refresh: bool = False
     refresh_reason: str = ""
+    limitation: "Limitation | None" = None
 
 
 @dataclass(frozen=True)

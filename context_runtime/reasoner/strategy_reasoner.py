@@ -28,7 +28,7 @@ class StrategyReasoner:
     def _one(self, req: ReasonRequest, *, temperature: float | None = None) -> ModelResult:
         s = self.strategy
         ctx = req.context
-        question = ctx.plan.intent.normalized or ctx.plan.id
+        question = getattr(ctx, "question", None) or ctx.plan.intent.normalized or ctx.plan.id
         prompt = f"Context:\n{ctx.assembled_text}\n\nQuestion: {question}"
         mreq = ModelRequest(
             messages=({"role": "user", "content": prompt},),
