@@ -161,3 +161,34 @@ def test_a_plain_retriever_declaring_exact_is_eligible_and_one_that_does_not_is_
     rt2 = ContextRuntime(models={t: CountingModel(tier=t) for t in _TIERS}, retriever=InMemoryStore(DOCS))
     with pytest.raises(NoEligiblePlan):
         rt2.plan(Goal(text="total sales per region", sources=(), constraints=Constraints(require_exact=True)))
+
+
+class _PromptSpy(CountingModel):
+    prompts: list = []
+
+    def complete(self, req):
+        _PromptSpy.prompts.append(req.messages[0]["content"])
+        return super().complete(req)
+
+
+def _run_with_spy(constraints, config=None):
+    _PromptSpy.prompts = []
+    kw = {"config": config} if config else {}
+    rt = ContextRuntime(models={t: _PromptSpy(tier=t) for t in _TIERS},
+                        retriever=HopRouterRetriever(single_hop=InMemoryStore(DOCS), graph=None, analytical=FakeAnalytical(), on_unbound="abstain"), **kw)
+    q = "As of 2024-06-30, how many open purchase orders existed and what was their total value?"
+    rt.run(Goal(text=q, sources=(), constraints=constraints))
+    return q, _PromptSpy.prompts[-1], rt.intent.analyze(Goal(text=q, sources=(), constraints=constraints)).normalized
+
+
+def test_exact_requests_ask_the_model_the_users_own_question():
+    q, prompt, _norm = _run_with_spy(Constraints(require_exact=True))
+    assert f"Question: {q}" in prompt                              # D-4: not the sorted token set
+
+
+def test_legacy_requests_still_see_the_normalised_question_unless_the_config_flag_is_on():
+    q, prompt, norm = _run_with_spy(Constraints())
+    assert f"Question: {norm}" in prompt and q not in prompt       # unchanged default behaviour
+    from context_runtime.runtime.config import Config
+    q2, prompt2, _ = _run_with_spy(Constraints(), config=Config(natural_question=True))
+    assert f"Question: {q2}" in prompt2

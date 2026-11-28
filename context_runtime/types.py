@@ -424,6 +424,9 @@ class BuiltContext:
     assembled_text: str = ""
     token_budget: dict[str, int] = field(default_factory=dict)
     limitation: "Limitation | None" = None
+    # The user's own question, carried to the reasoners ONLY for exactness-constrained requests (or when Config.natural_question is on). Left None
+    # otherwise: reasoners then use plan.intent.normalized (the sorted, de-duplicated plan-cache key), exactly as before.
+    question: str | None = None
 
 
 @dataclass

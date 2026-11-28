@@ -224,6 +224,8 @@ class ContextRuntime:
         return BuiltContext(
             plan=plan, graph=g, hits=tuple(hits),
             assembled_text=packed.text, token_budget=budget, limitation=limitation,
+            question=(goal.text if goal is not None and (self.config.natural_question or goal.constraints.require_exact
+                                                          or goal.constraints.require_complete) else None),
         )
 
     # ──────────────────────────── execution ────────────────────────────
