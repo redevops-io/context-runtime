@@ -20,6 +20,8 @@ from ..optimizer.knapsack import KnapsackOptimizer
 from ..plancache.cache import NullPlanCache, SnapshotPlanCache, build_key
 from ..planner.candidates import RuleCandidateGenerator
 from ..planner.intent import RuleIntentAnalyzer
+from ..plugins.base import NoEligiblePlan
+from ..types import Limitation
 from ..reasoner.single_shot import SingleShotReasoner
 from ..reasoner.strategies import reasoner_for
 from ..scheduler.schedule import TopoScheduler
@@ -129,12 +131,46 @@ class ContextRuntime:
     def _make_plan(self, goal: Goal):
         intent = self.intent.analyze(goal)
         cands = self.candidates.prune(self.candidates.generate(intent, goal), goal)
+        cands = self._exact_feasible(cands, goal)
         scored: list[tuple[Candidate, PlanScore]] = [(c, self.optimizer.score(c, goal)) for c in cands]
         # pass the intent bucket as the selection context — an online (Gen-4) optimizer keys its
         # contextual bandit on it; the static optimizer ignores it.
         plan = self.optimizer.select(scored, goal, context=intent.bucket)
         plan = replace(plan, intent=intent)   # attach the real intent
         return plan, scored, intent
+
+    def _method_capabilities(self, method: str) -> frozenset:
+        """Capabilities the bound provider declares for a retrieval method. A router answers per method; a plain retriever declares the
+        methods it serves plus any capability tokens in its ``info().capabilities``."""
+        per_method = getattr(self.retriever, "method_capabilities", None)
+        if per_method is not None:
+            return frozenset(per_method(method))
+        info = getattr(self.retriever, "info", None)
+        caps = frozenset(info().capabilities) if info is not None else frozenset()
+        return frozenset({"exact"}) & caps if method in caps else frozenset()
+
+    def _exact_feasible(self, cands, goal):
+        """Feasibility BEFORE cost: with require_exact / require_complete only plans whose retrieval method is served by a provider that
+        declares "exact" may be scored. If none exists the request fails with a typed NoEligiblePlan - never a top-k fallback."""
+        c = goal.constraints
+        if not (c.require_exact or c.require_complete):
+            return cands
+        methods = [x.steps[0].params.get("method", "hybrid") for x in cands]
+        ok = [x for x, m in zip(cands, methods) if "exact" in self._method_capabilities(m)]
+        if not ok and cands:
+            # The generator restricts candidates to the intent's representation. A caller that REQUIRES exactness has said the answer must
+            # be computed, so widen to every bound exact method (same plan shape, no rerank of an exact result) before giving up.
+            from ..planner import representations
+            from ..types import StepSpec
+            for m in representations.methods_for("analytical"):
+                if "exact" in self._method_capabilities(m):
+                    base = cands[0]
+                    steps = tuple(st for st in base.steps if st.type != "rerank")
+                    steps = (StepSpec("retrieve", {**steps[0].params, "method": m}),) + steps[1:]
+                    ok.append(replace(base, steps=steps))
+        if not ok:
+            raise NoEligiblePlan("no bound provider declares the 'exact' capability for any candidate retrieval method", sorted(set(methods)))
+        return ok
 
     def plan(self, goal, *, sources=None, constraints=None) -> Plan:
         g = self._coerce_goal(goal, sources, constraints)
@@ -167,7 +203,8 @@ class ContextRuntime:
         final_k = steps.get("rerank", {}).get("final_k", self.config.final_k)
         target_tokens = steps.get("compress", {}).get("target_tokens", self.config.target_tokens)
 
-        query = plan.intent.normalized or goal.text if goal else plan.intent.normalized
+        natural = goal is not None and method in getattr(self.retriever, "natural_query_methods", ())
+        query = goal.text if natural else (plan.intent.normalized or goal.text if goal else plan.intent.normalized)
         hits = self.retriever.search(query, k=top_k, method=method)
         if "rerank" in steps:
             hits = hits[:final_k]
@@ -176,16 +213,25 @@ class ContextRuntime:
         kept = sum(max(1, len(h.text) // 4) for h in hits)
         budget = {"keep": kept, "compress": packed.tokens, "drop": max(0, kept - packed.tokens)}
 
+        limitation = None
+        if goal is not None and (goal.constraints.require_exact or goal.constraints.require_complete):
+            if not hits:
+                limitation = Limitation("empty_exact_result", "the exact query returned no rows, so no value can be asserted", (method,))
+            elif goal.constraints.require_complete and any((h.meta or {}).get("at_row_cap") for h in hits):
+                limitation = Limitation("incomplete_evidence", "the exact result reached the provider's row cap and may be truncated", (method,))
+
         g = graphmod.build(plan.id, plan.chosen)
         return BuiltContext(
             plan=plan, graph=g, hits=tuple(hits),
-            assembled_text=packed.text, token_budget=budget,
+            assembled_text=packed.text, token_budget=budget, limitation=limitation,
         )
 
     # ──────────────────────────── execution ────────────────────────────
 
     def execute(self, ctx: BuiltContext, goal: Goal | None = None, *, as_of=None) -> RunResult:
         tb = traces.TraceBuilder(ctx.plan.id, goal.text if goal else ctx.plan.intent.normalized)
+        if ctx.limitation is not None:      # typed limitation: no model call, no prose answer
+            return RunResult(answer="", plan=ctx.plan, trace=tb.finalize(), limitation=ctx.limitation, freshness=ctx.plan.score.freshness)
 
         # schedule (decides when/where; recorded for inspection)
         t0 = traces.now()
@@ -283,7 +329,11 @@ class ContextRuntime:
 
     def run(self, goal, *, sources=None, constraints=None, as_of=None) -> RunResult:
         g = self._coerce_goal(goal, sources, constraints)
-        plan = self.plan(g)
+        try:
+            plan = self.plan(g)
+        except NoEligiblePlan as e:
+            tb = traces.TraceBuilder("no-plan", g.text)
+            return RunResult(answer="", plan=None, trace=tb.finalize(), limitation=Limitation("no_eligible_plan", e.reason, e.considered))
         ctx = self.build_context(plan, g)
         return self.verify(self.execute(ctx, g, as_of=as_of))
 

@@ -52,16 +52,17 @@ class HeuristicEstimator:
         # optimizer then picks the boosted specialist. Each branch mirrors a real engine choice.
         bucket, _risk = rules.classify(goal.text)
         want = representations.classify(bucket, goal.text)   # the representation the query needs
-        if bucket == "multi_hop":
+        if want == "analytical":
+            # aggregates / structured filters ("how many … per …"): only the DB retriever can compute them; document retrieval returns
+            # prose about the topic, not the number. Evaluated FIRST: the candidate generator already restricted candidates to this
+            # representation, so a "temporal" or "multi_hop" bucket must not shadow it (it used to, and `hybrid` then outranked `sql`).
+            recall = 0.9 if method in ("sql", "mongo", "elastic") else recall * 0.6
+        elif bucket == "multi_hop":
             # multi-hop reasoning: the answer is in the connections — HippoRAG reaches it. (vs redevops-rag)
             recall = 0.93 if method == "graph" else recall * 0.55
         elif bucket == "temporal":
             # point-in-time / what-changed / provenance: needs the bi-temporal store. (Graphiti vs document)
             recall = 0.9 if method == "temporal" else recall * 0.6
-        elif want == "analytical":
-            # aggregates / structured filters ("how many … per …"): only the DB retriever can compute
-            # them; document retrieval returns prose about the topic, not the number. (SQL/Mongo/Elastic)
-            recall = 0.9 if method in ("sql", "mongo", "elastic") else recall * 0.6
         elif want == "graph":
             # a graph-representation query that is NOT multi-hop reasoning = a deterministic ownership /
             # entity-link lookup → the property-graph traversal is exact where document retrieval only

@@ -187,6 +187,9 @@ _SQL_SYSTEM = (
 class AnalyticalRetriever:
     """RetrieverPlugin: NL question → guarded SQL → rows-as-Hits over a WarehouseBackend."""
 
+    # Text-to-SQL needs the user's own words (order, dates, ids): the runtime passes the goal text, not the plan-cache key, to these methods.
+    natural_query_methods = frozenset({"sql", "mongo", "elastic", "logs", "api"})
+
     def __init__(self, backend, model, *, max_rows: int = 100, sql_capability: str = "draft",
                  allowed_schemas=None):
         self.backend = backend      # WarehouseBackend: schema() + run_sql() + dialect()
@@ -219,7 +222,7 @@ class AnalyticalRetriever:
                 text=_row_text(row),
                 score=1.0,               # exact query results — rank is query order, not relevance
                 source=f"analytical:{dialect}",
-                meta={"row": row, "sql": sql, "method": method},
+                meta={"row": row, "sql": sql, "method": method, "at_row_cap": len(rows) >= self.max_rows},
             ))
         return hits
 
@@ -228,4 +231,4 @@ class AnalyticalRetriever:
 
     def info(self) -> PluginInfo:
         return PluginInfo(name="analytical", kind="retriever",
-                          capabilities=frozenset({"sql", "mongo", "elastic", "logs", "api"}))
+                          capabilities=frozenset({"sql", "mongo", "elastic", "logs", "api", "exact"}))

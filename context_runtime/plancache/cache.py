@@ -45,6 +45,8 @@ def build_key(intent: Intent, goal: Goal) -> PlanCacheKey:
     # only — two tenants with the same intent/sources/sensitivity shared a key, so tenant A's authorized
     # plan could be served to tenant B on the cache-HIT path (policy is evaluated on the MISS path only).
     # tenant/permissions default to (∅, empty) so single-tenant callers hash to a stable value.
+    if c.require_exact or c.require_complete:      # only when set, so every existing key is unchanged
+        envelope += f"|exact={c.require_exact}|complete={c.require_complete}"
     perms = ",".join(sorted(c.permissions))
     policy_fingerprint = _h(f"{c.tenant or '∅'}|{perms}|{c.sensitivity}")
     return PlanCacheKey(

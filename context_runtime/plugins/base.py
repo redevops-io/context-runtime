@@ -78,6 +78,16 @@ class PolicyDenied(Exception):
         super().__init__(f"no plan is permitted by policy ({len(self.rejected)} candidate(s) rejected: {'; '.join(reasons)[:300]})")
 
 
+class NoEligiblePlan(Exception):
+    """The request carries an execution-correctness requirement (``Constraints.require_exact`` / ``require_complete``) and NO candidate plan
+    can satisfy it with the bound providers. Raised by planning (like ``PolicyDenied``) instead of falling back to a plan that cannot meet
+    the requirement, e.g. a top-k document retrieval for an exact aggregate. ``considered`` lists the retrieval methods that were rejected."""
+
+    def __init__(self, reason: str, considered=()) -> None:
+        self.reason, self.considered = reason, tuple(considered)
+        super().__init__(f"no eligible plan: {reason} (considered: {', '.join(self.considered) or 'none'})")
+
+
 def policy_permitted(scored, policy, goal):
     """For an optimizer's fallback when nothing meets the HARD constraints: the candidates policy still permits. A candidate
     that failed a cost or latency limit was never shown to policy, so every one is asked here. Raises ``PolicyDenied`` when
