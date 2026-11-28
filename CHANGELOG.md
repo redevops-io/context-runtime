@@ -8,6 +8,10 @@ Notes: [docs/exactness-and-completeness.md](docs/exactness-and-completeness.md).
 - **Fix (the retriever and the model were shown the plan-cache key as the question).** The normalised key is sorted and de-duplicated. Exactness-constrained requests, and any request with `Config.natural_question=True`, now carry the user's own question to the retriever and the reasoners. Other requests are unchanged.
 - **Feature:** `Constraints.require_exact` / `require_complete`. Feasibility (a provider that declares the `exact` capability) is checked before cost; with none, `NoEligiblePlan` / a typed `Limitation`, never a silent top-k answer. Defaults are off and plan-cache keys are unchanged when they are off.
 
+- **Feature: typed-operation provider** (`context_runtime.adapters.store_typed`). The application registers typed, exact operations (how to recognise a request, compute, render, and which facts the rendering is accountable for) behind the existing retriever seam; the module names no domain. It declares `exact` and `typed`, and falls back to a wrapped natural-language retriever.
+- **Feature: narration verification** (`context_runtime.verification.narration`). A model's wording of typed results may not omit or change the attached facts (token-boundary matching, units, no figure absent from the structured result or the question); a failing narration is replaced by the structured rendering and the report says so (`RunResult.narration`, a `narration` trace span). Inert unless a provider attaches facts; `Config.verify_narration`.
+- **Feature (opt-in): deterministic fast path** (`Config.fast_path`). With `require_exact`, a request that is analytical by the existing intent classification and resolves to typed calls that cover everything it asks for runs without plan selection, context construction or a model call (`RunResult.path == "fast"`). Anything else, any error, and any optimizer with a policy take the normal path.
+
 ## 0.5.2 — 2026-11-25
 
 Notes: [docs/release-0.5.2.md](docs/release-0.5.2.md).

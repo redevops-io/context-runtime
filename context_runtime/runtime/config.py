@@ -17,6 +17,12 @@ class Config:
     store: str = "inmemory"           # "inmemory" | "redevops_rag"
     default_tier: str = "local"
     top_k: int = 50
+    # Opt-in deterministic fast path: with Constraints.require_exact, an unambiguous, fully covered typed operation is executed without plan
+    # selection, context construction or a model call. Not taken when the optimizer carries a policy (the policy is evaluated per plan).
+    fast_path: bool = False
+    # Check a model's narration of typed results against the facts the provider attached (omitted or changed figures); the structured
+    # rendering is served instead of a narration that fails. Inert unless a provider attaches facts.
+    verify_narration: bool = True
     natural_question: bool = False    # True: reasoners are asked the user's own question instead of the normalised (sorted, de-duplicated) cache key
     final_k: int = 8
     target_tokens: int = 3000

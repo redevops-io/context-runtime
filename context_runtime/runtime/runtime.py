@@ -19,6 +19,7 @@ from ..learning.reward import DefaultReward
 from ..optimizer.knapsack import KnapsackOptimizer
 from ..plancache.cache import NullPlanCache, SnapshotPlanCache, build_key
 from ..planner.candidates import RuleCandidateGenerator
+from ..planner import representations
 from ..planner.intent import RuleIntentAnalyzer
 from ..plugins.base import NoEligiblePlan
 from ..types import Limitation
@@ -39,6 +40,7 @@ from ..types import (
     Simulation,
     SourceRef,
 )
+from ..verification.narration import facts_from_hits, serve_verified
 from ..verification.verifier import CitationVerifier
 from .config import Config
 
@@ -286,6 +288,14 @@ class ContextRuntime:
         t1 = traces.now()
         result = reasoner.reason(ReasonRequest(context=ctx, capability="synthesis",
                                                constraints=(goal.constraints if goal else Constraints())))
+        narration = None
+        facts = facts_from_hits(ctx.hits) if self.config.verify_narration else []
+        if facts:   # a provider attached facts: the narration may not omit or change them (serve the structured rendering otherwise)
+            structured = "\n".join(h.text for h in ctx.hits if (h.meta or {}).get("facts"))
+            served, narration = serve_verified(result.text, facts, structured, question=ctx.question or (goal.text if goal else ""))
+            if served != result.text:
+                result = replace(result, text=served)
+            tb.span("narration", "verify", {"status": narration.status, "findings": list(narration.findings)}, t1, traces.now())
         tb.span("reason", "reason", {"model": result.model, "tier": result.tier,
                                      "tokens": result.prompt_tokens + result.completion_tokens,
                                      "cost_usd": result.est_cost_usd}, t1, traces.now())
@@ -320,7 +330,7 @@ class ContextRuntime:
 
         return RunResult(
             answer=result.text, plan=ctx.plan, trace=trace, citations=citations,
-            cost_usd=trace.actual_cost_usd, verdict=verdict, freshness=ctx.plan.score.freshness,
+            cost_usd=trace.actual_cost_usd, verdict=verdict, freshness=ctx.plan.score.freshness, narration=narration,
         )
 
     def verify(self, result: RunResult) -> RunResult:
@@ -329,8 +339,43 @@ class ContextRuntime:
 
     # ──────────────────────────── the core command ────────────────────────────
 
+    def _typed_resolver(self):
+        r = self.retriever
+        r = getattr(r, "typed_resolver", None) or r
+        return r if hasattr(r, "resolve") and hasattr(r, "execute") else None
+
+    def _fast_path(self, g: Goal) -> "RunResult | None":
+        """Deterministic fast path: only for a request that REQUIRES exactness, is analytical by the existing intent classification, and
+        resolves to typed calls that cover everything it asks for. Anything else (and any error) takes the normal path."""
+        if not (self.config.fast_path and g.constraints.require_exact) or getattr(self.optimizer, "policy", None) is not None:
+            return None
+        resolver = self._typed_resolver()
+        if resolver is None:
+            return None
+        intent = self.intent.analyze(g)
+        if representations.classify(intent.bucket, g.text) != "analytical":
+            return None
+        try:
+            resolution = resolver.resolve(g.text)
+            if resolution is None or not resolution.covered:
+                return None
+            tb = traces.TraceBuilder("fast-path", g.text)
+            t0 = traces.now()
+            hits = resolver.execute(resolution)
+            if not hits:
+                return None
+            tb.span("fast_path", "retrieve", {"operations": [c.op.name for c in resolution.calls], "model_calls": 0}, t0, traces.now())
+        except Exception:
+            return None
+        citations = tuple(h.chunk_id for h in hits)
+        tb.set_citations(citations)
+        return RunResult(answer="\n".join(h.text for h in hits), plan=None, trace=tb.finalize(), citations=citations, path="fast")
+
     def run(self, goal, *, sources=None, constraints=None, as_of=None) -> RunResult:
         g = self._coerce_goal(goal, sources, constraints)
+        fast = self._fast_path(g)
+        if fast is not None:
+            return fast
         try:
             plan = self.plan(g)
         except NoEligiblePlan as e:

@@ -37,6 +37,12 @@ Routing probe, 17 questions, shipped v0.5.2: every question whose representation
 
 The remaining failures with the shipped text-to-SQL are errors in the SQL the model wrote (wrong filter, wrong aggregate), not routing: the executed query is in each hit's `meta["sql"]`. Providers that run typed operations under the `exact` capability reach 17 / 17 on the same set; that provider lives in the application, not here. See `docs/evidence/cr_exactness_dev_set.yaml`.
 
+## Typed operations, narration verification and the fast path (follow-up, opt-in)
+
+* `TypedOperationRetriever` (`adapters/store_typed.py`): the application supplies operations (`match`, `run`, `render`, `facts`, `provides`) and a measure vocabulary; the runtime holds no domain. It declares `exact` and `typed`.
+* `verification/narration.py`: `verify_narration` / `serve_verified` check required facts (numbers with units, identifiers, dates, text) on token boundaries (`42` is not found in `00042` or `142`; `INV-00042` is not the number 42) and flag any figure in the answer that is not in the structured result or the question. A failing narration is replaced by the structured rendering, recorded in `RunResult.narration`. An explicit abstention is not required to repeat the facts but may not invent figures. Where the narration adds nothing, the structured result is what is served.
+* Fast path (`Config.fast_path`, default off): requires `require_exact`, an analytical classification, a resolution whose measures are all provided by the matched operations, and no optimizer policy (the policy is evaluated per plan; the shortcut must not go around it). Otherwise the normal path (with its model) runs, so an ambiguous request still gets the fallback.
+
 ## Not established
 
 * No result here generalises: the set is a development set, the holdout is a separate protocol.
