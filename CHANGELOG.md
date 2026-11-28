@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fix (an analytical question answered from document retrieval said nothing).** With no provider that declares `exact` for the planned method and no `require_exact`, the plan now carries `plan.extra["representation_fallback"]` (`detected`, `used`, `method`, `exact: false`, `reason`). Nothing about routing or answers changes; the same marker exists in the Go engine. With `require_exact` the request is still refused (`NoEligiblePlan`).
+
 Notes: [docs/exactness-and-completeness.md](docs/exactness-and-completeness.md).
 
 - **Fix (an exact aggregate was costed as a temporal or multi-hop question).** `HeuristicEstimator` tested the bucket before the analytical representation, so `hybrid` top-k retrieval outranked `sql` for questions that need a computed answer. The representation is now evaluated first. Behaviour change on the default path.
